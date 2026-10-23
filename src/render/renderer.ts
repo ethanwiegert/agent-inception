@@ -1,6 +1,10 @@
 import { lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import { World } from "../sim/world.ts";
 import type { Camera } from "../camera.ts";
+import type { AgentView } from "../simclient.ts";
+import { BODY_BOXES, buildBodies } from "./body.ts";
+import { BOX_FLOATS, BoxRenderer } from "./boxes.ts";
+import { CropRenderer } from "./crops.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look } from "./look.ts";
@@ -20,6 +24,13 @@ export interface Layouts {
 
 const SHADOW_SIZE = 2048;
 
+/** What's in the world this frame besides terrain. */
+export interface SceneState {
+  agents: AgentView[];
+  crops: Float32Array;
+  cropsVersion: number;
+}
+
 export interface RenderStats {
   gpuMs: number;
   grassBlades: number;
@@ -38,6 +49,9 @@ export class Renderer {
   private grass: GrassRenderer;
   private sky: SkyRenderer;
   private post: PostRenderer;
+  private boxes: BoxRenderer;
+  private crops: CropRenderer;
+  private boxData = new Float32Array(BODY_BOXES * BOX_FLOATS * 8);
   private targets: {
     width: number;
     height: number;
@@ -106,10 +120,12 @@ export class Renderer {
     this.grass = new GrassRenderer(device, world, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts, format);
+    this.boxes = new BoxRenderer(device, this.layouts);
+    this.crops = new CropRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
 
-  render(camera: Camera, look: Look, timeOfDay: number, time: number) {
+  render(camera: Camera, look: Look, timeOfDay: number, time: number, scene: SceneState) {
     const { device } = this;
     const canvas = this.context.canvas as HTMLCanvasElement;
     this.ensureTargets(canvas.width, canvas.height);
@@ -117,6 +133,10 @@ export class Renderer {
 
     this.stats.chunksRebuilt = this.terrain.update();
     this.grass.update();
+    this.crops.update(scene.crops, scene.cropsVersion);
+    const boxCapacity = scene.agents.length * BODY_BOXES * BOX_FLOATS;
+    if (this.boxData.length < boxCapacity) this.boxData = new Float32Array(boxCapacity * 2);
+    this.boxes.update(this.boxData, buildBodies(scene.agents, time, this.boxData));
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -151,9 +171,10 @@ export class Renderer {
     });
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
     this.terrain.drawShadow(shadowPass);
+    this.boxes.drawShadow(shadowPass);
     shadowPass.end();
 
-    const scene = encoder.beginRenderPass({
+    const main = encoder.beginRenderPass({
       colorAttachments: [{
         view: targets.color.createView(),
         resolveTarget: targets.resolve.createView(),
@@ -168,11 +189,13 @@ export class Renderer {
         depthStoreOp: "discard",
       },
     });
-    scene.setBindGroup(0, this.frameBindGroup);
-    this.terrain.draw(scene);
-    this.grass.draw(scene, blades);
-    this.sky.draw(scene, this.plainFrameBindGroup);
-    scene.end();
+    main.setBindGroup(0, this.frameBindGroup);
+    this.terrain.draw(main);
+    this.boxes.draw(main);
+    this.crops.draw(main);
+    this.grass.draw(main, blades);
+    this.sky.draw(main, this.plainFrameBindGroup);
+    main.end();
 
     const post = encoder.beginRenderPass({
       colorAttachments: [{

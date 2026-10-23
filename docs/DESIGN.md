@@ -37,29 +37,40 @@ watches.
 
 ## Agent transport
 
-Tools are defined once, in the browser, as a registry of JSON-schema tools. Browsers can't listen on
-a port, so they are exposed two ways:
+```
+agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──postMessage──▶ sim worker
+```
 
-- **Local bridge** (`tools/bridge.ts`, Deno, zero deps): an MCP server (Streamable HTTP) that relays
-  tool calls to the open tab over a WebSocket. This is how Claude Code / Haiku subagents play.
-- **WebMCP** (`navigator.modelContext`) when the browser supports it, so in-browser agents can use
-  the same tools with no bridge.
+- **Tools** are defined once in `src/sim/tools.ts` (JSON schema + handler). The bridge imports the
+  definitions to list them; the sim runs them. `screenshot` is the one client-side tool.
+- **Bridge** (`tools/bridge.ts`, zero deps): a Streamable HTTP MCP server (JSON responses, no SSE).
+  In dev it shares port 5173 with the game; standalone it's `deno task bridge` on 7777. It is a
+  pipe, not an authority: the tab owns the world. Latest connected tab wins.
+- **Sessions → bodies**: each MCP session `join`s with a name; joining an existing name reattaches
+  that body (inventory, journal). Session bindings are saved, so a page reload doesn't kick agents.
+- **Actions are jobs**: each tool call becomes a generator that advances one sim tick per `yield`
+  and returns its result text. Area tools (`till`, `plant`, `harvest`) cover up to 16 tiles per call
+  so agents spend few calls; walking is ~2 blocks/s, so calls take seconds to a minute.
+- **WebMCP** (`navigator.modelContext`) is a later option for in-browser agents, no bridge.
 
-The bridge is a pipe, not an authority: the tab owns the world.
+## Simulation
 
-Tool sketch: `look` (structured surroundings), `screenshot` (optional, for vision), `status`,
-`move_to`, `till`, `plant`, `harvest`, `place_block`, `break_block`, `pick_up`, `drop`, `craft`,
-`say`, `journal_write`, `journal_read`, `upload_object`. Actions are high-level and take game time;
-tools return when the action completes or is interrupted.
+- Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world by regenerating it
+  from the seed and applying streamed edits, and interpolates agent positions between ticks.
+- One game day is 10 real minutes at 1×. Wheat ripens in 0.75 days. Crops grow from the clock, so
+  offline progress is just elapsed ticks (capped at 3 days) applied on load.
+- Saved to IndexedDB every 5 s and when the tab hides: seed + block diff + crops + agents +
+  sessions.
 
 ## Milestones
 
-- **M0 — foundation.** Deno toolchain, dev server, WebGPU bootstrap, Chromium/CDP harness for
+- **M0 — foundation.** ✅ Deno toolchain, dev server, WebGPU bootstrap, Chromium/CDP harness for
   screenshots and frame timings.
-- **M1 — the look.** Meadow terrain chunks, instanced grass with wind, lighting + shadows,
+- **M1 — the look.** ✅ Meadow terrain chunks, instanced grass with wind, lighting + shadows,
   day/night. Workshop variants together.
-- **M2 — sim core.** Worker, fixed tick, determinism tests, save/load.
-- **M3 — the agent.** Body + animation, bridge, MCP tools, Haiku farmer subagent playing end to end.
+- **M2 — sim core.** ✅ Worker, fixed tick, determinism tests, save/load, offline catch-up.
+- **M3 — the agent.** ✅ Body + animation, bridge, MCP tools, Haiku farmer subagent playing end to
+  end.
 - **M4 — life.** Two animal species, plants and trees that grow.
 - **M5 — making.** Object recipes + upload, reverse-CAPTCHA gag.
 

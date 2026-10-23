@@ -9,6 +9,7 @@ const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 const GRASS = 1u;
 const DIRT = 2u;
 const STONE = 3u;
+const FARMLAND = 4u;
 
 struct Vertex { pos: vec3f, face: u32, ao: f32, block: u32 };
 
@@ -58,6 +59,13 @@ fn blockAlbedo(block: u32, face: u32, world: vec3f, n: vec3f) -> vec3f {
     }
   } else if (block == DIRT) {
     albedo = dirt;
+  } else if (block == FARMLAND) {
+    albedo = dirt;
+    if (face == 2u) {
+      // Dark tilled soil with furrows running east-west.
+      let furrow = 0.7 + 0.3 * smoothstep(0.2, 0.5, abs(fract(world.z * 3.0) - 0.5));
+      albedo = vec3f(0.09, 0.045, 0.022) * furrow;
+    }
   }
   return albedo * jitter;
 }

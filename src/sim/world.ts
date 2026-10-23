@@ -3,8 +3,18 @@ export const Block = {
   Grass: 1,
   Dirt: 2,
   Stone: 3,
+  Farmland: 4,
 } as const;
 export type BlockId = number;
+
+/** Names agents use for blocks, and the reverse lookup. */
+export const BLOCK_NAMES: Record<number, string> = {
+  [Block.Air]: "air",
+  [Block.Grass]: "grass",
+  [Block.Dirt]: "dirt",
+  [Block.Stone]: "stone",
+  [Block.Farmland]: "farmland",
+};
 
 export const CHUNK = 32;
 

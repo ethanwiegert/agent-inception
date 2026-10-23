@@ -1,0 +1,177 @@
+/// <reference lib="webworker" />
+/**
+ * Simulation worker: owns the authoritative Sim, steps it at a fixed rate,
+ * streams state to the page and persists to IndexedDB.
+ */
+import { AGENT_STRIDE, CROP_STRIDE, type FromWorker, type ToWorker } from "./sim/protocol.ts";
+import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
+import { callTool } from "./sim/tools.ts";
+
+const scope = self as unknown as DedicatedWorkerGlobalScope;
+const MAX_CATCH_UP = TICKS_PER_DAY * 3;
+const SAVE_EVERY_MS = 5000;
+
+let sim: Sim | null = null;
+let speed = 1;
+let lastStep = performance.now();
+let budget = 0;
+let lastSave = 0;
+let sentAgentsVersion = -1;
+let sentCropsVersion = -1;
+let cropsSentAt = 0;
+
+const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
+
+// Messages that arrive while init is loading the save wait for it.
+let ready: Promise<void> = Promise.resolve();
+
+scope.onmessage = (e: MessageEvent<ToWorker>) => {
+  const msg = e.data;
+  if (msg.type === "init") ready = handle(msg);
+  else ready = ready.then(() => handle(msg));
+};
+
+async function handle(msg: ToWorker) {
+  switch (msg.type) {
+    case "init": {
+      const saved = await load();
+      if (saved && (msg.seed === undefined || msg.seed === saved.seed)) {
+        sim = Sim.load(saved);
+        const away = Math.min(MAX_CATCH_UP, ((Date.now() - saved.savedAt) / 1000) * TICK_HZ);
+        sim.tick += Math.floor(away); // crops grow from the clock, so idle time is just elapsed ticks
+        start(Math.floor(away));
+      } else {
+        sim = new Sim(msg.seed ?? 1337);
+        start(0);
+      }
+      break;
+    }
+    case "reset":
+      sim = new Sim(msg.seed);
+      start(0);
+      await persist();
+      break;
+    case "call":
+      if (sim) callTool(sim, msg.session, msg.tool, msg.args, msg.callId);
+      break;
+    case "speed":
+      speed = Math.max(0, Math.min(120, msg.speed));
+      break;
+    case "setTime":
+      sim?.setTimeOfDay(msg.timeOfDay);
+      break;
+    case "save":
+      await persist();
+      break;
+  }
+}
+
+function start(caughtUp: number) {
+  const s = sim!;
+  const edits: number[] = [];
+  const w = s.world;
+  for (const [index, block] of s.edits) {
+    edits.push(
+      index % w.sizeX,
+      Math.floor(index / (w.sizeX * w.sizeZ)),
+      Math.floor(index / w.sizeX) % w.sizeZ,
+      block,
+    );
+  }
+  s.pendingEdits = [];
+  sentAgentsVersion = sentCropsVersion = -1;
+  post({ type: "ready", seed: s.seed, edits: Int32Array.from(edits), caughtUp });
+  lastStep = performance.now();
+  budget = 0;
+}
+
+setInterval(() => {
+  const now = performance.now();
+  budget += ((now - lastStep) / 1000) * TICK_HZ * speed;
+  lastStep = now;
+  if (!sim) return;
+  // Bound work per interval; at high speeds we just fall behind gracefully.
+  const steps = Math.min(Math.floor(budget), 4000);
+  budget -= steps;
+  if (budget > 4000) budget = 0;
+  for (let i = 0; i < steps; i++) sim.step();
+  send(now);
+  if (now - lastSave > SAVE_EVERY_MS) {
+    lastSave = now;
+    persist();
+  }
+}, 1000 / TICK_HZ);
+
+function send(now: number) {
+  const s = sim!;
+  const agents = new Float32Array(s.agents.length * AGENT_STRIDE);
+  s.agents.forEach((a, i) => {
+    agents.set([a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color], i * AGENT_STRIDE);
+  });
+
+  let crops: Float32Array<ArrayBuffer> | undefined;
+  if (s.cropsVersion !== sentCropsVersion || now - cropsSentAt > 1000) {
+    sentCropsVersion = s.cropsVersion;
+    cropsSentAt = now;
+    crops = new Float32Array(s.crops.size * CROP_STRIDE);
+    let i = 0;
+    for (const [key, crop] of s.crops) {
+      const x = key % s.world.sizeX, z = Math.floor(key / s.world.sizeX);
+      crops.set([x, s.world.heightAt(x, z) + 1, z, s.cropGrowth(crop)], i);
+      i += CROP_STRIDE;
+    }
+  }
+
+  let names: string[] | undefined;
+  if (s.agentsVersion !== sentAgentsVersion) {
+    sentAgentsVersion = s.agentsVersion;
+    names = s.agents.map((a) => a.name);
+  }
+
+  const edits = Int32Array.from(s.pendingEdits);
+  s.pendingEdits = [];
+  post({
+    type: "tick",
+    tick: s.tick,
+    day: s.day(),
+    timeOfDay: s.timeOfDay(),
+    speed,
+    agents,
+    names,
+    edits,
+    crops,
+    events: s.events.splice(0),
+    results: s.results.splice(0),
+  }, [agents.buffer, edits.buffer, ...(crops ? [crops.buffer] : [])]);
+}
+
+// ---------------------------------------------------------------- persistence
+
+function db(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("agent-inception", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("saves");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function load(): Promise<SaveData | undefined> {
+  try {
+    const d = await db();
+    return await new Promise((resolve, reject) => {
+      const req = d.transaction("saves").objectStore("saves").get("world");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function persist() {
+  if (!sim) return;
+  const data = sim.save(Date.now());
+  const d = await db();
+  d.transaction("saves", "readwrite").objectStore("saves").put(data, "world");
+}

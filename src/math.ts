@@ -79,3 +79,47 @@ export function invert(out: Mat4, m: Mat4) {
   out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
   return out;
 }
+
+// In-place transform builders: each post-multiplies `m` (m = m · T), like a scene-graph walk.
+
+export function identity(m: Mat4) {
+  m.fill(0);
+  m[0] =
+    m[5] =
+    m[10] =
+    m[15] =
+      1;
+  return m;
+}
+
+export function translate(m: Mat4, x: number, y: number, z: number) {
+  for (let r = 0; r < 4; r++) m[12 + r] += m[r] * x + m[4 + r] * y + m[8 + r] * z;
+  return m;
+}
+
+export function scale(m: Mat4, x: number, y: number, z: number) {
+  for (let r = 0; r < 4; r++) m[r] *= x, m[4 + r] *= y, m[8 + r] *= z;
+  return m;
+}
+
+/** Rotate about local X; positive angles tip +Y toward +Z. */
+export function rotateX(m: Mat4, a: number) {
+  const c = Math.cos(a), s = Math.sin(a);
+  for (let r = 0; r < 4; r++) {
+    const y = m[4 + r], z = m[8 + r];
+    m[4 + r] = y * c + z * s;
+    m[8 + r] = z * c - y * s;
+  }
+  return m;
+}
+
+/** Rotate about local Y; positive angles turn +Z toward +X. */
+export function rotateY(m: Mat4, a: number) {
+  const c = Math.cos(a), s = Math.sin(a);
+  for (let r = 0; r < 4; r++) {
+    const x = m[r], z = m[8 + r];
+    m[r] = x * c - z * s;
+    m[8 + r] = x * s + z * c;
+  }
+  return m;
+}

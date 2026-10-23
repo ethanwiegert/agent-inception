@@ -13,6 +13,8 @@ export class Camera {
   pitch = 0.95;
   distance = 58;
   fovY = 0.55;
+  /** Agent id to keep centered, or null for free look. Panning breaks the follow. */
+  follow: number | null = null;
   private view = mat4();
   private proj = mat4();
 
@@ -42,6 +44,7 @@ export class Camera {
         this.yaw -= dx * 0.005;
         this.pitch = Math.min(1.45, Math.max(0.45, this.pitch + dy * 0.004));
       } else {
+        this.follow = null;
         const s = this.distance * 0.0016;
         const cos = Math.cos(this.yaw), sin = Math.sin(this.yaw);
         this.pan(-(dx * cos + dy * sin) * s, (dx * sin - dy * cos) * s);
@@ -56,6 +59,12 @@ export class Camera {
   pan(dx: number, dz: number) {
     this.target[0] = Math.min(this.worldSize[0], Math.max(0, this.target[0] + dx));
     this.target[2] = Math.min(this.worldSize[1], Math.max(0, this.target[2] + dz));
+  }
+
+  /** Ease the view target toward a point, e.g. a followed agent. */
+  track(x: number, z: number) {
+    this.target[0] += (x - this.target[0]) * 0.08;
+    this.target[2] += (z - this.target[2]) * 0.08;
   }
 
   update(aspect: number) {

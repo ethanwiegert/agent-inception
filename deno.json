@@ -5,7 +5,8 @@
   },
   "tasks": {
     "dev": "deno run -A tools/dev.ts",
-    "build": "deno bundle --platform=browser --minify -o dist/main.js src/main.ts",
+    "build": "deno bundle --platform=browser --minify --outdir dist src/main.ts src/worker.ts",
+    "bridge": "deno run -A tools/bridge.ts",
     "check": "deno check src tools && deno lint && deno fmt --check",
     "test": "deno test",
     "shot": "deno run -A tools/shot.ts"

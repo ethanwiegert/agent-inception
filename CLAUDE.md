@@ -14,7 +14,9 @@ and milestones before making architectural changes.
 
 ## Commands
 
-- `deno task dev` — bundle on change + serve on http://localhost:5173
+- `deno task dev` — bundle on change, serve the game on http://localhost:5173 and the MCP bridge at
+  http://localhost:5173/mcp
+- `deno task bridge` — standalone MCP bridge on :7777 (for a hosted game)
 - `deno task check` — type check, lint, fmt check
 - `deno task test` — tests
 - `deno task shot [out.png]` — launch Chromium with WebGPU flags, load the game, save a screenshot
@@ -22,3 +24,9 @@ and milestones before making architectural changes.
 
 Chromium on Linux needs `--enable-unsafe-webgpu --enable-features=Vulkan` and a real window
 (headless only gets SwiftShader); `tools/browser.ts` handles this.
+
+## Playing
+
+Agents play through MCP (`.mcp.json` registers the `agent-inception` server). With `deno task dev`
+running and the game open in a browser, spawn the `farmer` subagent (Haiku) from
+`.claude/agents/farmer.md`. A new Claude Code session is needed to pick up `.mcp.json`.

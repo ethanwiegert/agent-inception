@@ -10,8 +10,13 @@ const types: Record<string, string> = {
   bin: "application/octet-stream",
 };
 
-export function serve(port: number): Deno.HttpServer<Deno.NetAddr> {
+type Route = (req: Request) => Response | Promise<Response> | undefined;
+
+/** Serve static files; `route` gets first pick of each request. */
+export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr> {
   return Deno.serve({ port, hostname: "127.0.0.1", onListen() {} }, async (req) => {
+    const routed = route?.(req);
+    if (routed) return routed;
     let path = decodeURIComponent(new URL(req.url).pathname);
     if (path.endsWith("/")) path += "index.html";
     if (path.includes("..")) return new Response("bad path", { status: 400 });
