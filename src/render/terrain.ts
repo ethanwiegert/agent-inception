@@ -15,7 +15,7 @@ struct Vertex { pos: vec3f, face: u32, ao: f32, block: u32 };
 
 fn unpack(v: u32, chunk: u32) -> Vertex {
   let local = vec3f(f32(v & 63u), f32((v >> 6u) & 127u), f32((v >> 13u) & 63u));
-  let aoLevels = array<f32, 4>(0.3, 0.55, 0.78, 1.0);
+  let aoLevels = array<f32, 4>(0.45, 0.65, 0.83, 1.0);
   return Vertex(chunkOrigins[chunk].xyz + local, (v >> 19u) & 7u, aoLevels[(v >> 22u) & 3u], v >> 24u);
 }
 

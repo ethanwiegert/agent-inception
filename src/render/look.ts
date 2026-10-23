@@ -48,7 +48,7 @@ export const LOOKS: Record<string, Look> = {
     bladesPerBlock: 64,
     flowerChance: 0,
     aoStrength: 1,
-    edgeDarken: 0.2,
+    edgeDarken: 0,
     saturation: 1.0,
     contrast: 1.12,
     warmth: 0,
@@ -115,7 +115,7 @@ export function applyLook(out: Float32Array, look: Look, timeOfDay: number) {
   const keyElev = keyDir[1];
   const sunColor = mixRgb([1.0, 0.45, 0.2], [1.0, 0.93, 0.82], smoothstep(0.0, 0.45, elev));
   const keyColor = isSun ? sunColor : ([0.3, 0.42, 1.0] as Rgb);
-  const keyIntensity = (isSun ? 2.8 : 0.3) * smoothstep(0.0, 0.12, keyElev);
+  const keyIntensity = (isSun ? 2.3 : 0.3) * smoothstep(0.0, 0.12, keyElev);
 
   let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day);
   let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day);
@@ -125,12 +125,12 @@ export function applyLook(out: Float32Array, look: Look, timeOfDay: number) {
   out.set(keyDir, F.sunDir);
   out[F.sunDir + 3] = keyIntensity;
   out.set(keyColor, F.sunColor);
-  out[F.sunColor + 3] = mix(1.2, 1.1, day);
+  out[F.sunColor + 3] = mix(1.2, 2.2, day);
   out.set(zenith, F.skyZenith);
   out[F.skyZenith + 3] = mix(2.4, 1.0, day); // exposure: eyes adjust a little at night
   out.set(horizon, F.skyHorizon);
   out[F.skyHorizon + 3] = look.fogDensity;
-  out.set(mixRgb([0.01, 0.012, 0.02], [0.2, 0.2, 0.09], day), F.groundAmbient);
+  out.set(mixRgb([0.01, 0.012, 0.02], [0.38, 0.32, 0.18], day), F.groundAmbient);
   out[F.groundAmbient + 3] = look.aoStrength;
   out.set(look.grassBase, F.grassBase);
   out[F.grassBase + 3] = look.edgeDarken;
