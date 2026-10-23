@@ -1,4 +1,9 @@
+import { Camera } from "./camera.ts";
+import { createDevPanel, type DevState } from "./devpanel.ts";
 import { createFrameStats } from "./perf.ts";
+import { LOOKS } from "./render/look.ts";
+import { Renderer } from "./render/renderer.ts";
+import { generateMeadow } from "./sim/worldgen.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
 
@@ -12,49 +17,38 @@ function fatal(message: string): never {
 if (!navigator.gpu) fatal("agent-inception needs WebGPU. Try a recent Chrome or Edge.");
 const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
 if (!adapter) fatal("No WebGPU adapter available.");
-const device = await adapter.requestDevice();
+const features: GPUFeatureName[] = adapter.features.has("timestamp-query")
+  ? ["timestamp-query"]
+  : [];
+const device = await adapter.requestDevice({ requiredFeatures: features });
 device.lost.then((info) => fatal(`GPU device lost: ${info.message}`));
+const gpuErrors: string[] = [];
+device.addEventListener("uncapturederror", (e) => {
+  const message = (e as GPUUncapturedErrorEvent).error.message;
+  gpuErrors.push(message);
+  console.error(message);
+});
 
 const context = canvas.getContext("webgpu") as GPUCanvasContext;
 const format = navigator.gpu.getPreferredCanvasFormat();
 context.configure({ device, format, alphaMode: "opaque" });
 
-// Placeholder sky: a fullscreen triangle with a day/night gradient. Replaced in M1.
-const shader = device.createShaderModule({
-  code: /* wgsl */ `
-    struct Frame { time: f32 };
-    @group(0) @binding(0) var<uniform> frame: Frame;
+const params = new URLSearchParams(location.search);
+const state: DevState = {
+  look: params.get("look") ?? "lush",
+  timeOfDay: Number(params.get("time") ?? 0.38),
+  daySpeed: Number(params.get("speed") ?? 0.1),
+  seed: Number(params.get("seed") ?? 1337),
+};
 
-    struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+let world = generateMeadow({ seed: state.seed });
+let renderer = new Renderer(device, context, format, world);
+const camera = new Camera([world.sizeX, world.sizeZ], (x, z) => world.heightAt(x, z));
+camera.attach(canvas);
 
-    @vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
-      let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
-      return Out(vec4f(p * 2.0 - 1.0, 0.0, 1.0), p);
-    }
-
-    @fragment fn fs(in: Out) -> @location(0) vec4f {
-      let day = 0.5 + 0.5 * sin(frame.time * 0.2);
-      let horizon = mix(vec3f(0.10, 0.12, 0.25), vec3f(0.95, 0.80, 0.60), day);
-      let zenith = mix(vec3f(0.01, 0.02, 0.06), vec3f(0.35, 0.60, 0.95), day);
-      return vec4f(mix(horizon, zenith, in.uv.y), 1.0);
-    }
-  `,
-});
-
-const pipeline = device.createRenderPipeline({
-  layout: "auto",
-  vertex: { module: shader, entryPoint: "vs" },
-  fragment: { module: shader, entryPoint: "fs", targets: [{ format }] },
-});
-
-const frameData = new Float32Array(4);
-const frameBuffer = device.createBuffer({
-  size: frameData.byteLength,
-  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-});
-const bindGroup = device.createBindGroup({
-  layout: pipeline.getBindGroupLayout(0),
-  entries: [{ binding: 0, resource: { buffer: frameBuffer } }],
+const panel = createDevPanel(state, (seed) => {
+  world = generateMeadow({ seed });
+  renderer = new Renderer(device, context, format, world);
 });
 
 function resize() {
@@ -66,27 +60,31 @@ new ResizeObserver(resize).observe(canvas);
 resize();
 
 const stats = createFrameStats();
-(globalThis as Record<string, unknown>).__perf = stats;
+(globalThis as Record<string, unknown>).__perf = {
+  summary: () => ({ ...stats.summary(), ...renderer.stats }),
+  gpuErrors,
+};
 
+let last = performance.now();
+let lastPanel = 0;
 function frame(now: number) {
   stats.tick(now);
-  frameData[0] = now / 1000;
-  device.queue.writeBuffer(frameBuffer, 0, frameData);
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  state.timeOfDay = (state.timeOfDay + dt * state.daySpeed / 60) % 1;
 
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [{
-      view: context.getCurrentTexture().createView(),
-      loadOp: "clear",
-      storeOp: "store",
-      clearValue: { r: 0, g: 0, b: 0, a: 1 },
-    }],
-  });
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.draw(3);
-  pass.end();
-  device.queue.submit([encoder.finish()]);
+  renderer.render(camera, LOOKS[state.look] ?? LOOKS.lush, state.timeOfDay, now / 1000);
+
+  if (now - lastPanel > 250) {
+    lastPanel = now;
+    const s = stats.summary();
+    const r = renderer.stats;
+    panel.update([
+      `${(1000 / s.meanMs).toFixed(0)} fps`,
+      `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
+      `${(r.grassBlades / 1000).toFixed(0)}k blades`,
+    ]);
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

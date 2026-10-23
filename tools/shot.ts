@@ -1,8 +1,12 @@
-/** Build, load the game in Chromium, report frame timings and save a screenshot. */
+/**
+ * Build, load the game in Chromium, report frame timings and save a screenshot.
+ * Usage: deno task shot [out.png] [query], e.g. `shot crisp.png "look=crisp&time=0.3"`.
+ */
 import { launch } from "./browser.ts";
 import { serve } from "./serve.ts";
 
 const out = Deno.args[0] ?? "shot.png";
+const query = Deno.args[1] ? `?${Deno.args[1]}` : "";
 const settleMs = 3000;
 
 const build = await new Deno.Command("deno", { args: ["task", "-q", "build"] }).output();
@@ -12,7 +16,7 @@ if (!build.success) {
 }
 
 const server = serve(0);
-const browser = await launch(`http://127.0.0.1:${server.addr.port}/`);
+const browser = await launch(`http://127.0.0.1:${server.addr.port}/${query}`);
 try {
   await new Promise((r) => setTimeout(r, settleMs));
   const adapter = await browser.evaluate(
