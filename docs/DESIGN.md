@@ -53,6 +53,18 @@ agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──p
   so agents spend few calls; walking is ~2 blocks/s, so calls take seconds to a minute.
 - **WebMCP** (`navigator.modelContext`) is a later option for in-browser agents, no bridge.
 
+## Terrain and bodies
+
+- Natural ground (grass, dirt) slopes: a column top lowers each corner that touches ground exactly
+  one block lower, unless something around that corner is higher or doesn't slope. That keeps
+  neighbouring surfaces watertight; drops of 2+ stay as cliffs, and farmland and placed stone keep
+  square edges. `World.slopeMask`/`slopeDrop` define the surface once; the mesher, the grass shader
+  (via the surface texture's mask channel) and walking bodies all follow it.
+- Agents are procedural farmers by default. `set_sprite` swaps in pixel art (text rows + palette, or
+  an uploaded image the page decodes to pixels so the sim never touches image formats), rendered as
+  extruded voxel runs that billboard toward the camera and flip with walking direction.
+- Spectators click a name tag (or the panel list) to glide over and follow that agent.
+
 ## Simulation
 
 - Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world by regenerating it
