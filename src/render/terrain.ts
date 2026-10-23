@@ -81,7 +81,9 @@ fn edgeFactor(world: vec3f, n: vec3f) -> f32 {
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let n = faceNormal(in.face);
+  // Tops may be sloped, so take their normal from the surface itself (flat per triangle).
+  let dn = normalize(cross(dpdx(in.world), dpdy(in.world)));
+  let n = select(faceNormal(in.face), dn * sign(dn.y), in.face == 2u);
   let albedo = blockAlbedo(in.block, in.face, in.world, n) * edgeFactor(in.world, n);
   let ao = mix(1.0, in.ao, frame.groundAmbient.w);
   return vec4f(fog(shade(albedo, n, in.world, ao, 0.0), in.world), 1.0);

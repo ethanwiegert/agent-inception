@@ -12,6 +12,13 @@ export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5 
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
 
+/** Pixel art an agent chose to appear as: row-major, -1 transparent, else 0xRRGGBB (sRGB). */
+export interface Sprite {
+  width: number;
+  height: number;
+  pixels: number[];
+}
+
 export interface Agent {
   id: number;
   name: string;
@@ -25,6 +32,8 @@ export interface Agent {
   stride: number;
   inventory: Record<string, number>;
   journal: string[];
+  /** Custom look; null means the default farmer body. */
+  sprite: Sprite | null;
   queue: { callId: number; job: Job }[];
 }
 
@@ -123,13 +132,14 @@ export class Sim {
       name,
       color: this.agents.length,
       x: x + 0.5,
-      y: this.world.heightAt(x, z) + 1,
+      y: this.world.surfaceY(x + 0.5, z + 0.5),
       z: z + 0.5,
       yaw: 0,
       anim: Anim.Idle,
       stride: 0,
       inventory: { wheat_seeds: 16 },
       journal: [],
+      sprite: null,
       queue: [],
     };
     this.agents.push(agent);
@@ -145,6 +155,8 @@ export class Sim {
   step() {
     this.tick++;
     for (const agent of this.agents) {
+      // Bodies follow the ground: slopes while walking, edits while standing still.
+      agent.y += (this.world.surfaceY(agent.x, agent.z) - agent.y) * 0.35;
       const current = agent.queue[0];
       if (!current) continue;
       try {
@@ -208,7 +220,14 @@ export class Sim {
     }
     for (const [key, planted] of data.crops) sim.crops.set(key, { kind: "wheat", planted });
     for (const a of data.agents) {
-      sim.agents.push({ ...structuredClone(a), anim: Anim.Idle, stride: 0, queue: [] });
+      const agent = structuredClone(a);
+      sim.agents.push({
+        ...agent,
+        sprite: agent.sprite ?? null,
+        anim: Anim.Idle,
+        stride: 0,
+        queue: [],
+      });
     }
     for (const [session, id] of data.sessions ?? []) {
       const agent = sim.agents.find((a) => a.id === id);

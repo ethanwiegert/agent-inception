@@ -7,7 +7,7 @@ export const Block = {
 } as const;
 export type BlockId = number;
 
-/** Names agents use for blocks, and the reverse lookup. */
+/** Names agents use for blocks. */
 export const BLOCK_NAMES: Record<number, string> = {
   [Block.Air]: "air",
   [Block.Grass]: "grass",
@@ -17,6 +17,26 @@ export const BLOCK_NAMES: Record<number, string> = {
 };
 
 export const CHUNK = 32;
+
+/** Natural ground softens into slopes; worked and placed blocks keep square edges. */
+export const slopes = (block: BlockId) => block === Block.Grass || block === Block.Dirt;
+
+/**
+ * How far (0-1) a top surface sinks at (fx, fz) within a column, given its corner mask.
+ * Each column top is two triangles split along the diagonal whose corners agree, so the
+ * mesher, the grass shader and walking bodies all see the same surface.
+ */
+export function slopeDrop(mask: number, fx: number, fz: number): number {
+  const d00 = mask & 1, d10 = (mask >> 1) & 1, d01 = (mask >> 2) & 1, d11 = (mask >> 3) & 1;
+  if (d00 === d11) {
+    return fx >= fz
+      ? d00 + (d10 - d00) * fx + (d11 - d10) * fz
+      : d00 + (d01 - d00) * fz + (d11 - d01) * fx;
+  }
+  return fx + fz <= 1
+    ? d00 + (d10 - d00) * fx + (d01 - d00) * fz
+    : d11 + (d10 - d11) * (1 - fz) + (d01 - d11) * (1 - fx);
+}
 
 /**
  * Fixed-size voxel world. Blocks are stored y-major per column-slab so a chunk
@@ -55,12 +75,47 @@ export class World {
     if (!this.inBounds(x, y, z)) return;
     this.blocks[this.index(x, y, z)] = block;
     this.updateTop(x, z);
-    this.touch(x, z);
-    // Faces and AO on chunk borders depend on neighbours.
-    if (x % CHUNK === 0) this.touch(x - 1, z);
-    if (x % CHUNK === CHUNK - 1) this.touch(x + 1, z);
-    if (z % CHUNK === 0) this.touch(x, z - 1);
-    if (z % CHUNK === CHUNK - 1) this.touch(x, z + 1);
+    // Faces, AO and slopes depend on all eight neighbours, which may sit in other chunks.
+    const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = Math.floor((x + dx) / CHUNK), nz = Math.floor((z + dz) / CHUNK);
+        if ((dx === 0 && dz === 0) || nx !== cx || nz !== cz) this.touch(x + dx, z + dz);
+      }
+    }
+  }
+
+  /**
+   * Which top corners of column (x, z) sink one block to meet lower ground, as a mask:
+   * bit 0 (x0,z0), 1 (x1,z0), 2 (x0,z1), 3 (x1,z1). A corner sinks when a column around it
+   * is exactly one lower, none is higher, and every column at this height also slopes;
+   * that keeps neighbouring surfaces watertight. Bigger drops stay as cliffs.
+   */
+  slopeMask(x: number, z: number): number {
+    const h = this.heightAt(x, z);
+    if (h < 1 || !slopes(this.get(x, h, z))) return 0;
+    let mask = 0;
+    for (let c = 0; c < 4; c++) {
+      const sx = c & 1 ? 1 : -1, sz = c & 2 ? 1 : -1;
+      let lower = false, blocked = false;
+      for (let k = 0; k < 3; k++) {
+        const nx = x + (k === 1 ? 0 : sx), nz = z + (k === 0 ? 0 : sz);
+        const nh = this.heightAt(nx, nz);
+        if (nh > h || (nh === h && !slopes(this.get(nx, nh, nz)))) blocked = true;
+        else if (nh === h - 1) lower = true;
+      }
+      if (lower && !blocked) mask |= 1 << c;
+    }
+    return mask;
+  }
+
+  /** Height of the walkable surface at a fractional position, following slopes. */
+  surfaceY(x: number, z: number): number {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    const h = this.heightAt(ix, iz);
+    if (h < 0) return 0;
+    const mask = this.slopeMask(ix, iz);
+    return h + 1 - (mask ? slopeDrop(mask, x - ix, z - iz) : 0);
   }
 
   /** Height of the topmost solid block at (x, z), or -1. */

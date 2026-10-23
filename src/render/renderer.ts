@@ -2,7 +2,7 @@ import { lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import { World } from "../sim/world.ts";
 import type { Camera } from "../camera.ts";
 import type { AgentView } from "../simclient.ts";
-import { BODY_BOXES, buildBodies } from "./body.ts";
+import { buildBodies, MAX_BOXES_PER_AGENT } from "./body.ts";
 import { BOX_FLOATS, BoxRenderer } from "./boxes.ts";
 import { CropRenderer } from "./crops.ts";
 import { F } from "./frame.ts";
@@ -51,7 +51,7 @@ export class Renderer {
   private post: PostRenderer;
   private boxes: BoxRenderer;
   private crops: CropRenderer;
-  private boxData = new Float32Array(BODY_BOXES * BOX_FLOATS * 8);
+  private boxData = new Float32Array(MAX_BOXES_PER_AGENT * BOX_FLOATS * 2);
   private targets: {
     width: number;
     height: number;
@@ -134,9 +134,9 @@ export class Renderer {
     this.stats.chunksRebuilt = this.terrain.update();
     this.grass.update();
     this.crops.update(scene.crops, scene.cropsVersion);
-    const boxCapacity = scene.agents.length * BODY_BOXES * BOX_FLOATS;
+    const boxCapacity = scene.agents.length * MAX_BOXES_PER_AGENT * BOX_FLOATS;
     if (this.boxData.length < boxCapacity) this.boxData = new Float32Array(boxCapacity * 2);
-    this.boxes.update(this.boxData, buildBodies(scene.agents, time, this.boxData));
+    this.boxes.update(this.boxData, buildBodies(scene.agents, time, this.boxData, camera.yaw));
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);

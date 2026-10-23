@@ -123,3 +123,14 @@ export function rotateY(m: Mat4, a: number) {
   }
   return m;
 }
+
+/** Rotate about local Z; positive angles turn +X toward +Y. */
+export function rotateZ(m: Mat4, a: number) {
+  const c = Math.cos(a), s = Math.sin(a);
+  for (let r = 0; r < 4; r++) {
+    const x = m[r], y = m[4 + r];
+    m[r] = x * c + y * s;
+    m[4 + r] = y * c - x * s;
+  }
+  return m;
+}

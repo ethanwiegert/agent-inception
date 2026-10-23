@@ -24,6 +24,20 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   return f32(*seed) / 4294967296.0;
 }
 
+/** Mirror of slopeDrop in sim/world.ts: how far a column top sinks at (fx, fz). */
+fn slopeDrop(mask: u32, fx: f32, fz: f32) -> f32 {
+  let d00 = f32(mask & 1u);
+  let d10 = f32((mask >> 1u) & 1u);
+  let d01 = f32((mask >> 2u) & 1u);
+  let d11 = f32((mask >> 3u) & 1u);
+  if (d00 == d11) {
+    if (fx >= fz) { return d00 + (d10 - d00) * fx + (d11 - d10) * fz; }
+    return d00 + (d01 - d00) * fz + (d11 - d01) * fx;
+  }
+  if (fx + fz <= 1.0) { return d00 + (d10 - d00) * fx + (d01 - d00) * fz; }
+  return d11 + (d10 - d11) * (1.0 - fz) + (d01 - d11) * (1.0 - fx);
+}
+
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
@@ -53,7 +67,9 @@ fn culled() -> Out {
   if (s.g != GRASS) { return culled(); }
 
   var seed = pcg((u32(cx) * 73856093u) ^ (u32(cz) * 19349663u) ^ (k * 83492791u));
-  let base = vec3f(f32(cx) + rand(&seed), f32(s.r) + 1.0, f32(cz) + rand(&seed));
+  let fx = rand(&seed);
+  let fz = rand(&seed);
+  let base = vec3f(f32(cx) + fx, f32(s.r) + 1.0 - slopeDrop(s.b, fx, fz), f32(cz) + fz);
 
   // Thin out with distance from the view center and fade to nothing at the edge.
   let d = distance(base.xz, frame.grassCenter.xy);
@@ -129,10 +145,10 @@ export class GrassRenderer {
   constructor(private device: GPUDevice, private world: World, layouts: Layouts) {
     this.texture = device.createTexture({
       size: [world.sizeX, world.sizeZ],
-      format: "rg8uint",
+      format: "rgba8uint",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    this.texels = new Uint8Array(world.sizeX * world.sizeZ * 2);
+    this.texels = new Uint8Array(world.sizeX * world.sizeZ * 4);
     this.versions = new Uint32Array(world.chunkVersion.length);
 
     const layout = device.createBindGroupLayout({
@@ -168,13 +184,14 @@ export class GrassRenderer {
     for (let i = 0; i < world.top.length; i++) {
       const h = world.top[i];
       const x = i % world.sizeX, z = (i / world.sizeX) | 0;
-      this.texels[i * 2] = Math.max(h, 0);
-      this.texels[i * 2 + 1] = h >= 0 ? world.get(x, h, z) : 0;
+      this.texels[i * 4] = Math.max(h, 0);
+      this.texels[i * 4 + 1] = h >= 0 ? world.get(x, h, z) : 0;
+      this.texels[i * 4 + 2] = world.slopeMask(x, z);
     }
     this.device.queue.writeTexture(
       { texture: this.texture },
       this.texels,
-      { bytesPerRow: world.sizeX * 2 },
+      { bytesPerRow: world.sizeX * 4 },
       [world.sizeX, world.sizeZ],
     );
   }

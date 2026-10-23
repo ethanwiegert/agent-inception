@@ -1,5 +1,11 @@
-import { AGENT_STRIDE, type FromWorker, type TickMessage, type ToWorker } from "./sim/protocol.ts";
-import type { SimEvent } from "./sim/sim.ts";
+import {
+  AGENT_STRIDE,
+  type AgentProfile,
+  type FromWorker,
+  type TickMessage,
+  type ToWorker,
+} from "./sim/protocol.ts";
+import type { SimEvent, Sprite } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
 import { generateMeadow } from "./sim/worldgen.ts";
 
@@ -13,6 +19,7 @@ export interface AgentView {
   anim: number;
   stride: number;
   color: number;
+  sprite: Sprite | null;
 }
 
 export interface ToolResult {
@@ -33,7 +40,7 @@ export class SimClient {
   speed = 1;
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
   cropsVersion = 0;
-  names: string[] = [];
+  profiles: AgentProfile[] = [];
   onReady: (world: World, caughtUp: number) => void = () => {};
   onEvent: (event: SimEvent) => void = () => {};
 
@@ -71,7 +78,8 @@ export class SimClient {
       const dyaw = Math.atan2(Math.sin(c[i + 4] - p[i + 4]), Math.cos(c[i + 4] - p[i + 4]));
       out.push({
         id: c[i],
-        name: this.names[i / AGENT_STRIDE] ?? "?",
+        name: this.profiles[i / AGENT_STRIDE]?.name ?? "?",
+        sprite: this.profiles[i / AGENT_STRIDE]?.sprite ?? null,
         x: lerp(1),
         y: lerp(2),
         z: lerp(3),
@@ -109,7 +117,7 @@ export class SimClient {
     this.day = msg.day;
     this.timeOfDay = msg.timeOfDay;
     this.speed = msg.speed;
-    if (msg.names) this.names = msg.names;
+    if (msg.profiles) this.profiles = msg.profiles;
     if (msg.crops) {
       this.crops = msg.crops;
       this.cropsVersion++;

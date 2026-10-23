@@ -15,6 +15,8 @@ export class Camera {
   fovY = 0.55;
   /** Agent id to keep centered, or null for free look. Panning breaks the follow. */
   follow: number | null = null;
+  /** Distance to glide to (e.g. when focusing on an agent); scrolling cancels it. */
+  zoomTo: number | null = null;
   private view = mat4();
   private proj = mat4();
 
@@ -52,6 +54,7 @@ export class Camera {
     });
     el.addEventListener("wheel", (e) => {
       e.preventDefault();
+      this.zoomTo = null;
       this.distance = Math.min(110, Math.max(10, this.distance * Math.exp(e.deltaY * 0.001)));
     }, { passive: false });
   }
@@ -61,6 +64,12 @@ export class Camera {
     this.target[2] = Math.min(this.worldSize[1], Math.max(0, this.target[2] + dz));
   }
 
+  /** Follow an agent and close in to a comfortable watching distance. */
+  focus(agentId: number) {
+    this.follow = agentId;
+    this.zoomTo = Math.min(this.distance, 30);
+  }
+
   /** Ease the view target toward a point, e.g. a followed agent. */
   track(x: number, z: number) {
     this.target[0] += (x - this.target[0]) * 0.08;
@@ -68,6 +77,10 @@ export class Camera {
   }
 
   update(aspect: number) {
+    if (this.zoomTo !== null) {
+      this.distance += (this.zoomTo - this.distance) * 0.06;
+      if (Math.abs(this.zoomTo - this.distance) < 0.05) this.zoomTo = null;
+    }
     const ground = this.groundAt(this.target[0], this.target[2]) + 1;
     this.target[1] += (ground - this.target[1]) * 0.08;
     const cp = Math.cos(this.pitch);

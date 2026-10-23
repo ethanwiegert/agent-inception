@@ -3,7 +3,13 @@
  * Simulation worker: owns the authoritative Sim, steps it at a fixed rate,
  * streams state to the page and persists to IndexedDB.
  */
-import { AGENT_STRIDE, CROP_STRIDE, type FromWorker, type ToWorker } from "./sim/protocol.ts";
+import {
+  AGENT_STRIDE,
+  type AgentProfile,
+  CROP_STRIDE,
+  type FromWorker,
+  type ToWorker,
+} from "./sim/protocol.ts";
 import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
 import { callTool } from "./sim/tools.ts";
 
@@ -122,10 +128,10 @@ function send(now: number) {
     }
   }
 
-  let names: string[] | undefined;
+  let profiles: AgentProfile[] | undefined;
   if (s.agentsVersion !== sentAgentsVersion) {
     sentAgentsVersion = s.agentsVersion;
-    names = s.agents.map((a) => a.name);
+    profiles = s.agents.map((a) => ({ name: a.name, sprite: a.sprite }));
   }
 
   const edits = Int32Array.from(s.pendingEdits);
@@ -137,7 +143,7 @@ function send(now: number) {
     timeOfDay: s.timeOfDay(),
     speed,
     agents,
-    names,
+    profiles,
     edits,
     crops,
     events: s.events.splice(0),

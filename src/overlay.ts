@@ -3,6 +3,7 @@ import type { AgentView } from "./simclient.ts";
 
 interface Tag {
   root: HTMLDivElement;
+  name: HTMLDivElement;
   bubble: HTMLDivElement;
   until: number;
 }
@@ -11,7 +12,10 @@ const css = `
 .ai-tag{position:fixed;left:0;top:0;pointer-events:none;display:flex;flex-direction:column;
   align-items:center;gap:4px;transform-origin:50% 100%;will-change:transform}
 .ai-name{font:600 11px/1 ui-sans-serif,system-ui;color:#fff;background:rgba(10,14,18,.55);
-  padding:3px 7px;border-radius:999px;white-space:nowrap}
+  padding:3px 7px;border-radius:999px;white-space:nowrap;pointer-events:auto;cursor:pointer;
+  border:1px solid transparent;transition:background .15s,border-color .15s}
+.ai-name:hover{background:rgba(10,14,18,.8)}
+.ai-name.followed{border-color:#9fd36b;background:rgba(20,40,16,.8)}
 .ai-bubble{max-width:220px;font:13px/1.35 ui-sans-serif,system-ui;color:#1a1d21;background:#fdfbf4;
   padding:7px 10px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.25);opacity:0;
   transition:opacity .3s;text-align:center}
@@ -28,7 +32,8 @@ export class Overlay {
   private tags = new Map<number, Tag>();
   private feed: HTMLDivElement;
 
-  constructor() {
+  /** `onSelect` fires when a spectator clicks an agent's name tag. */
+  constructor(private onSelect: (agentId: number) => void) {
     const style = document.createElement("style");
     style.textContent = css;
     document.head.append(style);
@@ -58,12 +63,20 @@ export class Overlay {
   }
 
   /** Place tags over heads. `width`/`height` are CSS pixels of the canvas. */
-  update(agents: AgentView[], viewProj: Mat4, width: number, height: number, now: number) {
+  update(
+    agents: AgentView[],
+    viewProj: Mat4,
+    width: number,
+    height: number,
+    now: number,
+    followed: number | null,
+  ) {
     const seen = new Set<number>();
     for (const a of agents) {
       seen.add(a.id);
       let tag = this.tags.get(a.id);
       if (!tag) tag = this.createTag(a);
+      tag.name.classList.toggle("followed", a.id === followed);
       const m = viewProj, x = a.x, y = a.y + 2.3, z = a.z;
       const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
       if (cw <= 0) {
@@ -96,9 +109,11 @@ export class Overlay {
     const name = document.createElement("div");
     name.className = "ai-name";
     name.textContent = a.name;
+    name.title = `Follow ${a.name}`;
+    name.onclick = () => this.onSelect(a.id);
     root.append(bubble, name);
     document.body.append(root);
-    const tag = { root, bubble, until: 0 };
+    const tag = { root, name, bubble, until: 0 };
     this.tags.set(a.id, tag);
     return tag;
   }

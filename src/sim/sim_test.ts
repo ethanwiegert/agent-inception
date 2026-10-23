@@ -75,3 +75,24 @@ Deno.test("rejoining by name reattaches the same body", () => {
   assertEquals(sim.agents.length, 1);
   assert(run(sim, "s2", "journal_read").text.includes("plant by the cliff"));
 });
+
+Deno.test("agents can set, validate, keep and reset a sprite", () => {
+  const sim = new Sim(1);
+  run(sim, "s", "join", { name: "Pip" });
+  const palette = { h: "#e8b23a", f: "#fc0" };
+  assert(run(sim, "s", "set_sprite", { rows: ["hh", "fx"], palette }).isError, "unknown key");
+  assert(run(sim, "s", "set_sprite", { rows: ["..", ".."], palette }).isError, "all transparent");
+  assert(run(sim, "s", "set_sprite", { rows: ["#".repeat(33)], palette: { "#": "#000" } }).isError);
+
+  const ok = run(sim, "s", "set_sprite", { rows: [".h", "fh."], palette });
+  assert(!ok.isError, ok.text);
+  assertEquals(sim.agents[0].sprite, {
+    width: 3,
+    height: 2,
+    pixels: [-1, 0xe8b23a, -1, 0xffcc00, 0xe8b23a, -1],
+  });
+  assertEquals(Sim.load(sim.save(0)).agents[0].sprite, sim.agents[0].sprite);
+
+  run(sim, "s", "set_sprite", { reset: true });
+  assertEquals(sim.agents[0].sprite, null);
+});

@@ -5,7 +5,8 @@ import { Overlay } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { LOOKS } from "./render/look.ts";
 import { Renderer } from "./render/renderer.ts";
-import { TOOL_DEFS } from "./sim/tools.ts";
+import type { Sprite } from "./sim/sim.ts";
+import { SPRITE_MAX, TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
@@ -47,7 +48,13 @@ if (params.has("speed")) client.send({ type: "speed", speed: Number(params.get("
 if (params.has("time")) client.send({ type: "setTime", timeOfDay: Number(params.get("time")) });
 addEventListener("visibilitychange", () => document.hidden && client.send({ type: "save" }));
 
-const overlay = new Overlay();
+// Clicking a name (over a head or in the panel) follows that agent; clicking again lets go.
+const toggleFollow = (id: number | null) => {
+  if (!camera) return;
+  if (id === null || camera.follow === id) camera.follow = null;
+  else camera.focus(id);
+};
+const overlay = new Overlay(toggleFollow);
 let renderer: Renderer | null = null;
 let camera: Camera | null = null;
 
@@ -71,7 +78,7 @@ client.onEvent = (event) => {
   }
 };
 
-const agentName = (id: number) => client.names[id - 1] ?? `#${id}`;
+const agentName = (id: number) => client.profiles[id - 1]?.name ?? `#${id}`;
 
 // ---------------------------------------------------------------- agents
 
@@ -86,6 +93,13 @@ async function handleTool(
     return { content: [{ type: "text", text: `Unknown tool "${name}".` }], isError: true };
   }
   if (name === "screenshot") return await screenshot(session);
+  if (name === "set_sprite" && typeof args.image_base64 === "string") {
+    try {
+      args = { _pixels: await decodeSprite(args.image_base64) };
+    } catch {
+      return { content: [{ type: "text", text: "Couldn't decode that image." }], isError: true };
+    }
+  }
   const who = await client.call(session, "_whoami", {});
   const label = who.isError ? String(args.name ?? "someone") : agentName(Number(who.text));
   if (!QUIET_TOOLS.has(name)) overlay.log(label, `${name} ${JSON.stringify(args)}`);
@@ -94,6 +108,24 @@ async function handleTool(
     overlay.log(label, firstSentence(r.text), r.isError);
   }
   return { content: [{ type: "text", text: r.text }], isError: r.isError };
+}
+
+/** Decode an uploaded image into sprite pixels, fitted to SPRITE_MAX with crisp (nearest) scaling. */
+async function decodeSprite(base64: string): Promise<Sprite> {
+  const bytes = Uint8Array.from(atob(base64.replace(/^data:[^,]*,/, "")), (c) => c.charCodeAt(0));
+  const bitmap = await createImageBitmap(new Blob([bytes]));
+  const fit = Math.min(1, SPRITE_MAX / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * fit));
+  const height = Math.max(1, Math.round(bitmap.height * fit));
+  const ctx = new OffscreenCanvas(width, height).getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const pixels: number[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    pixels.push(data[i + 3] < 128 ? -1 : (data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+  }
+  return { width, height, pixels };
 }
 
 const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0];
@@ -150,7 +182,7 @@ const panel = createDevPanel({
   time: (t) => client.send({ type: "setTime", timeOfDay: t }),
   speed: (speed) => client.send({ type: "speed", speed }),
   seed: (seed) => client.send({ type: "reset", seed }),
-  follow: (id) => camera && (camera.follow = id),
+  follow: toggleFollow,
 });
 
 function resize() {
@@ -187,7 +219,14 @@ function draw(now: number) {
     crops: client.crops,
     cropsVersion: client.cropsVersion,
   });
-  overlay.update(agents, camera.viewProj, canvas.clientWidth, canvas.clientHeight, now);
+  overlay.update(
+    agents,
+    camera.viewProj,
+    canvas.clientWidth,
+    canvas.clientHeight,
+    now,
+    camera.follow,
+  );
 
   if (now - lastPanel > 250) {
     lastPanel = now;

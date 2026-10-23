@@ -4,6 +4,7 @@ import {
   Anim,
   type Job,
   type Sim,
+  type Sprite,
   TICK_HZ,
   TICKS_PER_DAY,
   WHEAT_GROW_TICKS,
@@ -27,6 +28,7 @@ export interface ToolDef {
 }
 
 const WALK_SPEED = 2.2 / TICK_HZ; // blocks per tick: an unhurried stroll
+export const SPRITE_MAX = 32;
 const MAX_AREA = 16;
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -115,6 +117,38 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
+    name: "set_sprite",
+    description: "Choose how you look: pixel art (up to 32×32) that becomes your body, extruded " +
+      "into blocks. Draw yourself facing right; you'll flip when walking left. Either give `rows` " +
+      "plus a `palette`, or upload an image. Call with `reset: true` to go back to the farmer. " +
+      'Example: rows ["..hh..", ".hhhh.", "..ff..", ".bbbb.", "b.bb.b", "..ll..", ".l..l."], ' +
+      'palette {"h": "#e8b23a", "f": "#f1c9a5", "b": "#3b6fd1", "l": "#2a2a35"}.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        rows: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: SPRITE_MAX,
+          description: `Top-to-bottom rows of palette keys, at most ${SPRITE_MAX} long. ` +
+            '"." and " " are transparent.',
+        },
+        palette: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: 'Single-character keys to colors like "#a0522d" or "#fc0".',
+        },
+        image_base64: {
+          type: "string",
+          description:
+            "A PNG/JPEG/WebP image instead of rows; transparent pixels are see-through. " +
+            `Scaled to fit ${SPRITE_MAX}×${SPRITE_MAX}.`,
+        },
+        reset: { type: "boolean", description: "Go back to the default farmer body." },
+      },
+    },
+  },
+  {
     name: "say",
     description: "Say something out loud. It appears over your head for anyone watching.",
     inputSchema: {
@@ -191,7 +225,7 @@ function join(sim: Sim, session: string, args: Args): string {
     ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
     "to ripen, harvest, and build what you like. People are watching you live here, so take your " +
-    "time and narrate now and then with say. Start with look." +
+    "time and narrate now and then with say. Draw how you look with set_sprite. Start with look." +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "");
@@ -288,6 +322,21 @@ const HANDLERS: Record<string, Handler> = {
     })();
   },
 
+  set_sprite(sim, agent, args) {
+    if (args.reset) {
+      agent.sprite = null;
+      sim.agentsVersion++;
+      return "You look like a farmer again.";
+    }
+    const sprite = args._pixels ? fromPixels(args._pixels) : fromRows(args.rows, args.palette);
+    const opaque = sprite.pixels.filter((p) => p >= 0).length;
+    if (!opaque) throw new Error("That sprite is completely transparent.");
+    agent.sprite = sprite;
+    sim.agentsVersion++;
+    return `You now look like your ${sprite.width}×${sprite.height} sprite (${opaque} pixels). ` +
+      "Anyone watching sees the change.";
+  },
+
   say(sim, agent, args) {
     const text = String(args.text ?? "").slice(0, 140).trim();
     if (!text) throw new Error("Say something.");
@@ -341,7 +390,6 @@ function* walk(
       agent.z += (dz / d) * s;
       agent.stride += s;
       agent.yaw = turn(agent.yaw, Math.atan2(dx, dz), 0.35);
-      settle(sim, agent);
       yield;
     }
   }
@@ -425,9 +473,46 @@ function eachTile(
 
 // ---------------------------------------------------------------- helpers
 
-function settle(sim: Sim, agent: Agent) {
-  const ground = sim.world.heightAt(Math.floor(agent.x), Math.floor(agent.z)) + 1;
-  agent.y += (ground - agent.y) * 0.35;
+function parseColor(value: unknown, key: string): number {
+  const hex = String(value ?? "").trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) return parseInt([...hex].map((c) => c + c).join(""), 16);
+  if (/^[0-9a-f]{6}$/i.test(hex)) return parseInt(hex, 16);
+  throw new Error(`Palette color for "${key}" should look like "#a0522d" or "#fc0".`);
+}
+
+function fromRows(rows: unknown, palette: unknown): Sprite {
+  if (!Array.isArray(rows) || !rows.length) throw new Error("Give `rows` (or `image_base64`).");
+  if (rows.length > SPRITE_MAX) throw new Error(`At most ${SPRITE_MAX} rows.`);
+  const colors = new Map<string, number>();
+  for (const [key, value] of Object.entries((palette ?? {}) as Record<string, unknown>)) {
+    if ([...key].length !== 1) throw new Error(`Palette keys are single characters, not "${key}".`);
+    colors.set(key, parseColor(value, key));
+  }
+  const lines = rows.map(String);
+  const width = Math.max(...lines.map((r) => [...r].length));
+  if (width > SPRITE_MAX) throw new Error(`Rows can be at most ${SPRITE_MAX} characters.`);
+  const pixels: number[] = [];
+  for (const line of lines) {
+    const chars = [...line];
+    for (let x = 0; x < width; x++) {
+      const c = chars[x] ?? ".";
+      if (c === "." || c === " ") pixels.push(-1);
+      else if (colors.has(c)) pixels.push(colors.get(c)!);
+      else throw new Error(`"${c}" isn't in the palette.`);
+    }
+  }
+  return { width, height: lines.length, pixels };
+}
+
+/** Pixels the page decoded from an uploaded image. */
+function fromPixels(value: unknown): Sprite {
+  const { width, height, pixels } = value as Sprite;
+  const ok = Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 &&
+    width <= SPRITE_MAX && height <= SPRITE_MAX && Array.isArray(pixels) &&
+    pixels.length === width * height &&
+    pixels.every((p) => Number.isInteger(p) && p >= -1 && p <= 0xffffff);
+  if (!ok) throw new Error("Couldn't read that image.");
+  return { width, height, pixels: [...pixels] };
 }
 
 const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));

@@ -1,5 +1,5 @@
-import { identity, mat4, rotateX, rotateY, scale, translate } from "../math.ts";
-import { Anim } from "../sim/sim.ts";
+import { identity, mat4, rotateX, rotateY, rotateZ, scale, translate } from "../math.ts";
+import { Anim, type Sprite } from "../sim/sim.ts";
 import type { AgentView } from "../simclient.ts";
 import { BOX_FLOATS } from "./boxes.ts";
 
@@ -23,21 +23,68 @@ const IRON: Rgb = [0.35, 0.36, 0.38];
 
 /** Max boxes per farmer, for buffer sizing. */
 export const BODY_BOXES = 16;
+/** Worst case for a 32×32 sprite with no two neighbouring pixels alike. */
+export const MAX_BOXES_PER_AGENT = 32 * 32;
 
 const root = mat4(), part = mat4(), torso = mat4(), limb = mat4(), head = mat4();
 
+/** A horizontal run of same-colored sprite pixels, drawn as one box. Color is linear. */
+interface Run {
+  x: number;
+  y: number;
+  length: number;
+  color: Rgb;
+}
+
+const runsCache = new WeakMap<Sprite, Run[]>();
+const facingLeft = new Map<number, boolean>();
+
+function spriteRuns(sprite: Sprite): Run[] {
+  let runs = runsCache.get(sprite);
+  if (runs) return runs;
+  runs = [];
+  const { width, height, pixels } = sprite;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width;) {
+      const p = pixels[y * width + x];
+      let end = x + 1;
+      while (end < width && pixels[y * width + end] === p) end++;
+      if (p >= 0) {
+        const lin = (c: number) => Math.pow(c / 255, 2.2);
+        runs.push({
+          x,
+          y,
+          length: end - x,
+          color: [lin(p >> 16), lin((p >> 8) & 255), lin(p & 255)],
+        });
+      }
+      x = end;
+    }
+  }
+  runsCache.set(sprite, runs);
+  return runs;
+}
+
 /**
  * Procedural farmer: a blocky body built from boxes and animated from sim
- * state (walking stride, current work) plus time for idle life.
+ * state (walking stride, current work) plus time for idle life. Agents with a
+ * sprite become an extruded paper doll that turns to face the camera instead.
  */
-export function buildBodies(agents: AgentView[], time: number, out: Float32Array): number {
+export function buildBodies(
+  agents: AgentView[],
+  time: number,
+  out: Float32Array,
+  cameraYaw: number,
+): number {
   let n = 0;
+  // Alpha carries how much per-box contact shading to apply; sprites need none.
+  let contact = 1;
   const emit = (m: Float32Array, color: Rgb) => {
     out.set(m, n * BOX_FLOATS);
     out[n * BOX_FLOATS + 16] = color[0];
     out[n * BOX_FLOATS + 17] = color[1];
     out[n * BOX_FLOATS + 18] = color[2];
-    out[n * BOX_FLOATS + 19] = 1;
+    out[n * BOX_FLOATS + 19] = contact;
     n++;
   };
   /** Box of `size` whose center sits at (cx, cy, cz) in the frame `base`. */
@@ -56,7 +103,47 @@ export function buildBodies(agents: AgentView[], time: number, out: Float32Array
     emit(part, color);
   };
 
+  /** Sprite agents: billboard about Y toward the camera, flip to face the way they walk. */
+  const doll = (a: AgentView, sprite: Sprite) => {
+    const t = time + a.id * 1.7;
+    const phase = a.stride * 2.4;
+    // Which way they face on screen, with a dead zone so standing still doesn't flicker.
+    const side = Math.sin(a.yaw - cameraYaw);
+    if (Math.abs(side) > 0.25) facingLeft.set(a.id, side < 0);
+    const flip = facingLeft.get(a.id) ? -1 : 1;
+
+    let bob = 0, sway = 0, squash = 1;
+    const work = 0.5 + 0.5 * Math.sin(t * 6);
+    if (a.anim === Anim.Walk) {
+      bob = Math.abs(Math.sin(phase)) * 0.1;
+      sway = Math.sin(phase) * 0.1;
+    } else if (a.anim !== Anim.Idle) {
+      squash = 1 - 0.08 * work;
+      sway = -flip * 0.18 * work;
+    } else {
+      squash = 1 + 0.02 * Math.sin(t * 1.8);
+    }
+
+    const px = Math.min(1.9 / sprite.height, 1.5 / sprite.width);
+    const depth = px * 1.2;
+    identity(root);
+    translate(root, a.x, a.y + bob, a.z);
+    rotateY(root, cameraYaw);
+    rotateZ(root, sway);
+    scale(root, 1, squash, 1);
+    for (const r of spriteRuns(sprite)) {
+      const cx = (r.x + r.length / 2 - sprite.width / 2) * px * flip;
+      const cy = (sprite.height - r.y - 0.5) * px;
+      box(root, cx, cy, 0, r.length * px, px, depth, r.color);
+    }
+  };
+
   for (const a of agents) {
+    contact = a.sprite ? 0 : 1;
+    if (a.sprite) {
+      doll(a, a.sprite);
+      continue;
+    }
     const shirt = SHIRTS[a.color % SHIRTS.length];
     const skin = SKINS[(a.id * 7) % SKINS.length];
     const t = time + a.id * 1.7;

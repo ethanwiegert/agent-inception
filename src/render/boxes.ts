@@ -54,7 +54,7 @@ struct Out {
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   // Soft contact darkening toward the bottom of each part, and crisp edges.
-  let ao = mix(0.75, 1.0, smoothstep(-0.5, 0.2, in.local.y));
+  let ao = mix(1.0, mix(0.75, 1.0, smoothstep(-0.5, 0.2, in.local.y)), in.color.a);
   let a = abs(in.local);
   let m = max(max(a.x, a.y), a.z);
   let second = a.x + a.y + a.z - m - min(min(a.x, a.y), a.z);
