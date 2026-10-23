@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext", "deno.webgpu", "deno.ns"],
+    "strict": true
+  },
+  "tasks": {
+    "dev": "deno run -A tools/dev.ts",
+    "build": "deno bundle --platform=browser --minify -o dist/main.js src/main.ts",
+    "check": "deno check src tools && deno lint && deno fmt --check",
+    "test": "deno test",
+    "shot": "deno run -A tools/shot.ts"
+  },
+  "fmt": { "lineWidth": 100, "exclude": ["dist"] },
+  "lint": { "exclude": ["dist"] }
+}

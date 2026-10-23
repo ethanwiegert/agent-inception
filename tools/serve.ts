@@ -1,0 +1,32 @@
+/** Static file server for `web/` with `dist/` layered on top. */
+const roots = ["web", "dist"];
+const types: Record<string, string> = {
+  html: "text/html",
+  js: "text/javascript",
+  map: "application/json",
+  json: "application/json",
+  wgsl: "text/plain",
+  png: "image/png",
+  bin: "application/octet-stream",
+};
+
+export function serve(port: number): Deno.HttpServer<Deno.NetAddr> {
+  return Deno.serve({ port, hostname: "127.0.0.1", onListen() {} }, async (req) => {
+    let path = decodeURIComponent(new URL(req.url).pathname);
+    if (path.endsWith("/")) path += "index.html";
+    if (path.includes("..")) return new Response("bad path", { status: 400 });
+    for (const root of roots) {
+      try {
+        const body = await Deno.readFile(root + path);
+        const ext = path.slice(path.lastIndexOf(".") + 1);
+        return new Response(body, {
+          headers: {
+            "content-type": types[ext] ?? "application/octet-stream",
+            "cache-control": "no-store",
+          },
+        });
+      } catch { /* try next root */ }
+    }
+    return new Response("not found", { status: 404 });
+  });
+}
