@@ -35,7 +35,7 @@ context.configure({ device, format, alphaMode: "opaque" });
 
 const params = new URLSearchParams(location.search);
 const state: DevState = {
-  look: params.get("look") ?? "lush",
+  look: params.get("look") ?? "crisp",
   timeOfDay: Number(params.get("time") ?? 0.38),
   daySpeed: Number(params.get("speed") ?? 0.1),
   seed: Number(params.get("seed") ?? 1337),
@@ -73,7 +73,7 @@ function frame(now: number) {
   last = now;
   state.timeOfDay = (state.timeOfDay + dt * state.daySpeed / 60) % 1;
 
-  renderer.render(camera, LOOKS[state.look] ?? LOOKS.lush, state.timeOfDay, now / 1000);
+  renderer.render(camera, LOOKS[state.look] ?? LOOKS.crisp, state.timeOfDay, now / 1000);
 
   if (now - lastPanel > 250) {
     lastPanel = now;

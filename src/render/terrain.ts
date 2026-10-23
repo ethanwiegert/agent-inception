@@ -45,7 +45,7 @@ struct Out {
 fn blockAlbedo(block: u32, face: u32, world: vec3f, n: vec3f) -> vec3f {
   let cell = floor(world - n * 0.5);
   let jitter = 0.94 + 0.12 * hash21(cell.xz + cell.y * 17.0);
-  let dirt = vec3f(0.15, 0.075, 0.035);
+  let dirt = vec3f(0.22, 0.12, 0.06);
   var albedo = vec3f(0.18, 0.18, 0.19);
   if (block == GRASS) {
     let green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;

@@ -43,9 +43,9 @@ export const LOOKS: Record<string, Look> = {
     name: "Crisp blocks",
     grassBase: [0.04, 0.12, 0.025],
     grassTip: [0.12, 0.28, 0.05],
-    bladeHeight: 0.35,
-    bladeWidth: 0.12,
-    bladesPerBlock: 16,
+    bladeHeight: 0.6,
+    bladeWidth: 0.05,
+    bladesPerBlock: 64,
     flowerChance: 0,
     aoStrength: 1,
     edgeDarken: 0.2,
@@ -125,7 +125,7 @@ export function applyLook(out: Float32Array, look: Look, timeOfDay: number) {
   out.set(keyDir, F.sunDir);
   out[F.sunDir + 3] = keyIntensity;
   out.set(keyColor, F.sunColor);
-  out[F.sunColor + 3] = mix(1.2, 0.75, day);
+  out[F.sunColor + 3] = mix(1.2, 1.1, day);
   out.set(zenith, F.skyZenith);
   out[F.skyZenith + 3] = mix(2.4, 1.0, day); // exposure: eyes adjust a little at night
   out.set(horizon, F.skyHorizon);
