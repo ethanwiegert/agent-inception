@@ -22,12 +22,15 @@ pillars, decisions, art direction, status and next steps before making architect
 - `deno task test` — sim + world tests (headless, fast)
 - `deno task shot [out.png] [query]` — build, open Chromium on the real GPU, print frame/GPU
   timings, save a screenshot. Query is URL params, e.g. `"seed=7&time=0.62&speed=0"`.
+- `deno task camshot out.png "query" '{"distance":60,"pitch":0.2,"yaw":2.1,"dx":-60,"dz":30}'` —
+  like `shot`, but poses the camera (offset from world center) and prints GPU errors
 - `deno task build` — minified `dist/main.js` + `dist/worker.js`
 - `deno task bridge` — standalone MCP bridge on :7777 (for a hosted game; not used in dev)
 
 URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
-`time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`crisp` default, `lush`, `storybook`),
-`bridge` (WebSocket URL override).
+`time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
+`storybook`), `bridge` (WebSocket URL override), `debug` (comma list of passes to skip for
+profiling: `shadow,terrain,grass,water,sky,bodies`).
 
 ## Code map
 
@@ -38,19 +41,28 @@ src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation
 src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
-src/sim/            deterministic core — sim.ts (Sim, Agent, clock, save), tools.ts (tool defs +
-                    handlers as generator jobs), world.ts (voxels, slopes), worldgen.ts, path.ts
-                    (A*), protocol.ts (worker messages), noise.ts, rng.ts
-src/render/         renderer.ts (passes, shadows, GPU timer), frame.ts (shared uniforms + lighting
-                    WGSL), terrain.ts + mesher.ts, grass.ts, crops.ts, boxes.ts (instanced cubes) +
-                    body.ts (farmer bodies, sprite dolls), sky.ts, post.ts, look.ts (presets,
-                    day/night)
+src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
+                    defs + handlers as generator jobs), blocks.ts (block registry, patterns),
+                    world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
+                    path.ts (A* over floors, wading), protocol.ts, noise.ts, rng.ts
+src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
+                    common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
+                    surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
+                    water.ts, crops.ts, boxes.ts + body.ts (bodies, sprite dolls), sky.ts,
+                    post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
 
 Uniform layout lives in `render/frame.ts`: the `F` offsets and the WGSL `Frame` struct must change
-together. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader has a WGSL mirror of
-`slopeDrop` that must stay identical.
+together. The surface texture (`render/surface.ts`, rgba16uint per column) is read by grass, water
+and terrain: r height, g block, b slope mask | grass-neighbour bits << 4, a water level + 1. Slope
+rules live in `World.slopeMask`/`slopeDrop`; the grass shader has a WGSL mirror of `slopeDrop` that
+must stay identical.
+
+## Current work
+
+`docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
+camera). Pick up from there.
 
 ## Testing and debugging
 

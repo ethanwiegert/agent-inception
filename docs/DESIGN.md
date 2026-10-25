@@ -26,8 +26,8 @@ players are Haiku subagents spawned from Claude Code (no API key in the game).
 | Language      | TypeScript, data-oriented (typed arrays). Hot kernels move to Zig→WASM only when the profiler says so.                                   |
 | Where it runs | Fully client-side; the static site scales to any number of players. Each tab owns one world.                                             |
 | Simulation    | Deterministic fixed-tick core (20 Hz, seeded PRNG) in a Web Worker, no DOM. Same code runs headless in Deno for tests.                   |
-| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, one sun/moon shadow map, interpolates between sim ticks.                                             |
-| World         | 256×256×64 voxel world in 32×32 chunk columns. Rolling meadow with sloped one-block rises and occasional terraced cliffs.                |
+| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, sun/moon shadow map, cloud shadows, GPU water, compute-culled grass.                                 |
+| World         | 256×256×64 voxel island in 32×32 chunk columns: rolling hills, river valleys, beaches, sea to the horizon.                               |
 | Camera        | Angled top-down orbit (drag), pan (right-drag), zoom (wheel); click a name to follow. Watching isn't playing.                            |
 | Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                  |
 | Agents        | One world, many agents: each MCP session `join`s a named body. Rejoining by name reattaches it.                                          |
@@ -42,7 +42,10 @@ players are Haiku subagents spawned from Claude Code (no API key in the game).
 
 Settled with Ethan while workshopping M1; keep to it unless he asks otherwise.
 
-- **Crisp blocks** is the look (`render/look.ts`); Lush meadow and Storybook remain as alternates.
+- **Natural** is the default look (`render/look.ts`): Crisp blocks evolved toward smoother, more
+  realistic shading after Ethan asked for it. Crisp, Lush and Storybook remain as alternates.
+- Hills shade smoothly (per-vertex ground normals) and material edges (grass/sand) are organic
+  curves, not block steps. Water is clear and teal over sand, darkening with depth.
 - Grass is dense, tall and fine: 64 blades per block, 0.6 tall, 0.05 wide, generated on the GPU.
 - No lines across the screen: block grid outlines are off, and shadows get strong sky fill so step
   and cliff shadows read as soft shade, never black stripes.
@@ -114,30 +117,71 @@ agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──p
 - **M2 — sim core.** ✅ Worker, fixed tick, determinism tests, save/load, offline catch-up.
 - **M3 — the agent.** ✅ Bodies + animation, MCP bridge, tools, Haiku farmer playing end to end.
   Since then: sloped hills, agent sprites, click-to-follow.
-- **M4 — life.** Next. Two animal species (procedural box bodies via `boxes.ts`, simple needs and
-  wandering), trees and wild plants that grow, and tools to interact with them.
-- **M5 — making.** Object recipes + upload, crafting, reverse-CAPTCHA gag for WASD/clicks.
+- **World v2.** ✅ (commit 0477d69) Island worldgen with rivers and sea, block registry with
+  procedural patterns, smooth normals, organic grass edges, GPU water + ocean, sun/moon/stars/
+  clouds, cloud shadows, weather drift, compute-culled grass, `?debug=` profiling, `camshot`.
+- **M4 — life.** Next. Trees, plants and four animal species (see the upgrade checklist).
+- **M5 — making.** Building, crafting, agent-defined content, reverse-CAPTCHA gag.
 
-### Next up
+### Upgrade checklist (Ethan's 2026-10-25 goal, in progress)
 
-1. Re-run a Haiku playtest (Clover's first run was cut off before she gave tool feedback) and fold
-   the feedback into tool descriptions and `look` output.
-2. Start M4: animals first (they make the meadow feel alive to watch), then trees.
-3. Physics pass: swept AABB for bodies and animals, dropped items as simple rigid bodies.
-4. Measure on an integrated GPU; if grass is the bottleneck, move blade culling into a compute pass
-   with indirect draws.
+Goal: smoother/more realistic look, better camera, sun/moon, plants, trees, 3-4 animals,
+rivers/water, basic building, and everything extendable by agents through MCP. Stay efficient, zero
+dependencies; use Haiku subagents for playtests and content.
+
+Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above).
+
+To do, in order:
+
+1. **Camera** (`src/camera.ts`): time-based damped orbit/pan/zoom with goal values, zoom toward the
+   cursor, grab-the-ground panning (right/middle drag), pitch range down to ~0.12 so the
+   horizon/sun/moon are visible, double-click to glide to a point, touch (one-finger orbit, pinch
+   zoom, two-finger pan), and a small HUD (compass that resets north, rotate ±45°, overview,
+   cinematic auto-orbit toggle). No keyboard camera: WASD is reserved for the gag.
+2. **Model system** (`src/render/models.ts`, replaces most of `boxes.ts`): procedural mesh templates
+   built from primitives (box, ico-sphere with noise, cylinder, cone) with vertex colors and a sway
+   weight; instanced draws (instance = mat4 + tint), shadows, wind in the vertex shader. Farmer
+   bodies move onto it with rounded parts.
+3. **Props in the sim** (trees, bushes, flowers, reeds, rocks, lily pads): deterministic worldgen
+   placement (jittered grid + density noise, by habitat), stored as generated list + diff (removed
+   ids, added props) in saves, streamed to the page. Species: oak, birch, pine (2-3 variants each).
+   Saplings grow from the clock like crops.
+4. **Animals** (`src/sim/animals.ts`): data-driven species (parts with bones + behavior: speed,
+   habitat land/water, herding, diet, product): sheep (wool), chicken (eggs), cow (milk), duck
+   (swims). Wander/graze/flee/follow-wheat/sleep-at-night AI on the sim RNG; streamed like agents
+   and animated from parts.
+5. **Building**: `place_block` with optional `y` (roofs, overhangs), `build` from text blueprints
+   (layers of rows + palette, like `set_sprite`), `craft` recipes (log → planks, clay → brick, wheat
+   → thatch, cobble from stone), `interact` (chop tree → logs, pick flowers, shear sheep, collect
+   eggs, milk cow), more `look` legend entries.
+6. **Agent extensibility tools**: `define_block` (name, color, pattern — renderer already reads the
+   palette), `define_object` (parts list → model template) + `place_object` / `remove_object`,
+   `define_species` + `spawn_animal`, `terraform` (raise/lower/flatten/water/ drain an area),
+   `set_weather` (sim has `weatherOverride`), `world_info` (list registries). Persist all registries
+   in saves; mirror to the page like blocks.
+7. **Haiku playtests**: delegate 2-3 Haiku farmers (one builder, one rancher, one designer who
+   defines objects/blocks), collect their feedback, fix tool friction; update `farmer.md` tools.
+8. **Polish and measure**: see known gaps.
 
 ### Known gaps
 
+- Close, low views: sloped side triangles still read as dark facets in shade; sunset sky is too pale
+  (wants a warmer horizon band); the moon disc is a bit large; far-hill grass radius edge is visible
+  at low angles.
+- Underwater clay/gravel patches have square edges (only grass edges blend so far).
+- `generateWorld` takes ~330 ms and runs in both the worker and the page; could be shared.
 - Choosing a new seed (panel or `?seed=`) rebuilds the `Renderer` without destroying the old GPU
   resources. Fine for dev; fix before it matters.
 - In-flight tool calls are lost on page reload (jobs aren't saved); agents just get an error.
 - Crop growth is re-sent from the worker once a second; could move to the GPU from planted ticks.
 - WebMCP (`navigator.modelContext`), audio hooks and the reverse CAPTCHA aren't started.
+- Old saves from the flat meadow load onto the new island generator (blocks diffs still apply);
+  start a fresh world with a new seed if they look odd.
 
 ## Performance budgets
 
 - 60 fps on an integrated-GPU laptop at 1080p (unmeasured so far); 144 fps on the dev box.
 - < 2 MB transferred to first frame, < 1 s to first frame. Today: ~55 KB + ~20 KB minified JS.
 - Sim tick < 2 ms at M4 scale. No per-frame allocations in hot paths.
-- Measured on the RTX 2070 Super: ~0.8-1.0 ms GPU per frame with ~600k grass blades.
+- Measured on the RTX 2070 Super: ~2.5 ms GPU per frame with ~600k grass blades, water, clouds and
+  12-tap soft shadows (~0.75 ms of that is MSAA resolve + post at the harness size).
