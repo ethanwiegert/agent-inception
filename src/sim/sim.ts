@@ -1,6 +1,8 @@
+import { type BlockDef, BlockRegistry } from "./blocks.ts";
+import { perlin2 } from "./noise.ts";
 import { Rng } from "./rng.ts";
 import { Block, World } from "./world.ts";
-import { generateMeadow } from "./worldgen.ts";
+import { generateWorld } from "./worldgen.ts";
 
 export const TICK_HZ = 20;
 /** One game day per ten real minutes at 1× speed. */
@@ -62,6 +64,8 @@ export interface SaveData {
   edits: number[];
   crops: [number, number][];
   agents: Omit<Agent, "queue" | "anim" | "stride">[];
+  blocks?: BlockDef[];
+  weatherOverride?: { clouds: number; until: number } | null;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
 }
@@ -75,6 +79,7 @@ export class Sim {
   /** Shifts the clock so a new world starts in the morning. */
   dayOffset = Math.round(TICKS_PER_DAY * 0.3);
   readonly world: World;
+  readonly blocks = new BlockRegistry();
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
   readonly crops = new Map<number, Crop>();
@@ -85,11 +90,13 @@ export class Sim {
   events: SimEvent[] = [];
   results: CallResult[] = [];
   cropsVersion = 0;
+  /** An agent-set cloud cover that holds until `until` (a tick), then the weather drifts again. */
+  weatherOverride: { clouds: number; until: number } | null = null;
   agentsVersion = 0;
   readonly rng: Rng;
 
   constructor(readonly seed: number) {
-    this.world = generateMeadow({ seed });
+    this.world = generateWorld({ seed });
     this.rng = new Rng(seed ^ 0x5eed);
   }
 
@@ -99,6 +106,15 @@ export class Sim {
 
   day(): number {
     return Math.floor((this.tick + this.dayOffset) / TICKS_PER_DAY) + 1;
+  }
+
+  /** Cloud cover 0-1: slow natural drift over the days unless an agent set the weather. */
+  clouds(): number {
+    if (this.weatherOverride && this.tick < this.weatherOverride.until) {
+      return this.weatherOverride.clouds;
+    }
+    const days = (this.tick + this.dayOffset) / TICKS_PER_DAY;
+    return Math.min(1, Math.max(0, 0.35 + perlin2(days * 1.7, 0.5, this.seed + 3) * 0.9));
   }
 
   setTimeOfDay(t: number) {
@@ -156,7 +172,7 @@ export class Sim {
     this.tick++;
     for (const agent of this.agents) {
       // Bodies follow the ground: slopes while walking, edits while standing still.
-      agent.y += (this.world.surfaceY(agent.x, agent.z) - agent.y) * 0.35;
+      agent.y += (this.world.surfaceY(agent.x, agent.z, agent.y) - agent.y) * 0.35;
       const current = agent.queue[0];
       if (!current) continue;
       try {
@@ -199,6 +215,8 @@ export class Sim {
       savedAt,
       edits: [...this.edits].flat(),
       crops: [...this.crops].map(([key, crop]) => [key, crop.planted]),
+      blocks: this.blocks.customs(),
+      weatherOverride: this.weatherOverride,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, ...rest }) =>
         structuredClone(rest)
@@ -209,6 +227,8 @@ export class Sim {
   static load(data: SaveData): Sim {
     const sim = new Sim(data.seed);
     sim.tick = data.tick;
+    sim.blocks.load(data.blocks ?? []);
+    sim.weatherOverride = data.weatherOverride ?? null;
     sim.dayOffset = data.dayOffset;
     const w = sim.world;
     for (let i = 0; i < data.edits.length; i += 2) {

@@ -1,13 +1,15 @@
 import type { World } from "./world.ts";
 
-/** Bodies can climb one block and drop two. */
+/** Bodies can climb one block, drop two, and wade through water one block deep. */
 export const MAX_STEP_UP = 1;
 export const MAX_STEP_DOWN = 2;
+export const MAX_WADE = 1;
 
-export function canStep(world: World, fx: number, fz: number, tx: number, tz: number): boolean {
-  const from = world.heightAt(fx, fz), to = world.heightAt(tx, tz);
-  if (from < 0 || to < 0) return false;
-  return to - from <= MAX_STEP_UP && from - to <= MAX_STEP_DOWN;
+/** The floor a body standing on `fromFloor` reaches by stepping into (tx, tz), or -1. */
+export function step(world: World, fromFloor: number, tx: number, tz: number): number {
+  const to = world.floorBelow(tx, tz, fromFloor + MAX_STEP_UP);
+  if (to < 0 || fromFloor - to > MAX_STEP_DOWN) return -1;
+  return world.waterDepth(tx, tz, to) > MAX_WADE ? -1 : to;
 }
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -17,6 +19,7 @@ let stamp = new Uint32Array(0);
 let gScore = new Float32Array(0);
 let cameFrom = new Int32Array(0);
 let closed = new Uint32Array(0);
+let floorOf = new Int16Array(0);
 let generation = 0;
 
 /**
@@ -29,6 +32,7 @@ export function findPath(
   world: World,
   sx: number,
   sz: number,
+  startFloor: number,
   goal: (x: number, z: number) => boolean,
   heuristic: (x: number, z: number) => number,
   maxNodes = 8000,
@@ -39,6 +43,7 @@ export function findPath(
     gScore = new Float32Array(n);
     cameFrom = new Int32Array(n);
     closed = new Uint32Array(n);
+    floorOf = new Int16Array(n);
     generation = 0;
   }
   generation++;
@@ -47,6 +52,7 @@ export function findPath(
   stamp[start] = generation;
   gScore[start] = 0;
   cameFrom[start] = -1;
+  floorOf[start] = startFloor;
   heap.push(start, heuristic(sx, sz));
 
   let expanded = 0;
@@ -67,17 +73,20 @@ export function findPath(
     for (const [dx, dz] of DIRS) {
       const nx = cx + dx, nz = cz + dz;
       if (nx < 0 || nz < 0 || nx >= w || nz >= world.sizeZ) continue;
-      if (!canStep(world, cx, cz, nx, nz)) continue;
-      if (dx && dz && (!canStep(world, cx, cz, nx, cz) || !canStep(world, cx, cz, cx, nz))) {
-        continue;
-      }
+      const from = floorOf[cur];
+      const to = step(world, from, nx, nz);
+      if (to < 0) continue;
+      if (dx && dz && (step(world, from, nx, cz) < 0 || step(world, from, cx, nz) < 0)) continue;
       const next = nz * w + nx;
       if (closed[next] === generation) continue;
-      const g = gScore[cur] + (dx && dz ? Math.SQRT2 : 1);
+      // Wading is slow, so paths prefer dry land and bridges.
+      const wet = world.waterDepth(nx, nz, to) > 0 ? 2.5 : 1;
+      const g = gScore[cur] + (dx && dz ? Math.SQRT2 : 1) * wet;
       if (stamp[next] === generation && g >= gScore[next]) continue;
       stamp[next] = generation;
       gScore[next] = g;
       cameFrom[next] = cur;
+      floorOf[next] = to;
       heap.push(next, g + heuristic(nx, nz));
     }
   }

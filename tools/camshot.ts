@@ -1,0 +1,37 @@
+/**
+ * Like `shot`, but positions the camera first and prints GPU errors.
+ * Usage: deno task camshot out.png "query" '{"distance":60,"pitch":0.2,"yaw":2.1,"dx":-60,"dz":30}'
+ * dx/dz offset the view target from the world center; pitch 0 is level, ~1.4 straight down.
+ */
+import { launch } from "./browser.ts";
+import { serve } from "./serve.ts";
+
+const [out = "camshot.png", query = "", cam = "{}"] = Deno.args;
+const build = await new Deno.Command("deno", { args: ["task", "-q", "build"] }).output();
+if (!build.success) {
+  console.error(new TextDecoder().decode(build.stderr));
+  Deno.exit(1);
+}
+const server = serve(0);
+const browser = await launch(`http://127.0.0.1:${server.addr.port}/?${query}`);
+try {
+  await new Promise((r) => setTimeout(r, 2500));
+  await browser.evaluate(`(() => {
+    const c = __game.camera(), o = ${cam};
+    c.target[0] += o.dx ?? 0;
+    c.target[2] += o.dz ?? 0;
+    for (const k of ["distance", "pitch", "yaw"]) if (o[k] !== undefined) c[k] = o[k];
+    return 1;
+  })()`);
+  await new Promise((r) => setTimeout(r, 2000));
+  const perf = await browser.evaluate(`__perf.summary()`);
+  const errors = await browser.evaluate(`__perf.gpuErrors.slice(0, 3)`);
+  const { data } = await browser.send<{ data: string }>("Page.captureScreenshot", {
+    format: "png",
+  });
+  await Deno.writeFile(out, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+  console.log(JSON.stringify({ perf, errors, screenshot: out }, null, 2));
+} finally {
+  await browser.close();
+  await server.shutdown();
+}

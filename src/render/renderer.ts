@@ -1,5 +1,7 @@
-import { lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
+import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
+import type { BlockRegistry } from "../sim/blocks.ts";
 import { World } from "../sim/world.ts";
+import { SEA_LEVEL } from "../sim/worldgen.ts";
 import type { Camera } from "../camera.ts";
 import type { AgentView } from "../simclient.ts";
 import { buildBodies, MAX_BOXES_PER_AGENT } from "./body.ts";
@@ -7,10 +9,12 @@ import { BOX_FLOATS, BoxRenderer } from "./boxes.ts";
 import { CropRenderer } from "./crops.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
-import { applyLook, type Look } from "./look.ts";
+import { applyLook, type Look, type Weather } from "./look.ts";
 import { PostRenderer } from "./post.ts";
 import { SkyRenderer } from "./sky.ts";
+import { SurfaceTexture } from "./surface.ts";
 import { TerrainRenderer } from "./terrain.ts";
+import { WaterRenderer } from "./water.ts";
 
 export interface Layouts {
   /** Group 0 for lit passes: frame uniforms + shadow map + comparison sampler. */
@@ -29,6 +33,9 @@ export interface SceneState {
   agents: AgentView[];
   crops: Float32Array;
   cropsVersion: number;
+  blocks: BlockRegistry;
+  day: number;
+  weather: Weather;
 }
 
 export interface RenderStats {
@@ -39,6 +46,8 @@ export interface RenderStats {
 
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
+  /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies". */
+  debug = new Set<string>();
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
   private frameBuffer: GPUBuffer;
@@ -47,6 +56,9 @@ export class Renderer {
   private shadowView: GPUTextureView;
   private terrain: TerrainRenderer;
   private grass: GrassRenderer;
+  private surface: SurfaceTexture;
+  private water: WaterRenderer;
+  private planes = new Float32Array(24);
   private sky: SkyRenderer;
   private post: PostRenderer;
   private boxes: BoxRenderer;
@@ -69,12 +81,14 @@ export class Renderer {
     format: GPUTextureFormat,
     world: World,
   ) {
+    // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
+    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     this.layouts = {
       frame: device.createBindGroupLayout({
         entries: [
-          { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} },
-          { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },
-          { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } },
+          { binding: 0, visibility: VF, buffer: {} },
+          { binding: 1, visibility: VF, texture: { sampleType: "depth" } },
+          { binding: 2, visibility: VF, sampler: { type: "comparison" } },
         ],
       }),
       shadowFrame: device.createBindGroupLayout({
@@ -116,8 +130,10 @@ export class Renderer {
       entries: [{ binding: 0, resource: { buffer: this.frameBuffer } }],
     });
 
-    this.terrain = new TerrainRenderer(device, world, this.layouts);
-    this.grass = new GrassRenderer(device, world, this.layouts);
+    this.surface = new SurfaceTexture(device, world);
+    this.terrain = new TerrainRenderer(device, world, this.surface, this.layouts);
+    this.grass = new GrassRenderer(device, this.surface, this.layouts);
+    this.water = new WaterRenderer(device, this.surface, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts, format);
     this.boxes = new BoxRenderer(device, this.layouts);
@@ -131,8 +147,9 @@ export class Renderer {
     this.ensureTargets(canvas.width, canvas.height);
     const targets = this.targets!;
 
+    this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
-    this.grass.update();
+    this.surface.update();
     this.crops.update(scene.crops, scene.cropsVersion);
     const boxCapacity = scene.agents.length * MAX_BOXES_PER_AGENT * BOX_FLOATS;
     if (this.boxData.length < boxCapacity) this.boxData = new Float32Array(boxCapacity * 2);
@@ -144,7 +161,9 @@ export class Renderer {
     fd.set(camera.invViewProj, F.invViewProj);
     fd.set(camera.eye, F.cameraPos);
     fd[F.cameraPos + 3] = time;
-    applyLook(fd, look, timeOfDay);
+    applyLook(fd, look, timeOfDay, scene.day, scene.weather);
+    fd[F.extra + 2] = SEA_LEVEL;
+    frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
 
     const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85)));
@@ -170,9 +189,12 @@ export class Renderer {
       timestampWrites: this.timer?.writes(0),
     });
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
-    this.terrain.drawShadow(shadowPass);
-    this.boxes.drawShadow(shadowPass);
+    if (!this.debug.has("shadow")) {
+      this.terrain.drawShadow(shadowPass);
+      this.boxes.drawShadow(shadowPass);
+    }
     shadowPass.end();
+    if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
 
     const main = encoder.beginRenderPass({
       colorAttachments: [{
@@ -190,11 +212,15 @@ export class Renderer {
       },
     });
     main.setBindGroup(0, this.frameBindGroup);
-    this.terrain.draw(main);
-    this.boxes.draw(main);
+    const skip = this.debug;
+    if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
+    if (!skip.has("bodies")) this.boxes.draw(main);
     this.crops.draw(main);
-    this.grass.draw(main, blades);
-    this.sky.draw(main, this.plainFrameBindGroup);
+    if (!skip.has("grass")) this.grass.draw(main);
+    if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);
+    // Transparent last: water blends over everything opaque, including the sky at the horizon.
+    main.setBindGroup(0, this.frameBindGroup);
+    if (!skip.has("water")) this.water.draw(main);
     main.end();
 
     const post = encoder.beginRenderPass({

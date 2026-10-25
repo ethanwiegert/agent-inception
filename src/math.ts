@@ -134,3 +134,36 @@ export function rotateZ(m: Mat4, a: number) {
   }
   return m;
 }
+
+const PLANE_ROWS = [0, 1, 0, -1, 1, 1, 1, -1, 2, 0, 2, -1];
+
+/** The six planes (a, b, c, d) of a view-projection's frustum, for `aabbVisible`. */
+export function frustumPlanes(out: Float32Array, m: Mat4) {
+  // Gribb-Hartmann for [0, 1] depth: left, right, bottom, top, near, far. Row r is m[r + 4k].
+  for (let p = 0; p < 6; p++) {
+    const r = PLANE_ROWS[p * 2], s = PLANE_ROWS[p * 2 + 1];
+    for (let k = 0; k < 4; k++) {
+      const v = m[r + 4 * k];
+      out[p * 4 + k] = s === 0 ? v : m[3 + 4 * k] + s * v;
+    }
+  }
+  return out;
+}
+
+/** Whether an axis-aligned box touches the frustum (conservative). */
+export function aabbVisible(
+  planes: Float32Array,
+  x0: number,
+  y0: number,
+  z0: number,
+  x1: number,
+  y1: number,
+  z1: number,
+): boolean {
+  for (let i = 0; i < 24; i += 4) {
+    const a = planes[i], b = planes[i + 1], c = planes[i + 2], d = planes[i + 3];
+    // The box corner furthest along the plane normal.
+    if (a * (a > 0 ? x1 : x0) + b * (b > 0 ? y1 : y0) + c * (c > 0 ? z1 : z0) + d < 0) return false;
+  }
+  return true;
+}

@@ -1,25 +1,8 @@
-export const Block = {
-  Air: 0,
-  Grass: 1,
-  Dirt: 2,
-  Stone: 3,
-  Farmland: 4,
-} as const;
-export type BlockId = number;
+import { Block, type BlockId, slopes, solid } from "./blocks.ts";
 
-/** Names agents use for blocks. */
-export const BLOCK_NAMES: Record<number, string> = {
-  [Block.Air]: "air",
-  [Block.Grass]: "grass",
-  [Block.Dirt]: "dirt",
-  [Block.Stone]: "stone",
-  [Block.Farmland]: "farmland",
-};
+export { Block, type BlockId, slopes, solid };
 
 export const CHUNK = 32;
-
-/** Natural ground softens into slopes; worked and placed blocks keep square edges. */
-export const slopes = (block: BlockId) => block === Block.Grass || block === Block.Dirt;
 
 /**
  * How far (0-1) a top surface sinks at (fx, fz) within a column, given its corner mask.
@@ -47,6 +30,8 @@ export class World {
   readonly blocks: Uint8Array;
   /** Height of the topmost solid block per (x, z), or -1 for an empty column. */
   readonly top: Int16Array;
+  /** Height of the topmost water block above the ground per (x, z), or -1. */
+  readonly waterTop: Int16Array;
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
@@ -54,6 +39,7 @@ export class World {
   constructor(readonly sizeX: number, readonly sizeY: number, readonly sizeZ: number) {
     this.blocks = new Uint8Array(sizeX * sizeY * sizeZ);
     this.top = new Int16Array(sizeX * sizeZ).fill(-1);
+    this.waterTop = new Int16Array(sizeX * sizeZ).fill(-1);
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);
@@ -109,13 +95,42 @@ export class World {
     return mask;
   }
 
-  /** Height of the walkable surface at a fractional position, following slopes. */
-  surfaceY(x: number, z: number): number {
+  /**
+   * Height of the walkable surface at a fractional position, following slopes.
+   * With `feet`, finds the floor a body standing at that height is on (so it stays
+   * under roofs and on bridges); without, the column's top surface.
+   */
+  surfaceY(x: number, z: number, feet?: number): number {
     const ix = Math.floor(x), iz = Math.floor(z);
     const h = this.heightAt(ix, iz);
     if (h < 0) return 0;
+    const floor = feet === undefined ? h : this.floorBelow(ix, iz, Math.floor(feet + 0.5));
+    if (floor < 0) return 0;
+    if (floor !== h) return floor + 1;
     const mask = this.slopeMask(ix, iz);
     return h + 1 - (mask ? slopeDrop(mask, x - ix, z - iz) : 0);
+  }
+
+  /**
+   * The highest solid block at or below `maxY` with two non-solid cells above it
+   * (room to stand), or -1.
+   */
+  floorBelow(x: number, z: number, maxY: number): number {
+    if (x < 0 || z < 0 || x >= this.sizeX || z >= this.sizeZ) return -1;
+    for (let y = Math.min(maxY, this.top[z * this.sizeX + x]); y >= 0; y--) {
+      if (
+        solid(this.blocks[this.index(x, y, z)]) &&
+        !solid(this.get(x, y + 1, z)) && !solid(this.get(x, y + 2, z))
+      ) return y;
+    }
+    return -1;
+  }
+
+  /** Water standing above the floor at `floor`, in blocks (0 if dry). */
+  waterDepth(x: number, z: number, floor = this.heightAt(x, z)): number {
+    if (x < 0 || z < 0 || x >= this.sizeX || z >= this.sizeZ) return 0;
+    const w = this.waterTop[z * this.sizeX + x];
+    return w > floor ? w - floor : 0;
   }
 
   /** Height of the topmost solid block at (x, z), or -1. */
@@ -128,7 +143,13 @@ export class World {
   updateTop(x: number, z: number): void {
     let y = this.sizeY - 1;
     while (y >= 0 && this.blocks[this.index(x, y, z)] === Block.Air) y--;
+    let water = -1;
+    if (y >= 0 && this.blocks[this.index(x, y, z)] === Block.Water) {
+      water = y;
+      while (y >= 0 && !solid(this.blocks[this.index(x, y, z)])) y--;
+    }
     this.top[z * this.sizeX + x] = y;
+    this.waterTop[z * this.sizeX + x] = water;
   }
 
   private touch(x: number, z: number): void {

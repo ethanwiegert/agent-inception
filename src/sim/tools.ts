@@ -9,7 +9,7 @@ import {
   TICKS_PER_DAY,
   WHEAT_GROW_TICKS,
 } from "./sim.ts";
-import { Block, BLOCK_NAMES } from "./world.ts";
+import { Block } from "./world.ts";
 
 /**
  * The agent-facing API. Every game action is a tool; definitions are plain
@@ -255,7 +255,7 @@ const HANDLERS: Record<string, Handler> = {
       check(x, y, z) {
         const b = sim.world.get(x, y, z);
         if (b === Block.Farmland) return "already farmland";
-        if (b !== Block.Grass && b !== Block.Dirt) return `${BLOCK_NAMES[b]} can't be tilled`;
+        if (b !== Block.Grass && b !== Block.Dirt) return `${sim.blocks.name(b)} can't be tilled`;
       },
       apply: (x, y, z) => sim.setBlock(x, y, z, Block.Farmland),
     }),
@@ -318,7 +318,9 @@ const HANDLERS: Record<string, Handler> = {
       sim.setBlock(x, y, z, Block.Air);
       const got = b === Block.Stone ? "stone" : "dirt";
       give(agent, got, 1);
-      return `Dug ${BLOCK_NAMES[b]} at x=${x} y=${y} z=${z}, got 1 ${got}. ${inventoryText(agent)}`;
+      return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got 1 ${got}. ${
+        inventoryText(agent)
+      }`;
     })();
   },
 
@@ -376,7 +378,9 @@ function* walk(
   heuristic: (x: number, z: number) => number,
   label: string,
 ): Generator<void, void> {
-  const path = findPath(sim.world, Math.floor(agent.x), Math.floor(agent.z), goal, heuristic);
+  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
+  const floor = sim.world.floorBelow(ax, az, Math.floor(agent.y + 0.5));
+  const path = findPath(sim.world, ax, az, floor, goal, heuristic);
   if (!path) throw new Error(`You can't find a way to ${label}.`);
   agent.anim = Anim.Walk;
   for (let i = 0; i < path.length; i += 2) {

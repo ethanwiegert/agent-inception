@@ -22,6 +22,23 @@ export interface Look {
 }
 
 export const LOOKS: Record<string, Look> = {
+  natural: {
+    name: "Natural",
+    grassBase: [0.062, 0.15, 0.03],
+    grassTip: [0.19, 0.36, 0.075],
+    bladeHeight: 0.62,
+    bladeWidth: 0.05,
+    bladesPerBlock: 64,
+    flowerChance: 0.004,
+    aoStrength: 0.9,
+    edgeDarken: 0,
+    saturation: 1.0,
+    contrast: 1.06,
+    warmth: 0.15,
+    vignette: 0.16,
+    fogDensity: 0.0016,
+    wind: 0.9,
+  },
   lush: {
     name: "Lush meadow",
     grassBase: [0.02, 0.07, 0.012],
@@ -87,53 +104,86 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 };
 
 const SKY = {
-  nightZenith: [0.003, 0.006, 0.02] as Rgb,
-  nightHorizon: [0.015, 0.025, 0.06] as Rgb,
+  nightZenith: [0.008, 0.016, 0.045] as Rgb,
+  nightHorizon: [0.025, 0.04, 0.085] as Rgb,
   duskZenith: [0.12, 0.14, 0.32] as Rgb,
   duskHorizon: [0.95, 0.42, 0.18] as Rgb,
-  dayZenith: [0.16, 0.36, 0.85] as Rgb,
-  dayHorizon: [0.55, 0.72, 0.95] as Rgb,
+  dayZenith: [0.08, 0.22, 0.6] as Rgb,
+  dayHorizon: [0.36, 0.53, 0.8] as Rgb,
 };
 
+/** Moon phases cycle over this many game days. */
+const MOON_CYCLE_DAYS = 8;
+
+/** Direction of a body on a tilted daily arc; angle 0 rises in the east, π/2 is overhead. */
+function arc(angle: number): Rgb {
+  const v: Rgb = [Math.cos(angle) * 0.8, Math.sin(angle), 0.45];
+  const len = Math.hypot(...v);
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+
+export interface Weather {
+  /** 0 clear to 1 overcast. */
+  clouds: number;
+}
+
 /**
- * Write lighting and look uniforms for a time of day in [0, 1):
+ * Write lighting and look uniforms for a time of day in [0, 1) on game day `day`:
  * 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset.
  */
-export function applyLook(out: Float32Array, look: Look, timeOfDay: number) {
-  const a = (timeOfDay - 0.25) * Math.PI * 2;
-  const sun: Rgb = [Math.cos(a) * 0.8, Math.sin(a), 0.45];
-  const len = Math.hypot(...sun);
-  sun[0] /= len, sun[1] /= len, sun[2] /= len;
+export function applyLook(
+  out: Float32Array,
+  look: Look,
+  timeOfDay: number,
+  day = 1,
+  weather: Weather = { clouds: 0.35 },
+) {
+  const sunAngle = (timeOfDay - 0.25) * Math.PI * 2;
+  const sun = arc(sunAngle);
   const elev = sun[1];
+  // The moon trails the sun by a phase angle that grows through the cycle: new moon rides with
+  // the sun, full moon rises at sunset.
+  // Start the cycle near first quarter so a new world's first night has a moon to see.
+  const phase = (((day - 1 + timeOfDay) / MOON_CYCLE_DAYS + 0.4) % 1) * Math.PI * 2;
+  const moon = arc(sunAngle - phase);
+  const illuminated = (1 - Math.cos(phase)) / 2;
 
-  const day = smoothstep(-0.1, 0.25, elev);
+  const day01 = smoothstep(-0.1, 0.25, elev);
   const twilight = Math.max(0, 1 - Math.abs(elev) / 0.3);
+  const overcast = weather.clouds;
 
-  // The key light is the sun by day and a cool moon (opposite the sun) by night.
-  const isSun = elev > 0;
-  const keyDir: Rgb = isSun ? sun : [-sun[0], -sun[1], -sun[2]];
-  const keyElev = keyDir[1];
+  // The key light is the sun by day and the moon (by its phase) at night.
+  const isSun = elev > 0 || moon[1] <= 0;
+  const keyDir: Rgb = isSun ? (elev > 0 ? sun : [0, 1, 0]) : moon;
   const sunColor = mixRgb([1.0, 0.45, 0.2], [1.0, 0.93, 0.82], smoothstep(0.0, 0.45, elev));
   const keyColor = isSun ? sunColor : ([0.3, 0.42, 1.0] as Rgb);
-  const keyIntensity = (isSun ? 2.3 : 0.3) * smoothstep(0.0, 0.12, keyElev);
+  const keyIntensity = isSun
+    ? 2.3 * smoothstep(0.0, 0.12, elev) * mix(1, 0.55, overcast)
+    : 0.15 + 0.35 * illuminated * smoothstep(0.0, 0.12, moon[1]);
 
-  let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day);
-  let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day);
+  let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day01);
+  let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day01);
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
   horizon = mixRgb(horizon, SKY.duskHorizon, twilight * 0.75);
+  // Overcast skies go grey.
+  const grey = (c: Rgb): Rgb => {
+    const l = (c[0] + c[1] + c[2]) / 3;
+    return mixRgb(c, [l, l, l * 1.05], overcast * 0.5);
+  };
+  zenith = grey(zenith);
+  horizon = grey(horizon);
 
   out.set(keyDir, F.sunDir);
   out[F.sunDir + 3] = keyIntensity;
   out.set(keyColor, F.sunColor);
-  out[F.sunColor + 3] = mix(1.2, 2.2, day);
+  out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast);
   out.set(zenith, F.skyZenith);
-  out[F.skyZenith + 3] = mix(2.4, 1.0, day); // exposure: eyes adjust a little at night
+  out[F.skyZenith + 3] = mix(3.2, 1.0, day01); // exposure: eyes adjust at night
   out.set(horizon, F.skyHorizon);
   out[F.skyHorizon + 3] = look.fogDensity;
-  out.set(mixRgb([0.01, 0.012, 0.02], [0.38, 0.32, 0.18], day), F.groundAmbient);
+  out.set(mixRgb([0.01, 0.012, 0.02], [0.38, 0.32, 0.18], day01), F.groundAmbient);
   out[F.groundAmbient + 3] = look.aoStrength;
   out.set(look.grassBase, F.grassBase);
-  out[F.grassBase + 3] = look.edgeDarken;
   out.set(look.grassTip, F.grassTip);
   out[F.grassTip + 3] = look.flowerChance;
   out[F.grass] = look.bladeHeight;
@@ -141,11 +191,17 @@ export function applyLook(out: Float32Array, look: Look, timeOfDay: number) {
   out[F.grass + 2] = look.bladesPerBlock;
   out[F.wind] = 0.8;
   out[F.wind + 1] = 0.6;
-  out[F.wind + 2] = look.wind;
-  out[F.grade] = look.saturation * mix(0.45, 1, day); // colors fade in moonlight
+  out[F.wind + 2] = look.wind * mix(1, 1.6, overcast);
+  out[F.grade] = look.saturation * mix(0.45, 1, day01); // colors fade in moonlight
   out[F.grade + 1] = look.contrast;
   out[F.grade + 2] = look.warmth;
   out[F.grade + 3] = look.vignette;
-  out[F.extra] = 1 - smoothstep(-0.2, 0.0, elev);
-  out[F.extra + 1] = day;
+  out[F.extra] = (1 - smoothstep(-0.2, 0.0, elev)) * (1 - overcast);
+  out[F.extra + 1] = day01;
+  out.set(sun, F.sunPos);
+  out[F.sunPos + 3] = smoothstep(-0.08, 0.05, elev) * mix(1, 0.3, overcast);
+  out.set(moon, F.moonDir);
+  out[F.moonDir + 3] = illuminated * smoothstep(-0.05, 0.05, moon[1]) * (1 - overcast * 0.8);
+  out[F.weather] = overcast;
+  out[F.weather + 1] = 1;
 }

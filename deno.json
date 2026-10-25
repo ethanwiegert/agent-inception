@@ -9,7 +9,8 @@
     "bridge": "deno run -A tools/bridge.ts",
     "check": "deno check src tools && deno lint && deno fmt --check",
     "test": "deno test",
-    "shot": "deno run -A tools/shot.ts"
+    "shot": "deno run -A tools/shot.ts",
+    "camshot": "deno run -A tools/camshot.ts"
   },
   "fmt": { "lineWidth": 100, "exclude": ["dist"] },
   "lint": { "exclude": ["dist"] }

@@ -88,7 +88,7 @@ export class Camera {
     this.eye[1] = this.target[1] + Math.sin(this.pitch) * this.distance;
     this.eye[2] = this.target[2] + Math.cos(this.yaw) * cp * this.distance;
     lookAt(this.view, this.eye, this.target, [0, 1, 0]);
-    perspective(this.proj, this.fovY, aspect, 0.5, 600);
+    perspective(this.proj, this.fovY, aspect, 0.5, 4000);
     multiply(this.viewProj, this.proj, this.view);
     invert(this.invViewProj, this.viewProj);
   }

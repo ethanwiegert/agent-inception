@@ -1,92 +1,182 @@
+import { type BlockRegistry, MAX_BLOCKS, Pattern } from "../sim/blocks.ts";
 import { CHUNK, World } from "../sim/world.ts";
+import { aabbVisible } from "../math.ts";
 import { frameWgsl, lightingWgsl } from "./frame.ts";
 import { meshChunk } from "./mesher.ts";
+import { grassWeightWgsl, type SurfaceTexture } from "./surface.ts";
 import type { Layouts } from "./renderer.ts";
 
-const shader = frameWgsl + lightingWgsl + /* wgsl */ `
+const P = Pattern;
+const shader = frameWgsl + lightingWgsl + grassWeightWgsl + /* wgsl */ `
 @group(1) @binding(0) var<storage, read> chunkOrigins: array<vec4f>;
+/** Per block id: linear rgb, pattern index. */
+@group(1) @binding(1) var<storage, read> blockInfo: array<vec4f, ${MAX_BLOCKS}>;
+@group(1) @binding(2) var surface: texture_2d<u32>;
 
-const GRASS = 1u;
-const DIRT = 2u;
-const STONE = 3u;
-const FARMLAND = 4u;
-
-struct Vertex { pos: vec3f, face: u32, ao: f32, block: u32 };
-
-fn unpack(v: u32, chunk: u32) -> Vertex {
-  let local = vec3f(f32(v & 63u), f32((v >> 6u) & 127u), f32((v >> 13u) & 63u));
-  let aoLevels = array<f32, 4>(0.45, 0.65, 0.83, 1.0);
-  return Vertex(chunkOrigins[chunk].xyz + local, (v >> 19u) & 7u, aoLevels[(v >> 22u) & 3u], v >> 24u);
+fn natural(b: u32) -> bool {
+  return b == 1u || b == 2u || b == 6u || b == 7u || b == 8u;
 }
 
-fn faceNormal(face: u32) -> vec3f {
-  let normals = array<vec3f, 6>(
-    vec3f(1.0, 0.0, 0.0), vec3f(-1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0),
-    vec3f(0.0, -1.0, 0.0), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 0.0, -1.0));
-  return normals[face];
+struct Vertex { pos: vec3f, normal: vec3f, face: u32, ao: f32, block: u32 };
+
+fn unpack(v: u32, nrm: u32, chunk: u32) -> Vertex {
+  let local = vec3f(f32(v & 63u), f32((v >> 6u) & 127u), f32((v >> 13u) & 63u));
+  let aoLevels = array<f32, 4>(0.45, 0.65, 0.83, 1.0);
+  return Vertex(
+    chunkOrigins[chunk].xyz + local,
+    unpack4x8snorm(nrm).xyz,
+    (v >> 19u) & 7u,
+    aoLevels[(v >> 22u) & 3u],
+    v >> 24u);
 }
 
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
-  @location(1) ao: f32,
-  @location(2) @interpolate(flat) face: u32,
-  @location(3) @interpolate(flat) block: u32,
+  @location(1) normal: vec3f,
+  @location(2) ao: f32,
+  @location(3) @interpolate(flat) face: u32,
+  @location(4) @interpolate(flat) block: u32,
 };
 
-@vertex fn vs(@location(0) packed: u32, @builtin(instance_index) chunk: u32) -> Out {
-  let v = unpack(packed, chunk);
-  return Out(frame.viewProj * vec4f(v.pos, 1.0), v.pos, v.ao, v.face, v.block);
+@vertex fn vs(@location(0) packed: u32, @location(1) nrm: u32, @builtin(instance_index) chunk: u32) -> Out {
+  let v = unpack(packed, nrm, chunk);
+  return Out(frame.viewProj * vec4f(v.pos, 1.0), v.pos, v.normal, v.ao, v.face, v.block);
 }
 
-@vertex fn vsShadow(@location(0) packed: u32, @builtin(instance_index) chunk: u32) -> @builtin(position) vec4f {
-  return frame.lightViewProj * vec4f(unpack(packed, chunk).pos, 1.0);
+@vertex fn vsShadow(@location(0) packed: u32, @location(1) nrm: u32, @builtin(instance_index) chunk: u32) -> @builtin(position) vec4f {
+  return frame.lightViewProj * vec4f(unpack(packed, nrm, chunk).pos, 1.0);
 }
 
-fn blockAlbedo(block: u32, face: u32, world: vec3f, n: vec3f) -> vec3f {
-  let cell = floor(world - n * 0.5);
-  let jitter = 0.94 + 0.12 * hash21(cell.xz + cell.y * 17.0);
-  let dirt = vec3f(0.22, 0.12, 0.06);
-  var albedo = vec3f(0.18, 0.18, 0.19);
-  if (block == GRASS) {
-    let green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
-    if (face == 2u) {
-      albedo = green;
-    } else {
-      // Green fringe hanging over the dirt on the sides of grass blocks.
+fn faceNormalXZ(face: u32) -> vec2f {
+  let n = array<vec2f, 6>(vec2f(1.0, 0.0), vec2f(-1.0, 0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0, 1.0), vec2f(0.0, -1.0));
+  return n[face];
+}
+
+/** 2D coordinates across a face, in blocks. */
+fn faceUV(world: vec3f, face: u32) -> vec2f {
+  if (face < 2u) { return world.zy; }
+  if (face < 4u) { return world.xz; }
+  return world.xy;
+}
+
+fn dirtTone(uv: vec2f) -> f32 {
+  return (0.85 + 0.3 * valueNoise(uv * 4.0)) * (0.9 + 0.2 * valueNoise(uv * 13.0));
+}
+
+fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
+  let uv = faceUV(world, face);
+  let top = face == 2u || face == 3u;
+  switch pattern {
+    case ${P.grass}u: {
+      let green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
+      if (face == 2u) { return green; }
+      // One-block banks between slopes are turf; taller cliffs show dirt under a grass fringe.
+      // Side fragments sit on the column boundary; step back inside to find the owning column.
+      let outward = vec2i(faceNormalXZ(face));
+      let c = vec2i(floor(world.xz - faceNormalXZ(face) * 0.5));
+      let s = textureLoad(surface, c, 0);
+      let n = textureLoad(surface, clamp(c + outward, vec2i(0), vec2i(textureDimensions(surface)) - 1), 0);
+      if (i32(s.r) - i32(n.r) <= 1 && u32(floor(world.y)) == s.r) { return green * 0.9; }
       let fringe = step(0.78 + 0.1 * hash21(floor(world.xz * 4.0 + world.y)), fract(world.y));
-      albedo = mix(dirt, green, fringe);
+      return mix(vec3f(0.2, 0.11, 0.055) * dirtTone(uv), green, fringe);
     }
-  } else if (block == DIRT) {
-    albedo = dirt;
-  } else if (block == FARMLAND) {
-    albedo = dirt;
-    if (face == 2u) {
-      // Dark tilled soil with furrows running east-west.
+    case ${P.dirt}u: { return base * dirtTone(uv); }
+    case ${P.farmland}u: {
+      if (face != 2u) { return vec3f(0.2, 0.11, 0.055) * dirtTone(uv); }
       let furrow = 0.7 + 0.3 * smoothstep(0.2, 0.5, abs(fract(world.z * 3.0) - 0.5));
-      albedo = vec3f(0.09, 0.045, 0.022) * furrow;
+      return base * furrow * (0.9 + 0.2 * valueNoise(uv * 9.0));
     }
+    case ${P.stone}u: {
+      let crack = smoothstep(0.03, 0.0, abs(valueNoise(uv * 2.5) - 0.5));
+      return base * (0.78 + 0.35 * fbm(uv * 1.7)) * (1.0 - 0.35 * crack);
+    }
+    case ${P.sand}u: {
+      return base * (0.9 + 0.08 * valueNoise(uv * 3.0) + 0.1 * valueNoise(uv * 23.0));
+    }
+    case ${P.planks}u: {
+      let board = floor(uv.y * 4.0);
+      let grain = valueNoise(vec2f(uv.x * 1.2 + board * 3.1, uv.y * 40.0));
+      let gap = smoothstep(0.06, 0.0, fract(uv.y * 4.0));
+      return base * (0.85 + 0.15 * hash21(vec2f(board, floor(uv.x))) + 0.12 * grain) * (1.0 - 0.5 * gap);
+    }
+    case ${P.bricks}u: {
+      let row = floor(uv.y * 4.0);
+      let bu = uv.x * 2.0 + row * 0.5;
+      let mortar = max(smoothstep(0.07, 0.0, fract(uv.y * 4.0)), smoothstep(0.04, 0.0, fract(bu)));
+      let tone = 0.85 + 0.25 * hash21(vec2f(floor(bu), row));
+      return mix(base * tone * (0.92 + 0.1 * valueNoise(uv * 20.0)), vec3f(0.55, 0.53, 0.5), mortar);
+    }
+    case ${P.log}u: {
+      if (top) {
+        let r = length(fract(uv) - 0.5);
+        return base * vec3f(1.5, 1.35, 1.1) * (0.85 + 0.15 * sin(r * 40.0)) * (1.0 - 0.4 * smoothstep(0.42, 0.5, r));
+      }
+      return base * (0.7 + 0.35 * valueNoise(vec2f(uv.x * 9.0, uv.y * 1.2)));
+    }
+    case ${P.thatch}u: {
+      let straw = valueNoise(vec2f(uv.x * 28.0 + uv.y * 4.0, uv.y * 2.5));
+      return base * (0.75 + 0.4 * straw) * (1.0 - 0.25 * smoothstep(0.7, 1.0, fract(uv.y * 3.0)));
+    }
+    case ${P.cobble}u: {
+      let n = valueNoise(uv * 3.0) + 0.5 * valueNoise(uv * 6.0);
+      let gap = smoothstep(0.12, 0.0, abs(fract(n * 2.5) - 0.5));
+      return base * (0.8 + 0.3 * hash21(floor(uv * 3.0 + n))) * (1.0 - 0.45 * gap);
+    }
+    case ${P.tiles}u: {
+      let row = fract(uv.y * 3.0);
+      let col = fract(uv.x * 3.0 + floor(uv.y * 3.0) * 0.5);
+      let edge = smoothstep(0.75, 1.0, row) + smoothstep(0.06, 0.0, col) * 0.6;
+      return base * (0.9 + 0.15 * hash21(floor(uv * 3.0))) * (1.0 - 0.35 * clamp(edge, 0.0, 1.0));
+    }
+    default: { return base * (0.93 + 0.1 * valueNoise(uv * 6.0)); }
   }
-  return albedo * jitter;
 }
 
-/** Darken block edges for the crisp look; 0 strength disables it. */
-fn edgeFactor(world: vec3f, n: vec3f) -> f32 {
-  let f = abs(fract(world) - 0.5);
-  let a = abs(n);
-  // Distance to the nearest edge measured in the face's own plane.
-  let planar = select(f, vec3f(0.0), a > vec3f(0.5));
-  let edge = 0.5 - max(max(planar.x, planar.y), planar.z);
-  return 1.0 - frame.grassBase.w * (1.0 - smoothstep(0.0, 0.07, edge));
+/**
+ * Natural ground tops blend across material edges along the same organic boundary the
+ * grass blades use, so meadow and beach meet in curves rather than block steps.
+ */
+fn groundMaterial(block: u32, world: vec3f) -> u32 {
+  let c = vec2i(floor(world.xz));
+  let s = textureLoad(surface, c, 0);
+  if (s.g != block || !natural(block)) { return block; }
+  let grassy = isGrassy(s, world.xz);
+  if (grassy) { return 1u; }
+  if (block != 1u) { return block; }
+  // A grass column on the losing side of the edge: borrow the neighbouring material.
+  let d = vec2i(select(-1, 1, fract(world.x) >= 0.5), select(-1, 1, fract(world.z) >= 0.5));
+  let offsets = array<vec2i, 3>(vec2i(d.x, 0), vec2i(0, d.y), d);
+  for (var i = 0; i < 3; i++) {
+    let nb = textureLoad(surface, clamp(c + offsets[i], vec2i(0), vec2i(textureDimensions(surface)) - 1), 0).g;
+    if (nb != 1u && natural(nb)) { return nb; }
+  }
+  return block;
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  // Tops may be sloped, so take their normal from the surface itself (flat per triangle).
-  let dn = normalize(cross(dpdx(in.world), dpdy(in.world)));
-  let n = select(faceNormal(in.face), dn * sign(dn.y), in.face == 2u);
-  let albedo = blockAlbedo(in.block, in.face, in.world, n) * edgeFactor(in.world, n);
+  let block = select(in.block, groundMaterial(in.block, in.world), in.face == 2u);
+  let info = blockInfo[block];
+  let n = normalize(in.normal);
+  let cell = floor(in.world - n * 0.5);
+  let jitter = 0.95 + 0.1 * hash21(cell.xz + cell.y * 17.0);
+  let albedo = patternAlbedo(u32(info.w), info.rgb, in.world, in.face) * jitter;
   let ao = mix(1.0, in.ao, frame.groundAmbient.w);
-  return vec4f(fog(shade(albedo, n, in.world, ao, 0.0), in.world), 1.0);
+  var color = shade(albedo, n, in.world, ao, 0.0);
+
+  // Under water: light is absorbed with depth (red first) and dances in caustics.
+  let s = textureLoad(surface, vec2i(floor(in.world.xz)), 0);
+  let depth = f32(s.a) - 0.12 - in.world.y;
+  if (s.a > 0u && depth > 0.0) {
+    let t = frame.cameraPos.w;
+    let q = in.world.xz * 1.3;
+    let c1 = valueNoise(q + vec2f(t * 0.35, t * 0.2));
+    let c2 = valueNoise(q * 1.7 - vec2f(t * 0.25, -t * 0.3));
+    let caustic = pow(1.0 - abs(c1 - c2), 6.0) * smoothstep(0.0, 0.6, depth) * exp(-depth * 0.5);
+    color += albedo * frame.sunColor.rgb * frame.sunDir.w * caustic * 0.5 * keyLight(in.world, n);
+    color *= exp(-depth * vec3f(0.85, 0.36, 0.26));
+  }
+  return vec4f(fog(color, in.world), 1.0);
 }
 `;
 
@@ -96,16 +186,26 @@ interface ChunkMesh {
   version: number;
 }
 
+const srgbToLinear = (c: number) => Math.pow(c / 255, 2.2);
+
 /** Owns chunk meshes and draws them; remeshes chunks whose world version changed. */
 export class TerrainRenderer {
   private chunks: ChunkMesh[];
   private indexBuffer: GPUBuffer | null = null;
   private indexQuads = 0;
-  private originsBindGroup: GPUBindGroup;
+  private bindGroup: GPUBindGroup;
+  private paletteBuffer: GPUBuffer;
+  private palette = new Float32Array(MAX_BLOCKS * 4);
+  private paletteVersion = -1;
   private pipeline: GPURenderPipeline;
   private shadowPipeline: GPURenderPipeline;
 
-  constructor(private device: GPUDevice, private world: World, layouts: Layouts) {
+  constructor(
+    private device: GPUDevice,
+    private world: World,
+    surface: SurfaceTexture,
+    layouts: Layouts,
+  ) {
     this.chunks = Array.from(
       { length: world.chunksX * world.chunksZ },
       () => ({ buffer: null, quads: 0, version: 0 }),
@@ -121,17 +221,30 @@ export class TerrainRenderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(originBuffer, 0, origins);
-
-    const chunkLayout = device.createBindGroupLayout({
-      entries: [{
-        binding: 0,
-        visibility: GPUShaderStage.VERTEX,
-        buffer: { type: "read-only-storage" },
-      }],
+    this.paletteBuffer = device.createBuffer({
+      size: this.palette.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    this.originsBindGroup = device.createBindGroup({
+
+    const storage = (binding: number, visibility: number): GPUBindGroupLayoutEntry => ({
+      binding,
+      visibility,
+      buffer: { type: "read-only-storage" },
+    });
+    const chunkLayout = device.createBindGroupLayout({
+      entries: [
+        storage(0, GPUShaderStage.VERTEX),
+        storage(1, GPUShaderStage.FRAGMENT),
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "uint" } },
+      ],
+    });
+    this.bindGroup = device.createBindGroup({
       layout: chunkLayout,
-      entries: [{ binding: 0, resource: { buffer: originBuffer } }],
+      entries: [
+        { binding: 0, resource: { buffer: originBuffer } },
+        { binding: 1, resource: { buffer: this.paletteBuffer } },
+        { binding: 2, resource: surface.view },
+      ],
     });
 
     const module = device.createShaderModule({ code: shader, label: "terrain" });
@@ -139,8 +252,11 @@ export class TerrainRenderer {
       module,
       entryPoint: "vs",
       buffers: [{
-        arrayStride: 4,
-        attributes: [{ shaderLocation: 0, offset: 0, format: "uint32" }],
+        arrayStride: 8,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: "uint32" },
+          { shaderLocation: 1, offset: 4, format: "uint32" },
+        ],
       }],
     };
     this.pipeline = device.createRenderPipeline({
@@ -154,7 +270,9 @@ export class TerrainRenderer {
     });
     this.shadowPipeline = device.createRenderPipeline({
       label: "terrain-shadow",
-      layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.shadowFrame, chunkLayout] }),
+      layout: device.createPipelineLayout({
+        bindGroupLayouts: [layouts.shadowFrame, chunkLayout],
+      }),
       vertex: { ...vertex, entryPoint: "vsShadow" },
       primitive: { topology: "triangle-list", cullMode: "back" },
       depthStencil: {
@@ -165,6 +283,27 @@ export class TerrainRenderer {
         depthBiasSlopeScale: 2.5,
       },
     });
+  }
+
+  /** Upload block colors and patterns when the registry changed (e.g. an agent defined a block). */
+  setBlocks(blocks: BlockRegistry) {
+    if (blocks.version === this.paletteVersion) return;
+    this.paletteVersion = blocks.version;
+    for (let id = 0; id < MAX_BLOCKS; id++) {
+      const def = blocks.get(id);
+      if (!def) continue;
+      const c = def.color;
+      this.palette.set(
+        [
+          srgbToLinear(c >> 16),
+          srgbToLinear((c >> 8) & 255),
+          srgbToLinear(c & 255),
+          Pattern[def.pattern],
+        ],
+        id * 4,
+      );
+    }
+    this.device.queue.writeBuffer(this.paletteBuffer, 0, this.palette);
   }
 
   /** Remesh chunks whose world version moved. Returns how many were rebuilt. */
@@ -181,7 +320,7 @@ export class TerrainRenderer {
       );
       chunk.buffer?.destroy();
       chunk.buffer = null;
-      chunk.quads = verts.length / 4;
+      chunk.quads = verts.length / 8;
       chunk.version = version;
       if (chunk.quads > 0) {
         chunk.buffer = this.device.createBuffer({
@@ -196,23 +335,28 @@ export class TerrainRenderer {
     return rebuilt;
   }
 
-  draw(pass: GPURenderPassEncoder) {
+  /** Draw chunks whose bounds intersect the view frustum `planes`. */
+  draw(pass: GPURenderPassEncoder, planes: Float32Array) {
     pass.setPipeline(this.pipeline);
-    this.drawChunks(pass);
+    pass.setBindGroup(1, this.bindGroup);
+    this.drawChunks(pass, planes);
   }
 
   drawShadow(pass: GPURenderPassEncoder) {
     pass.setPipeline(this.shadowPipeline);
-    this.drawChunks(pass);
+    pass.setBindGroup(1, this.bindGroup);
+    this.drawChunks(pass, null);
   }
 
-  private drawChunks(pass: GPURenderPassEncoder) {
+  private drawChunks(pass: GPURenderPassEncoder, planes: Float32Array | null) {
     if (!this.indexBuffer) return;
-    pass.setBindGroup(1, this.originsBindGroup);
     pass.setIndexBuffer(this.indexBuffer, "uint32");
+    const { chunksX } = this.world, h = this.world.sizeY;
     for (let i = 0; i < this.chunks.length; i++) {
       const chunk = this.chunks[i];
       if (!chunk.buffer) continue;
+      const x = (i % chunksX) * CHUNK, z = Math.floor(i / chunksX) * CHUNK;
+      if (planes && !aabbVisible(planes, x, 0, z, x + CHUNK, h, z + CHUNK)) continue;
       pass.setVertexBuffer(0, chunk.buffer);
       pass.drawIndexed(chunk.quads * 6, 1, 0, 0, i);
     }

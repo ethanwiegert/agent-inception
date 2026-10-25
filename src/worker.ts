@@ -23,6 +23,7 @@ let lastStep = performance.now();
 let budget = 0;
 let lastSave = 0;
 let sentAgentsVersion = -1;
+let sentBlocksVersion = -1;
 let sentCropsVersion = -1;
 let cropsSentAt = 0;
 
@@ -86,7 +87,14 @@ function start(caughtUp: number) {
   }
   s.pendingEdits = [];
   sentAgentsVersion = sentCropsVersion = -1;
-  post({ type: "ready", seed: s.seed, edits: Int32Array.from(edits), caughtUp });
+  sentBlocksVersion = s.blocks.version;
+  post({
+    type: "ready",
+    seed: s.seed,
+    edits: Int32Array.from(edits),
+    caughtUp,
+    blocks: s.blocks.customs(),
+  });
   lastStep = performance.now();
   budget = 0;
 }
@@ -142,6 +150,10 @@ function send(now: number) {
     day: s.day(),
     timeOfDay: s.timeOfDay(),
     speed,
+    clouds: s.clouds(),
+    blocks: s.blocks.version !== sentBlocksVersion
+      ? (sentBlocksVersion = s.blocks.version, s.blocks.customs())
+      : undefined,
     agents,
     profiles,
     edits,

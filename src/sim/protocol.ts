@@ -1,3 +1,4 @@
+import type { BlockDef } from "./blocks.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
@@ -25,6 +26,8 @@ export interface ReadyMessage {
   edits: Int32Array<ArrayBuffer>;
   /** Ticks fast-forwarded to cover time spent away. */
   caughtUp: number;
+  /** Agent-defined blocks. */
+  blocks: BlockDef[];
 }
 
 export interface TickMessage {
@@ -33,7 +36,10 @@ export interface TickMessage {
   day: number;
   timeOfDay: number;
   speed: number;
+  clouds: number;
   agents: Float32Array<ArrayBuffer>;
+  /** Agent-defined blocks, sent when the registry changes. */
+  blocks?: BlockDef[];
   /** Per agent, in `agents` order. Sent when agents join or change how they look. */
   profiles?: AgentProfile[];
   edits: Int32Array<ArrayBuffer>;

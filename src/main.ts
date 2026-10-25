@@ -38,7 +38,7 @@ const format = navigator.gpu.getPreferredCanvasFormat();
 context.configure({ device, format, alphaMode: "opaque" });
 
 const params = new URLSearchParams(location.search);
-let look = params.get("look") ?? "crisp";
+let look = params.get("look") ?? "natural";
 let bridgeConnected = false;
 
 // ---------------------------------------------------------------- simulation
@@ -60,6 +60,7 @@ let camera: Camera | null = null;
 
 client.onReady = (world, caughtUp) => {
   renderer = new Renderer(device, context, format, world);
+  renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
   if (!camera) {
     camera = new Camera([world.sizeX, world.sizeZ], (x, z) => client.world!.heightAt(x, z));
     camera.attach(canvas);
@@ -214,10 +215,13 @@ function draw(now: number) {
   const followed = agents.find((a) => a.id === camera!.follow);
   if (followed) camera.track(followed.x, followed.z);
 
-  renderer.render(camera, LOOKS[look] ?? LOOKS.crisp, client.timeOfDay, now / 1000, {
+  renderer.render(camera, LOOKS[look] ?? LOOKS.natural, client.timeOfDay, now / 1000, {
     agents,
     crops: client.crops,
     cropsVersion: client.cropsVersion,
+    blocks: client.blocks,
+    day: client.day,
+    weather: { clouds: client.clouds },
   });
   overlay.update(
     agents,
