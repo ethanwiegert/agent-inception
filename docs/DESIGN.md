@@ -129,11 +129,12 @@ Goal: smoother/more realistic look, better camera, sun/moon, plants, trees, 3-4 
 rivers/water, basic building, and everything extendable by agents through MCP. Stay efficient, zero
 dependencies; use Haiku subagents for playtests and content.
 
-Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above).
+Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above), camera
+(item 1; written without a deno/GPU available, so give it a `deno task check` and a hands-on look).
 
 To do, in order:
 
-1. **Camera** (`src/camera.ts`): time-based damped orbit/pan/zoom with goal values, zoom toward the
+1. ~~**Camera**~~ (done, `src/camera.ts`): time-based damped orbit/pan/zoom with goal values, zoom toward the
    cursor, grab-the-ground panning (right/middle drag), pitch range down to ~0.12 so the
    horizon/sun/moon are visible, double-click to glide to a point, touch (one-finger orbit, pinch
    zoom, two-finger pan), and a small HUD (compass that resets north, rotate ±45°, overview,

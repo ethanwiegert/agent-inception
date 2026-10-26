@@ -62,7 +62,7 @@ must stay identical.
 ## Current work
 
 `docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-camera). Pick up from there.
+model system). Pick up from there.
 
 ## Testing and debugging
 

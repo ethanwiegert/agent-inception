@@ -18,9 +18,8 @@ try {
   await new Promise((r) => setTimeout(r, 2500));
   await browser.evaluate(`(() => {
     const c = __game.camera(), o = ${cam};
-    c.target[0] += o.dx ?? 0;
-    c.target[2] += o.dz ?? 0;
-    for (const k of ["distance", "pitch", "yaw"]) if (o[k] !== undefined) c[k] = o[k];
+    c.snap({ x: c.target[0] + (o.dx ?? 0), z: c.target[2] + (o.dz ?? 0),
+      distance: o.distance, pitch: o.pitch, yaw: o.yaw });
     return 1;
   })()`);
   await new Promise((r) => setTimeout(r, 2000));
