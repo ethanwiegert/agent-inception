@@ -104,8 +104,9 @@ export class World {
     const ix = Math.floor(x), iz = Math.floor(z);
     const h = this.heightAt(ix, iz);
     if (h < 0) return 0;
-    const floor = feet === undefined ? h : this.floorBelow(ix, iz, Math.floor(feet + 0.5));
-    if (floor < 0) return 0;
+    // A body buried in solid ground (e.g. an old save on new terrain) climbs to the top.
+    const below = feet === undefined ? h : this.floorBelow(ix, iz, Math.floor(feet + 0.5));
+    const floor = below < 0 ? h : below;
     if (floor !== h) return floor + 1;
     const mask = this.slopeMask(ix, iz);
     return h + 1 - (mask ? slopeDrop(mask, x - ix, z - iz) : 0);

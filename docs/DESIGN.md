@@ -129,13 +129,13 @@ Goal: smoother/more realistic look, better camera, sun/moon, plants, trees, 3-4 
 rivers/water, basic building, and everything extendable by agents through MCP. Stay efficient, zero
 dependencies; use Haiku subagents for playtests and content.
 
-Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above), camera
-(item 1; written without a deno/GPU available, so give it a `deno task check` and a hands-on look).
+Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above), camera (item
+1; reviewed and verified in the browser, plus terrain collision for low orbits).
 
 To do, in order:
 
-1. ~~**Camera**~~ (done, `src/camera.ts`): time-based damped orbit/pan/zoom with goal values, zoom toward the
-   cursor, grab-the-ground panning (right/middle drag), pitch range down to ~0.12 so the
+1. ~~**Camera**~~ (done, `src/camera.ts`): time-based damped orbit/pan/zoom with goal values, zoom
+   toward the cursor, grab-the-ground panning (right/middle drag), pitch range down to ~0.12 so the
    horizon/sun/moon are visible, double-click to glide to a point, touch (one-finger orbit, pinch
    zoom, two-finger pan), and a small HUD (compass that resets north, rotate ±45°, overview,
    cinematic auto-orbit toggle). No keyboard camera: WASD is reserved for the gag.
@@ -151,18 +151,24 @@ To do, in order:
    habitat land/water, herding, diet, product): sheep (wool), chicken (eggs), cow (milk), duck
    (swims). Wander/graze/flee/follow-wheat/sleep-at-night AI on the sim RNG; streamed like agents
    and animated from parts.
-5. **Building**: `place_block` with optional `y` (roofs, overhangs), `build` from text blueprints
+5. **Fish and fishing**: fish species (minnow and trout in rivers, perch in ponds, mackerel and cod
+   in the sea) as water-habitat animals: small schools that drift and dart in water columns,
+   rendered from the model system just under the surface (shadowy at depth, ripples when they jump).
+   A `fish` tool: stand next to water, cast at a tile within reach, wait a few seconds, and the
+   catch depends on habitat, time of day and weather (dawn/dusk and rain bite better); fish go to
+   the inventory, the activity feed shows the catch. `look` marks visible schools.
+6. **Building**: `place_block` with optional `y` (roofs, overhangs), `build` from text blueprints
    (layers of rows + palette, like `set_sprite`), `craft` recipes (log → planks, clay → brick, wheat
    → thatch, cobble from stone), `interact` (chop tree → logs, pick flowers, shear sheep, collect
    eggs, milk cow), more `look` legend entries.
-6. **Agent extensibility tools**: `define_block` (name, color, pattern — renderer already reads the
+7. **Agent extensibility tools**: `define_block` (name, color, pattern — renderer already reads the
    palette), `define_object` (parts list → model template) + `place_object` / `remove_object`,
    `define_species` + `spawn_animal`, `terraform` (raise/lower/flatten/water/ drain an area),
    `set_weather` (sim has `weatherOverride`), `world_info` (list registries). Persist all registries
    in saves; mirror to the page like blocks.
-7. **Haiku playtests**: delegate 2-3 Haiku farmers (one builder, one rancher, one designer who
+8. **Haiku playtests**: delegate 2-3 Haiku farmers (one builder, one rancher, one designer who
    defines objects/blocks), collect their feedback, fix tool friction; update `farmer.md` tools.
-8. **Polish and measure**: see known gaps.
+9. **Polish and measure**: see known gaps.
 
 ### Known gaps
 

@@ -56,7 +56,7 @@ export class Camera {
     this.goalTarget = [...this.target];
   }
 
-  /** Distance to glide to (e.g. when focusing on an agent); scrolling cancels it. */
+  /** Distance to glide to (e.g. when focusing on an agent). */
   set zoomTo(d: number | null) {
     if (d !== null) this.goalDistance = clamp(d, MIN_DIST, MAX_DIST);
   }
@@ -65,6 +65,7 @@ export class Camera {
   snap(o: { x?: number; z?: number; distance?: number; pitch?: number; yaw?: number }) {
     if (o.x !== undefined) this.target[0] = this.goalTarget[0] = o.x;
     if (o.z !== undefined) this.target[2] = this.goalTarget[2] = o.z;
+    this.target[1] = this.groundAt(this.target[0], this.target[2]) + 1;
     if (o.distance !== undefined) this.distance = this.goalDistance = o.distance;
     if (o.pitch !== undefined) this.pitch = this.goalPitch = o.pitch;
     if (o.yaw !== undefined) this.yaw = this.goalYaw = o.yaw;
@@ -275,6 +276,10 @@ export class Camera {
     this.eye[0] = this.target[0] + Math.sin(this.yaw) * cp * this.distance;
     this.eye[1] = this.target[1] + Math.sin(this.pitch) * this.distance;
     this.eye[2] = this.target[2] + Math.cos(this.yaw) * cp * this.distance;
+    // Low orbits behind a hill would put the eye inside it; ride over the terrain instead.
+    const [sx, sz] = this.worldSize;
+    const under = this.groundAt(clamp(this.eye[0], 0, sx - 1), clamp(this.eye[2], 0, sz - 1)) + 1.5;
+    if (this.eye[1] < under) this.eye[1] = under;
     lookAt(this.view, this.eye, this.target, [0, 1, 0]);
     perspective(this.proj, this.fovY, aspect, 0.5, 4000);
     multiply(this.viewProj, this.proj, this.view);

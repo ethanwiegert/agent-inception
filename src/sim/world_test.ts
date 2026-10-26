@@ -82,3 +82,9 @@ Deno.test("one-block rises become watertight slopes; cliffs stay square", () => 
   w.set(4, 3, 3, Block.Stone);
   assertEquals(w.slopeMask(4, 3), 0);
 });
+
+Deno.test("a body buried in solid ground stands on the top surface", () => {
+  const w = new World(4, 8, 4);
+  for (let y = 0; y < 5; y++) w.set(1, y, 1, Block.Stone);
+  assertEquals(w.surfaceY(1.5, 1.5, 0), 5);
+});
