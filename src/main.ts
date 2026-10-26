@@ -143,13 +143,12 @@ async function screenshot(session: string): Promise<CallReply> {
   await new Promise((r) => setTimeout(r, 900)); // let a visible view glide over
   // Then snap and render directly: animation frames don't run while the tab is hidden.
   const me = client.agents(performance.now()).find((a) => a.id === id);
-  if (me) camera.target[0] = me.x, camera.target[2] = me.z;
-  // Frame a ~20 block neighbourhood for the agent, then hand the spectator their zoom back.
-  const distance = camera.distance;
-  camera.distance = 26;
+  // Frame a ~20 block neighbourhood for the agent, then hand the spectator their view back.
+  const saved = camera.pose();
+  camera.snap({ x: me?.x, z: me?.z, distance: 26 });
   draw(performance.now());
   const dataUrl = captureFrame();
-  camera.distance = distance;
+  camera.snap(saved);
   return {
     content: [
       { type: "image", data: dataUrl.slice(dataUrl.indexOf(",") + 1), mimeType: "image/jpeg" },
