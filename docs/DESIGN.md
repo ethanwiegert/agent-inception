@@ -32,7 +32,7 @@ players are Haiku subagents spawned from Claude Code (no API key in the game).
 | Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                  |
 | Agents        | One world, many agents: each MCP session `join`s a named body. Rejoining by name reattaches it.                                          |
 | Physics       | Today: bodies follow the walkable surface (slopes, edits) and path with A* (climb 1, drop 2). Planned: swept AABB, rigid items, joints.  |
-| Agent body    | Procedural blocky farmer (straw hat, walk/work/idle animation) or an agent-drawn sprite extruded into voxels.                            |
+| Agent body    | Procedural farmer from rounded mesh parts (straw hat, walk/work/idle animation) or an agent-drawn sprite extruded into voxels.           |
 | Animals       | Planned (M4): a couple of species, procedural meshes, simple needs.                                                                      |
 | Objects       | Planned (M5): agents author declarative recipes (shapes, materials, physics props), upload via MCP; validated and meshed in the browser. |
 | Persistence   | IndexedDB in the worker: seed + block diff + crops + agents + session bindings, every 5 s and on tab hide.                               |
@@ -129,8 +129,9 @@ Goal: smoother/more realistic look, better camera, sun/moon, plants, trees, 3-4 
 rivers/water, basic building, and everything extendable by agents through MCP. Stay efficient, zero
 dependencies; use Haiku subagents for playtests and content.
 
-Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above), camera (item
-1; reviewed and verified in the browser, plus terrain collision for low orbits).
+Done: island + rivers + water, sun/moon/stars/clouds, smoother shading (phase 1 above), model system
+(item 2), camera (item 1; reviewed and verified in the browser, plus terrain collision for low
+orbits).
 
 To do, in order:
 
@@ -139,10 +140,12 @@ To do, in order:
    horizon/sun/moon are visible, double-click to glide to a point, touch (one-finger orbit, pinch
    zoom, two-finger pan), and a small HUD (compass that resets north, rotate ±45°, overview,
    cinematic auto-orbit toggle). No keyboard camera: WASD is reserved for the gag.
-2. **Model system** (`src/render/models.ts`, replaces most of `boxes.ts`): procedural mesh templates
-   built from primitives (box, ico-sphere with noise, cylinder, cone) with vertex colors and a sway
-   weight; instanced draws (instance = mat4 + tint), shadows, wind in the vertex shader. Farmer
-   bodies move onto it with rounded parts.
+2. ~~**Model system**~~ (done, `render/meshes.ts` + `render/models.ts`): rounded box, ico-sphere
+   with noise, cylinder/cone primitives with linear vertex colors, sway and AO gradients, packed 20
+   bytes per vertex into one shared buffer of named templates (`MeshLibrary`, re-uploaded when
+   templates change). `InstanceBatch` groups instances (mat4 + tint + wind weight) by template
+   without per-frame allocation; one `drawIndexed` per template, shadows, wind in the vertex shader.
+   The farmer is rounded parts tinted per agent; sprite dolls use the `cube` template.
 3. **Props in the sim** (trees, bushes, flowers, reeds, rocks, lily pads): deterministic worldgen
    placement (jittered grid + density noise, by habitat), stored as generated list + diff (removed
    ids, added props) in saves, streamed to the page. Species: oak, birch, pine (2-3 variants each).

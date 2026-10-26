@@ -4,12 +4,13 @@ import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
 import type { Camera } from "../camera.ts";
 import type { AgentView } from "../simclient.ts";
-import { buildBodies, MAX_BOXES_PER_AGENT } from "./body.ts";
-import { BOX_FLOATS, BoxRenderer } from "./boxes.ts";
+import { type BodyModels, buildBodies, defineBodyModels } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
+import { InstanceBatch, MeshLibrary } from "./meshes.ts";
+import { ModelBatch, ModelRenderer } from "./models.ts";
 import { PostRenderer } from "./post.ts";
 import { SkyRenderer } from "./sky.ts";
 import { SurfaceTexture } from "./surface.ts";
@@ -61,9 +62,12 @@ export class Renderer {
   private planes = new Float32Array(24);
   private sky: SkyRenderer;
   private post: PostRenderer;
-  private boxes: BoxRenderer;
+  /** Mesh templates for everything drawn as instanced models. */
+  readonly library = new MeshLibrary();
+  private models: ModelRenderer;
+  private bodyModels: BodyModels;
+  private bodies = new ModelBatch(new InstanceBatch());
   private crops: CropRenderer;
-  private boxData = new Float32Array(MAX_BOXES_PER_AGENT * BOX_FLOATS * 2);
   private targets: {
     width: number;
     height: number;
@@ -136,7 +140,8 @@ export class Renderer {
     this.water = new WaterRenderer(device, this.surface, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts, format);
-    this.boxes = new BoxRenderer(device, this.layouts);
+    this.bodyModels = defineBodyModels(this.library);
+    this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
@@ -151,9 +156,9 @@ export class Renderer {
     this.stats.chunksRebuilt = this.terrain.update();
     this.surface.update();
     this.crops.update(scene.crops, scene.cropsVersion);
-    const boxCapacity = scene.agents.length * MAX_BOXES_PER_AGENT * BOX_FLOATS;
-    if (this.boxData.length < boxCapacity) this.boxData = new Float32Array(boxCapacity * 2);
-    this.boxes.update(this.boxData, buildBodies(scene.agents, time, this.boxData, camera.yaw));
+    this.bodies.instances.clear();
+    buildBodies(scene.agents, time, this.bodies.instances, camera.yaw, this.bodyModels);
+    this.models.upload(this.bodies);
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -191,7 +196,7 @@ export class Renderer {
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
     if (!this.debug.has("shadow")) {
       this.terrain.drawShadow(shadowPass);
-      this.boxes.drawShadow(shadowPass);
+      this.models.drawShadow(shadowPass, this.bodies);
     }
     shadowPass.end();
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
@@ -214,7 +219,7 @@ export class Renderer {
     main.setBindGroup(0, this.frameBindGroup);
     const skip = this.debug;
     if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
-    if (!skip.has("bodies")) this.boxes.draw(main);
+    if (!skip.has("bodies")) this.models.draw(main, this.bodies);
     this.crops.draw(main);
     if (!skip.has("grass")) this.grass.draw(main);
     if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);

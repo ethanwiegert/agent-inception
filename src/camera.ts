@@ -52,7 +52,7 @@ export class Camera {
     private groundAt: (x: number, z: number) => number,
   ) {
     this.target = [worldSize[0] / 2, 0, worldSize[1] / 2];
-    this.target[1] = groundAt(this.target[0], this.target[2]) + 1;
+    this.target[1] = this.aimHeight();
     this.goalTarget = [...this.target];
   }
 
@@ -65,10 +65,16 @@ export class Camera {
   snap(o: { x?: number; z?: number; distance?: number; pitch?: number; yaw?: number }) {
     if (o.x !== undefined) this.target[0] = this.goalTarget[0] = o.x;
     if (o.z !== undefined) this.target[2] = this.goalTarget[2] = o.z;
-    this.target[1] = this.groundAt(this.target[0], this.target[2]) + 1;
     if (o.distance !== undefined) this.distance = this.goalDistance = o.distance;
     if (o.pitch !== undefined) this.pitch = this.goalPitch = o.pitch;
     if (o.yaw !== undefined) this.yaw = this.goalYaw = o.yaw;
+    this.target[1] = this.aimHeight();
+  }
+
+  /** Aim above the ground: about waist height far out, rising to a farmer's chest up close. */
+  private aimHeight() {
+    const close = clamp((14 - this.distance) / 10, 0, 1);
+    return this.groundAt(this.target[0], this.target[2]) + 1 + close * 0.7;
   }
 
   /** The current pose, in the shape `snap` takes. */
@@ -240,7 +246,7 @@ export class Camera {
     unproject(0, near), unproject(1, far);
     const dy = far[1] - near[1];
     if (dy >= -1e-6) return false; // looking at or above the horizon
-    let h = this.target[1] - 1;
+    let h = this.groundAt(this.target[0], this.target[2]);
     for (let i = 0; i < 3; i++) {
       const t = (h - near[1]) / dy;
       out[0] = near[0] + (far[0] - near[0]) * t;
@@ -269,8 +275,7 @@ export class Camera {
     const kt = this.follow === null ? k : 1 - Math.exp(-5 * dt);
     this.target[0] += (this.goalTarget[0] - this.target[0]) * kt;
     this.target[2] += (this.goalTarget[2] - this.target[2]) * kt;
-    const ground = this.groundAt(this.target[0], this.target[2]) + 1;
-    this.target[1] += (ground - this.target[1]) * Math.min(1, 5 * dt);
+    this.target[1] += (this.aimHeight() - this.target[1]) * Math.min(1, 5 * dt);
 
     const cp = Math.cos(this.pitch);
     this.eye[0] = this.target[0] + Math.sin(this.yaw) * cp * this.distance;

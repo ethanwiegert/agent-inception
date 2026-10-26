@@ -48,7 +48,8 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
 src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
                     common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
                     surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
-                    water.ts, crops.ts, boxes.ts + body.ts (bodies, sprite dolls), sky.ts,
+                    water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
+                    (instanced draws, wind) + body.ts (farmer parts, sprite dolls), sky.ts,
                     post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
@@ -62,7 +63,7 @@ must stay identical.
 ## Current work
 
 `docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-model system). Pick up from there.
+props in the sim). Pick up from there.
 
 ## Testing and debugging
 

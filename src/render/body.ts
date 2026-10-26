@@ -1,9 +1,7 @@
 import { identity, mat4, rotateX, rotateY, rotateZ, scale, translate } from "../math.ts";
 import { Anim, type Sprite } from "../sim/sim.ts";
 import type { AgentView } from "../simclient.ts";
-import { BOX_FLOATS } from "./boxes.ts";
-
-type Rgb = [number, number, number];
+import type { InstanceBatch, MeshLibrary, Rgb } from "./meshes.ts";
 
 const SHIRTS: Rgb[] = [
   [0.55, 0.08, 0.05],
@@ -15,18 +13,63 @@ const SHIRTS: Rgb[] = [
 ];
 const SKINS: Rgb[] = [[0.75, 0.48, 0.33], [0.5, 0.3, 0.18], [0.85, 0.6, 0.45], [0.32, 0.18, 0.1]];
 const PANTS: Rgb = [0.05, 0.07, 0.13];
+const BOOTS: Rgb = [0.1, 0.05, 0.02];
 const STRAW: Rgb = [0.7, 0.52, 0.18];
 const BAND: Rgb = [0.35, 0.05, 0.03];
 const EYES: Rgb = [0.02, 0.02, 0.03];
 const WOOD: Rgb = [0.3, 0.16, 0.06];
 const IRON: Rgb = [0.35, 0.36, 0.38];
+const WHITE: Rgb = [1, 1, 1];
 
-/** Max boxes per farmer, for buffer sizing. */
-export const BODY_BOXES = 16;
-/** Worst case for a 32×32 sprite with no two neighbouring pixels alike. */
-export const MAX_BOXES_PER_AGENT = 32 * 32;
+const root = mat4(), part = mat4(), torso = mat4(), limb = mat4(), head = mat4(), place = mat4();
 
-const root = mat4(), part = mat4(), torso = mat4(), limb = mat4(), head = mat4();
+/** Template ids for bodies, from `defineBodyModels`. */
+export type BodyModels = ReturnType<typeof defineBodyModels>;
+
+/**
+ * Farmer parts as rounded mesh templates, each with its pivot at the origin (hip, shoulder, neck).
+ * Shirt and skin parts are white and take the agent's colors as instance tints.
+ */
+export function defineBodyModels(lib: MeshLibrary) {
+  const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
+  return {
+    cube: lib.define("cube", (b) => b.box(null, [1, 1, 1], { color: WHITE })),
+    leg: lib.define("farmer.leg", (b) => {
+      b.box(at(0, -0.33, 0), [0.2, 0.66, 0.22], { color: PANTS, ao: 0.3 }, 0.07);
+      b.box(at(0, -0.66, 0.02), [0.21, 0.13, 0.27], { color: BOOTS }, 0.05);
+    }),
+    torso: lib.define("farmer.torso", (b) => {
+      b.box(at(0, 0.3, 0), [0.5, 0.6, 0.3], { color: WHITE, ao: 0.2 }, 0.1);
+    }),
+    sleeve: lib.define("farmer.sleeve", (b) => {
+      b.box(at(0, -0.26, 0), [0.16, 0.54, 0.16], { color: WHITE }, 0.07);
+    }),
+    hand: lib.define("farmer.hand", (b) => {
+      b.sphere(at(0, -0.6, 0), [0.08, 0.08, 0.08], { color: WHITE }, { detail: 1 });
+    }),
+    head: lib.define("farmer.head", (b) => {
+      b.box(at(0, 0.22, 0), [0.42, 0.42, 0.42], { color: WHITE }, 0.09);
+      b.box(at(0, 0.18, 0.22), [0.07, 0.08, 0.06], { color: WHITE }, 0.025);
+    }),
+    eyes: lib.define("farmer.eyes", (b) => {
+      for (const x of [-0.1, 0.1]) b.box(at(x, 0, 0), [0.07, 0.09, 0.02], { color: EYES }, 0.01);
+    }),
+    hat: lib.define("farmer.hat", (b) => {
+      const straw = { color: STRAW, jitter: 0.08 };
+      b.cylinder(at(0, 0.42, 0), 0.4, 0.38, 0.04, straw, { segments: 18 });
+      b.cylinder(at(0, 0.45, 0), 0.24, 0.21, 0.22, straw, { segments: 14 });
+      b.cylinder(at(0, 0.47, 0), 0.245, 0.235, 0.06, { color: BAND }, { segments: 14 });
+    }),
+    hoe: lib.define("tool.hoe", (b) => {
+      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
+      b.box(at(0, -0.72, 0.68), [0.2, 0.22, 0.04], { color: IRON }, 0.01);
+    }),
+    hammer: lib.define("tool.hammer", (b) => {
+      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
+      b.box(at(0, -0.62, 0.66), [0.16, 0.16, 0.12], { color: IRON }, 0.02);
+    }),
+  };
+}
 
 /** A horizontal run of same-colored sprite pixels, drawn as one box. Color is linear. */
 interface Run {
@@ -66,42 +109,18 @@ function spriteRuns(sprite: Sprite): Run[] {
 }
 
 /**
- * Procedural farmer: a blocky body built from boxes and animated from sim
- * state (walking stride, current work) plus time for idle life. Agents with a
- * sprite become an extruded paper doll that turns to face the camera instead.
+ * Procedural farmer: rounded parts posed from sim state (walking stride, current work) plus time
+ * for idle life. Agents with a sprite become an extruded paper doll that turns to face the camera
+ * instead.
  */
 export function buildBodies(
   agents: AgentView[],
   time: number,
-  out: Float32Array,
+  out: InstanceBatch,
   cameraYaw: number,
-): number {
-  let n = 0;
-  // Alpha carries how much per-box contact shading to apply; sprites need none.
-  let contact = 1;
-  const emit = (m: Float32Array, color: Rgb) => {
-    out.set(m, n * BOX_FLOATS);
-    out[n * BOX_FLOATS + 16] = color[0];
-    out[n * BOX_FLOATS + 17] = color[1];
-    out[n * BOX_FLOATS + 18] = color[2];
-    out[n * BOX_FLOATS + 19] = contact;
-    n++;
-  };
-  /** Box of `size` whose center sits at (cx, cy, cz) in the frame `base`. */
-  const box = (
-    base: Float32Array,
-    cx: number,
-    cy: number,
-    cz: number,
-    sx: number,
-    sy: number,
-    sz: number,
-    color: Rgb,
-  ) => {
-    part.set(base);
-    scale(translate(part, cx, cy, cz), sx, sy, sz);
-    emit(part, color);
-  };
+  ids: BodyModels,
+) {
+  const add = (id: number, m: Float32Array, c: Rgb = WHITE) => out.add(id, m, c[0], c[1], c[2]);
 
   /** Sprite agents: billboard about Y toward the camera, flip to face the way they walk. */
   const doll = (a: AgentView, sprite: Sprite) => {
@@ -134,12 +153,12 @@ export function buildBodies(
     for (const r of spriteRuns(sprite)) {
       const cx = (r.x + r.length / 2 - sprite.width / 2) * px * flip;
       const cy = (sprite.height - r.y - 0.5) * px;
-      box(root, cx, cy, 0, r.length * px, px, depth, r.color);
+      part.set(root);
+      add(ids.cube, scale(translate(part, cx, cy, 0), r.length * px, px, depth), r.color);
     }
   };
 
   for (const a of agents) {
-    contact = a.sprite ? 0 : 1;
     if (a.sprite) {
       doll(a, a.sprite);
       continue;
@@ -204,44 +223,35 @@ export function buildBodies(
       part.set(root);
       translate(part, side * 0.12, 0.72 + crouch * 0.5, 0);
       rotateX(part, (walking ? side * legSwing : 0) - crouch * 1.2);
-      scale(translate(part, 0, -0.36, 0), 0.2, 0.72, 0.22);
-      emit(part, PANTS);
+      add(ids.leg, part);
     }
 
     // Torso leans from the hips.
     torso.set(root);
     translate(torso, 0, 0.72, 0);
     rotateX(torso, lean);
-    box(torso, 0, 0.3, 0, 0.5, 0.6, 0.3, shirt);
+    add(ids.torso, torso, shirt);
 
     // Arms hang from the shoulders; the right hand carries a tool while working.
     for (const side of [-1, 1]) {
       limb.set(torso);
       translate(limb, side * 0.33, 0.56, 0);
       rotateX(limb, side < 0 ? armL : armR);
-      const arm = limb;
-      box(arm, 0, -0.27, 0, 0.16, 0.56, 0.16, shirt);
-      box(arm, 0, -0.6, 0, 0.14, 0.12, 0.14, skin);
-      if (side > 0 && (a.anim === Anim.Till || a.anim === Anim.Build)) {
-        const hoe = a.anim === Anim.Till;
-        box(arm, 0, -0.62, 0.3, 0.05, 0.05, 0.75, WOOD);
-        box(arm, 0, hoe ? -0.72 : -0.62, 0.66, hoe ? 0.2 : 0.16, hoe ? 0.22 : 0.16, 0.05, IRON);
-      }
+      add(ids.sleeve, limb, shirt);
+      add(ids.hand, limb, skin);
+      if (side > 0 && a.anim === Anim.Till) add(ids.hoe, limb);
+      if (side > 0 && a.anim === Anim.Build) add(ids.hammer, limb);
     }
 
-    // Head on the neck, with eyes and a straw hat.
+    // Head on the neck, with blinking eyes and a straw hat.
     head.set(torso);
     translate(head, 0, 0.6, 0);
     rotateY(head, headYaw);
     rotateX(head, headPitch);
-    const h = head;
-    box(h, 0, 0.22, 0, 0.42, 0.42, 0.42, skin);
-    const blink = (t % 4.3) < 0.12 ? 0.015 : 0.09;
-    box(h, -0.1, 0.24, 0.215, 0.07, blink, 0.02, EYES);
-    box(h, 0.1, 0.24, 0.215, 0.07, blink, 0.02, EYES);
-    box(h, 0, 0.45, 0, 0.72, 0.05, 0.72, STRAW);
-    box(h, 0, 0.52, 0, 0.44, 0.1, 0.44, BAND);
-    box(h, 0, 0.6, 0, 0.42, 0.1, 0.42, STRAW);
+    add(ids.head, head, skin);
+    add(ids.hat, head);
+    part.set(head);
+    const blink = (t % 4.3) < 0.12 ? 0.15 : 1;
+    add(ids.eyes, scale(translate(part, 0, 0.25, 0.212), 1, blink, 1));
   }
-  return n;
 }
