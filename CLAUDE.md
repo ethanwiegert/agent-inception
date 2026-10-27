@@ -42,7 +42,8 @@ src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
-                    defs + handlers as generator jobs), blocks.ts (block registry, patterns),
+                    defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
+                    shared by handlers), blocks.ts (block registry, patterns),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (trees/flowers/rocks…: generation, saplings, save diff),
                     animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),

@@ -1,6 +1,19 @@
 import { SPECIES } from "./animals.ts";
 import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
-import { findPath, levelAt, octile } from "./path.ts";
+import {
+  angleDiff,
+  type Args,
+  give,
+  type Handler,
+  inventoryText,
+  num,
+  reach,
+  solidProp,
+  turn,
+  walk,
+  work,
+} from "./jobs.ts";
+import { octile } from "./path.ts";
 import { PROP_DEFS, PropKind } from "./props.ts";
 import {
   type Agent,
@@ -30,7 +43,6 @@ export interface ToolDef {
   client?: boolean;
 }
 
-const WALK_SPEED = 2.2 / TICK_HZ; // blocks per tick: an unhurried stroll
 export const SPRITE_MAX = 32;
 const MAX_AREA = 16;
 const CAST_RANGE = 4;
@@ -227,9 +239,6 @@ export const TOOL_DEFS: ToolDef[] = [
   },
 ];
 
-type Args = Record<string, unknown>;
-type Handler = (sim: Sim, agent: Agent, args: Args) => string | Job;
-
 /**
  * Run a tool call. Instant tools push their result immediately; actions are
  * queued as jobs on the agent and resolve as the sim steps.
@@ -268,12 +277,6 @@ function join(sim: Sim, session: string, args: Args): string {
       ? "\nYour journal has notes from before — journal_read."
       : "");
 }
-
-const num = (v: unknown, name: string): number => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) throw new Error(`"${name}" must be a number.`);
-  return Math.floor(n);
-};
 
 const HANDLERS: Record<string, Handler> = {
   look: (sim, agent, args) =>
@@ -473,58 +476,6 @@ const HANDLERS: Record<string, Handler> = {
 
 // ---------------------------------------------------------------- jobs
 
-function* walk(
-  sim: Sim,
-  agent: Agent,
-  goal: (x: number, z: number) => boolean,
-  heuristic: (x: number, z: number) => number,
-  label: string,
-): Generator<void, void> {
-  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
-  const floor = levelAt(sim.world, ax, az, agent.y);
-  const path = findPath(sim.world, ax, az, floor, goal, heuristic);
-  if (!path) throw new Error(`You can't find a way to ${label}.`);
-  agent.anim = Anim.Walk;
-  for (let i = 0; i < path.length; i += 2) {
-    const tx = path[i] + 0.5, tz = path[i + 1] + 0.5;
-    for (;;) {
-      const dx = tx - agent.x, dz = tz - agent.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 1e-3) break;
-      const s = Math.min(WALK_SPEED, d);
-      agent.x += (dx / d) * s;
-      agent.z += (dz / d) * s;
-      agent.stride += s;
-      agent.yaw = turn(agent.yaw, Math.atan2(dx, dz), 0.35);
-      yield;
-    }
-  }
-  agent.anim = Anim.Idle;
-}
-
-/** Stand next to (x, z), facing it. */
-function* reach(sim: Sim, agent: Agent, x: number, z: number): Generator<void, void> {
-  if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
-  const h = sim.world.heightAt(x, z);
-  const near = (cx: number, cz: number) =>
-    Math.max(Math.abs(cx - x), Math.abs(cz - z)) === 1 &&
-    Math.abs(sim.world.heightAt(cx, cz) - h) <= 2;
-  if (!near(Math.floor(agent.x), Math.floor(agent.z))) {
-    yield* walk(sim, agent, near, octile(x, z), `(${x}, ${z})`);
-  }
-  const target = Math.atan2(x + 0.5 - agent.x, z + 0.5 - agent.z);
-  while (Math.abs(angleDiff(agent.yaw, target)) > 0.05) {
-    agent.yaw = turn(agent.yaw, target, 0.3);
-    yield;
-  }
-}
-
-function* work(agent: Agent, anim: number, ticks: number): Generator<void, void> {
-  agent.anim = anim;
-  for (let i = 0; i < ticks; i++) yield;
-  agent.anim = Anim.Idle;
-}
-
 interface TileAction {
   /** Reason to skip the tile, or nothing if the action can go ahead. */
   check(x: number, y: number, z: number): string | void;
@@ -578,15 +529,6 @@ function eachTile(
 }
 
 // ---------------------------------------------------------------- helpers
-
-/** Why a solid prop stops work on a tile, or nothing. */
-function solidProp(sim: Sim, x: number, z: number): string | undefined {
-  const p = sim.props.at(x, z);
-  if (!p || !PROP_DEFS[p.kind].solid) return undefined;
-  const def = PROP_DEFS[p.kind];
-  const what = sim.props.growth(p, sim.tick) < 1 ? `${def.name} sapling` : def.name;
-  return `a ${what} is in the way`;
-}
 
 const TREES: Record<string, number> = {
   oak: PropKind.Oak,
@@ -658,18 +600,6 @@ function fromPixels(value: unknown): Sprite {
     pixels.every((p) => Number.isInteger(p) && p >= -1 && p <= 0xffffff);
   if (!ok) throw new Error("Couldn't read that image.");
   return { width, height, pixels: [...pixels] };
-}
-
-const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
-const turn = (from: number, to: number, rate: number) => from + angleDiff(from, to) * rate;
-
-function give(agent: Agent, item: string, n: number) {
-  agent.inventory[item] = (agent.inventory[item] ?? 0) + n;
-}
-
-function inventoryText(agent: Agent): string {
-  const items = Object.entries(agent.inventory).filter(([, n]) => n > 0);
-  return `Inventory: ${items.length ? items.map(([k, n]) => `${k} ${n}`).join(", ") : "empty"}.`;
 }
 
 function clock(t: number): string {

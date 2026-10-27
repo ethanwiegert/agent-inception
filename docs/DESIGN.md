@@ -172,10 +172,21 @@ To do, in order:
    every two game hours), go to the inventory and pop a speech bubble. The farmer holds a rod with
    line and bobber. `look` marks schools (f) and lists them. Farmers can now swim water up to 3 deep
    (slow; heads above water), so rivers no longer cut the island apart.
-6. **Building**: `place_block` with optional `y` (roofs, overhangs), `build` from text blueprints
-   (layers of rows + palette, like `set_sprite`), `craft` recipes (log → planks, clay → brick, wheat
-   → thatch, cobble from stone), `interact` (chop tree → logs, pick flowers, shear sheep, collect
-   eggs, milk cow), more `look` legend entries.
+6. **Building** (next; groundwork in): job helpers now live in `sim/jobs.ts` so new tool groups can
+   sit in their own files (planned `sim/building.ts`, merged into `TOOL_DEFS` and the handlers), and
+   `reach(sim, agent, x, z, y)` takes an optional block height (reachable within `MAX_REACH` = 3 of
+   the farmer's feet) so tall walls and roofs are workable. Plan:
+   - `place_block` for any placeable block in the inventory, with optional `y`; needs a solid
+     neighbour (no floating blocks), refuses cells a farmer stands in and solid-prop tiles.
+   - `break_block` with optional `y` (an exposed block); drops come from the block registry.
+   - `build`: text blueprint (layers bottom→top of rows + palette, like `set_sprite`) at x, z,
+     optional base y; checks the inventory up front, places layer by layer (≤ 48 blocks per call, ~8
+     ticks each to stay under MCP timeouts), and reports skipped cells.
+   - `craft`: log → 4 planks, stone → cobble, clay → brick or 2 tiles, 2 wheat → thatch.
+   - `interact` at x, z: chop a grown tree (logs + a sapling, axe swing anim), dig up a sapling,
+     break a rock (cobble), pick flowers/reeds/lily pads, and for animals within reach shear sheep /
+     milk cows / collect eggs when their product is ready (`readyAt`).
+   - `look` legend for built blocks (log, planks, cobble, brick, thatch, tiles) and a test per tool.
 7. **Agent extensibility tools**: `define_block` (name, color, pattern — renderer already reads the
    palette), `define_object` (parts list → model template) + `place_object` / `remove_object`,
    `define_species` + `spawn_animal`, `terraform` (raise/lower/flatten/water/ drain an area),
