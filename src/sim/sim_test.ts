@@ -229,3 +229,57 @@ Deno.test("fish schools keep to their water, and casting near one catches fish",
   assert(run(sim, "s", "look").text.includes("Fish in view") || spot.f.count === 0);
   assert(run(sim, "s", "fish", { x: spot.x, z: spot.z }).isError, "not water");
 });
+
+Deno.test("break_block and place_block move blocks between the world and the inventory", () => {
+  const sim = new Sim(1337);
+  run(sim, "s", "join", { name: "Fern" });
+  const fern = sim.agents[0];
+  const x = Math.floor(fern.x) + 2, z = Math.floor(fern.z) - 1;
+  const y0 = sim.world.heightAt(x, z);
+  const dirt0 = fern.inventory.dirt ?? 0;
+
+  const dug = run(sim, "s", "break_block", { x, z });
+  assert(!dug.isError, dug.text);
+  assertEquals(sim.world.heightAt(x, z), y0 - 1);
+  assertEquals(fern.inventory.dirt, dirt0 + 1);
+
+  const placed = run(sim, "s", "place_block", { x, z, block: "dirt" });
+  assert(!placed.isError, placed.text);
+  assertEquals(sim.world.heightAt(x, z), y0);
+  assertEquals(fern.inventory.dirt, dirt0);
+
+  // Out of stone: refused, and the world is untouched.
+  fern.inventory.stone = 0;
+  assert(run(sim, "s", "place_block", { x, z, block: "stone" }).isError);
+  assertEquals(sim.world.heightAt(x, z), y0);
+  // Unknown block kinds and coordinates outside the world are refused.
+  assert(run(sim, "s", "place_block", { x, z, block: "lava" }).isError);
+  assert(run(sim, "s", "break_block", { x: -5, z: 0 }).isError);
+  assert(run(sim, "s", "break_block", { x: "a", z }).isError);
+});
+
+Deno.test("say and journal_write trim, cap and reject empty text", () => {
+  const sim = new Sim(1);
+  run(sim, "s", "join", { name: "Moss" });
+  assert(run(sim, "s", "say", { text: "   " }).isError);
+  assert(run(sim, "s", "journal_write", { text: "" }).isError);
+  assert(!run(sim, "s", "say", { text: "x".repeat(300) }).isError);
+  const said = sim.events.filter((e) => e.type === "say").at(-1)!;
+  assertEquals((said as { text: string }).text.length, 140);
+
+  for (let i = 0; i < 60; i++) run(sim, "s", "journal_write", { text: `note ${i}` });
+  const entries = sim.agents[0].journal;
+  assertEquals(entries.length, 50);
+  assert(entries[0].endsWith("note 10") && entries[49].endsWith("note 59"));
+});
+
+Deno.test("wait clamps its duration and look clamps its radius", () => {
+  const sim = new Sim(1);
+  run(sim, "s", "join", { name: "Moss" });
+  const t0 = sim.tick;
+  assert(!run(sim, "s", "wait", { seconds: 0 }).isError);
+  const waited = sim.tick - t0;
+  assert(waited >= 20 && waited < 40, `waited ${waited} ticks`); // clamped up to 1 s
+  assert(!run(sim, "s", "look", { radius: 999 }).isError);
+  assert(!run(sim, "s", "look", { radius: -4 }).isError);
+});
