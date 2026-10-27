@@ -6,6 +6,8 @@
 import {
   AGENT_STRIDE,
   type AgentProfile,
+  ANIMAL_READY,
+  ANIMAL_STRIDE,
   CROP_STRIDE,
   type FromWorker,
   type ToWorker,
@@ -126,6 +128,15 @@ function send(now: number) {
     agents.set([a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color], i * AGENT_STRIDE);
   });
 
+  const animals = new Float32Array(s.animals.length * ANIMAL_STRIDE);
+  s.animals.forEach((a, i) => {
+    const flags = s.tick >= a.readyAt ? ANIMAL_READY : 0;
+    animals.set(
+      [a.id, a.species, a.x, a.y, a.z, a.yaw, a.anim, a.stride, flags],
+      i * ANIMAL_STRIDE,
+    );
+  });
+
   let crops: Float32Array<ArrayBuffer> | undefined;
   if (s.cropsVersion !== sentCropsVersion || now - cropsSentAt > 1000) {
     sentCropsVersion = s.cropsVersion;
@@ -161,12 +172,13 @@ function send(now: number) {
       ? (sentPropsVersion = s.props.version, s.props.diff())
       : undefined,
     agents,
+    animals,
     profiles,
     edits,
     crops,
     events: s.events.splice(0),
     results: s.results.splice(0),
-  }, [agents.buffer, edits.buffer, ...(crops ? [crops.buffer] : [])]);
+  }, [agents.buffer, animals.buffer, edits.buffer, ...(crops ? [crops.buffer] : [])]);
 }
 
 // ---------------------------------------------------------------- persistence

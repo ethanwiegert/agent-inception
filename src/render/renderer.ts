@@ -4,9 +4,10 @@ import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
 import type { Camera } from "../camera.ts";
-import type { AgentView } from "../simclient.ts";
+import type { AgentView, AnimalView } from "../simclient.ts";
 import { type BodyModels, buildBodies, defineBodyModels } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
+import { buildAnimals, defineFaunaModels, type FaunaModels } from "./fauna.ts";
 import { anyGrowing, buildProps, defineFloraModels, type FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
@@ -34,6 +35,7 @@ const SHADOW_SIZE = 2048;
 /** What's in the world this frame besides terrain. */
 export interface SceneState {
   agents: AgentView[];
+  animals: AnimalView[];
   crops: Float32Array;
   cropsVersion: number;
   blocks: BlockRegistry;
@@ -73,6 +75,7 @@ export class Renderer {
   private bodyModels: BodyModels;
   private bodies = new ModelBatch(new InstanceBatch());
   private floraModels: FloraModels;
+  private faunaModels: FaunaModels;
   private flora = new ModelBatch(new InstanceBatch());
   private groundCover = new ModelBatch(new InstanceBatch(), 70);
   private floraVersion = -1;
@@ -152,6 +155,7 @@ export class Renderer {
     this.post = new PostRenderer(device, this.layouts, format);
     this.bodyModels = defineBodyModels(this.library);
     this.floraModels = defineFloraModels(this.library);
+    this.faunaModels = defineFaunaModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
@@ -169,6 +173,7 @@ export class Renderer {
     this.crops.update(scene.crops, scene.cropsVersion);
     this.bodies.instances.clear();
     buildBodies(scene.agents, time, this.bodies.instances, camera.yaw, this.bodyModels);
+    buildAnimals(scene.animals, time, this.bodies.instances, this.faunaModels);
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);
 

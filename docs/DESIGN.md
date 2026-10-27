@@ -33,7 +33,7 @@ players are Haiku subagents spawned from Claude Code (no API key in the game).
 | Agents        | One world, many agents: each MCP session `join`s a named body. Rejoining by name reattaches it.                                          |
 | Physics       | Today: bodies follow the walkable surface (slopes, edits) and path with A* (climb 1, drop 2). Planned: swept AABB, rigid items, joints.  |
 | Agent body    | Procedural farmer from rounded mesh parts (straw hat, walk/work/idle animation) or an agent-drawn sprite extruded into voxels.           |
-| Animals       | Planned (M4): a couple of species, procedural meshes, simple needs.                                                                      |
+| Animals       | Sheep, cows, chickens, ducks: data-driven species in the sim, rigged parts on the model system (fish next).                              |
 | Objects       | Planned (M5): agents author declarative recipes (shapes, materials, physics props), upload via MCP; validated and meshed in the browser. |
 | Persistence   | IndexedDB in the worker: seed + block diff + crops + agents + session bindings, every 5 s and on tab hide.                               |
 | Audio         | Planned: WebAudio layer with positional sound and event hooks; soundtrack and voices are authored by Ethan.                              |
@@ -154,10 +154,14 @@ To do, in order:
    `seed: oak|birch|pine` (new farmers carry one sapling of each), saplings grow over 2 game days.
    Ground cover is a separate no-shadow batch that fades out past 70 blocks. `look` shows props,
    sand and water.
-4. **Animals** (`src/sim/animals.ts`): data-driven species (parts with bones + behavior: speed,
-   habitat land/water, herding, diet, product): sheep (wool), chicken (eggs), cow (milk), duck
-   (swims). Wander/graze/flee/follow-wheat/sleep-at-night AI on the sim RNG; streamed like agents
-   and animated from parts.
+4. ~~**Animals**~~ (done, `sim/animals.ts` + `render/fauna.ts`): sheep (wool), cow (milk), chicken
+   (eggs) on land and ducks on rivers and ponds, ~37 animals in herds placed from the seed. Wander
+   near the herd, graze, sleep at night, shy away from farmers walking at them, follow anyone
+   carrying wheat; all on the sim RNG (~7 µs per tick). Saved in full, streamed like agents (with a
+   product-ready flag), and drawn from rigs: parts hung from pivots with roles (legs swing with the
+   stride, heads graze/peck/look around, ducks bob and dabble, sheared wool shrinks). `look` marks
+   animals and lists nearby herds with products ready. Collecting products comes with `interact`
+   (item 6).
 5. **Fish and fishing**: fish species (minnow and trout in rivers, perch in ponds, mackerel and cod
    in the sea) as water-habitat animals: small schools that drift and dart in water columns,
    rendered from the model system just under the surface (shadowy at depth, ripples when they jump).

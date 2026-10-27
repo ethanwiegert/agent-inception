@@ -1,3 +1,4 @@
+import { type Animal, type Farmer, spawnAnimals, stepAnimals } from "./animals.ts";
 import { type BlockDef, BlockRegistry } from "./blocks.ts";
 import { perlin2 } from "./noise.ts";
 import { type PropDiff, Props } from "./props.ts";
@@ -68,6 +69,8 @@ export interface SaveData {
   blocks?: BlockDef[];
   /** Trees, rocks, flowers etc. that differ from generation. */
   props?: PropDiff;
+  /** Missing in old saves: those worlds get freshly spawned herds. */
+  animals?: Animal[];
   weatherOverride?: { clouds: number; until: number } | null;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
@@ -83,6 +86,7 @@ export class Sim {
   dayOffset = Math.round(TICKS_PER_DAY * 0.3);
   readonly world: World;
   readonly props: Props;
+  animals: Animal[];
   readonly blocks = new BlockRegistry();
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
@@ -102,6 +106,7 @@ export class Sim {
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed);
+    this.animals = spawnAnimals(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
   }
 
@@ -177,6 +182,7 @@ export class Sim {
 
   step() {
     this.tick++;
+    this.stepAnimals();
     for (const agent of this.agents) {
       // Bodies follow the ground: slopes while walking, edits while standing still.
       agent.y += (this.world.surfaceY(agent.x, agent.z, agent.y) - agent.y) * 0.35;
@@ -193,6 +199,19 @@ export class Sim {
       agent.queue.shift();
       agent.anim = Anim.Idle;
     }
+  }
+
+  private farmers: Farmer[] = [];
+
+  private stepAnimals() {
+    const f = this.farmers;
+    f.length = this.agents.length;
+    this.agents.forEach((a, i) => {
+      const o = f[i] ??= { x: 0, z: 0, moving: false, wheat: false };
+      o.x = a.x, o.z = a.z, o.moving = a.anim === Anim.Walk, o.wheat = (a.inventory.wheat ?? 0) > 0;
+    });
+    const t = this.timeOfDay();
+    stepAnimals(this.animals, this.world, this.rng, f, t < 0.2 || t > 0.86, TICK_HZ);
   }
 
   /** Spread arrivals around the world center on flat grass. */
@@ -225,6 +244,7 @@ export class Sim {
       crops: [...this.crops].map(([key, crop]) => [key, crop.planted]),
       blocks: this.blocks.customs(),
       props: this.props.diff(),
+      animals: structuredClone(this.animals),
       weatherOverride: this.weatherOverride,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, ...rest }) =>
@@ -248,6 +268,7 @@ export class Sim {
       sim.setBlock(x, y, z, block);
     }
     if (data.props) sim.props.applyDiff(data.props);
+    if (data.animals) sim.animals = structuredClone(data.animals);
     for (const [key, planted] of data.crops) sim.crops.set(key, { kind: "wheat", planted });
     for (const a of data.agents) {
       const agent = structuredClone(a);

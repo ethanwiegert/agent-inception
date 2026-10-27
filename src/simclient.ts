@@ -1,6 +1,7 @@
 import {
   AGENT_STRIDE,
   type AgentProfile,
+  ANIMAL_STRIDE,
   type FromWorker,
   type TickMessage,
   type ToWorker,
@@ -22,6 +23,18 @@ export interface AgentView {
   stride: number;
   color: number;
   sprite: Sprite | null;
+}
+
+export interface AnimalView {
+  id: number;
+  species: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  anim: number;
+  stride: number;
+  flags: number;
 }
 
 export interface ToolResult {
@@ -54,6 +67,9 @@ export class SimClient {
   private worker: Worker;
   private prev: Float32Array<ArrayBuffer> = new Float32Array(0);
   private curr: Float32Array<ArrayBuffer> = new Float32Array(0);
+  private prevAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
+  private currAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
+  private animalViews: AnimalView[] = [];
   private currAt = 0;
   private interval = 50;
   private pending = new Map<number, (r: ToolResult) => void>();
@@ -99,6 +115,35 @@ export class SimClient {
     return out;
   }
 
+  /** Animals interpolated for render time `now` (ms). The returned views are reused. */
+  animals(now: number): AnimalView[] {
+    const t = Math.min(1, Math.max(0, (now - this.currAt) / this.interval));
+    const c = this.currAnimals, n = c.length / ANIMAL_STRIDE;
+    const views = this.animalViews;
+    views.length = n;
+    for (let j = 0; j < n; j++) {
+      const i = j * ANIMAL_STRIDE;
+      const p = this.prevAnimals.length > i && this.prevAnimals[i] === c[i] ? this.prevAnimals : c;
+      const dyaw = Math.atan2(Math.sin(c[i + 5] - p[i + 5]), Math.cos(c[i + 5] - p[i + 5]));
+      const v = views[j] ??= {
+        id: 0,
+        species: 0,
+        x: 0,
+        y: 0,
+        z: 0,
+        yaw: 0,
+        anim: 0,
+        stride: 0,
+        flags: 0,
+      };
+      v.id = c[i], v.species = c[i + 1];
+      v.x = mix(p, c, i + 2, t), v.y = mix(p, c, i + 3, t), v.z = mix(p, c, i + 4, t);
+      v.yaw = p[i + 5] + dyaw * t, v.anim = c[i + 6], v.stride = mix(p, c, i + 7, t);
+      v.flags = c[i + 8];
+    }
+    return views;
+  }
+
   private receive(msg: FromWorker) {
     if (msg.type === "ready") {
       this.seed = msg.seed;
@@ -110,6 +155,7 @@ export class SimClient {
       applyEdits(world, msg.edits);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
+      this.prevAnimals = this.currAnimals = new Float32Array(0);
       this.crops = new Float32Array(0);
       this.cropsVersion++;
       this.onReady(world, msg.caughtUp);
@@ -123,6 +169,8 @@ export class SimClient {
     if (this.currAt) this.interval = Math.min(200, Math.max(16, now - this.currAt));
     this.prev = this.curr;
     this.curr = msg.agents;
+    this.prevAnimals = this.currAnimals;
+    this.currAnimals = msg.animals;
     this.currAt = now;
     this.tick = msg.tick;
     this.day = msg.day;
@@ -144,6 +192,8 @@ export class SimClient {
     }
   }
 }
+
+const mix = (p: Float32Array, c: Float32Array, i: number, t: number) => p[i] + (c[i] - p[i]) * t;
 
 function applyEdits(world: World, edits: Int32Array) {
   for (let i = 0; i < edits.length; i += 4) {

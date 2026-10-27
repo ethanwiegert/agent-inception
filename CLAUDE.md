@@ -45,13 +45,15 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     defs + handlers as generator jobs), blocks.ts (block registry, patterns),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (trees/flowers/rocks…: generation, saplings, save diff),
+                    animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),
                     path.ts (A* over floors, wading), protocol.ts, noise.ts, rng.ts
 src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
                     common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
                     surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
                     water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
                     (instanced draws, wind) + body.ts (farmer parts, sprite dolls) + flora.ts
-                    (prop templates and instances), sky.ts,
+                    (prop templates and instances) + fauna.ts (species rigs: parts with roles),
+                    sky.ts,
                     post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
@@ -65,7 +67,7 @@ must stay identical.
 ## Current work
 
 `docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-animals). Pick up from there.
+fish and fishing). Pick up from there.
 
 ## Testing and debugging
 

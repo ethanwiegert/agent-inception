@@ -1,5 +1,6 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
 import { type CallResult, Sim, WHEAT_GROW_TICKS } from "./sim.ts";
+import { AnimalAnim, SPECIES } from "./animals.ts";
 import { GROWN, PROP_DEFS, PropKind } from "./props.ts";
 import { callTool } from "./tools.ts";
 import { Block } from "./world.ts";
@@ -142,4 +143,45 @@ Deno.test("trees block walking and building; saplings grow and survive a save", 
   assert(flower);
   sim.setBlock(fx, sim.world.heightAt(fx, fz) + 1, fz, Block.Stone);
   assertEquals(Sim.load(sim.save(0)).props.at(fx, fz), undefined);
+});
+
+Deno.test("herds spawn per seed, wander, sleep at night and follow wheat", () => {
+  const sim = new Sim(11);
+  const counts = SPECIES.map((_, s) => sim.animals.filter((a) => a.species === s).length);
+  assert(counts.every((n) => n > 0), String(counts));
+  assertEquals(new Sim(11).animals, sim.animals);
+  for (const a of sim.animals) {
+    const key = Math.floor(a.z) * sim.world.sizeX + Math.floor(a.x);
+    const wet = sim.world.waterTop[key] >= 0;
+    assertEquals(wet, SPECIES[a.species].habitat === "water", SPECIES[a.species].name);
+  }
+
+  const start = sim.animals.map((a) => [a.x, a.z]);
+  sim.setTimeOfDay(0.4);
+  for (let i = 0; i < 600; i++) sim.step();
+  const moved = sim.animals.filter((a, i) => Math.hypot(a.x - start[i][0], a.z - start[i][1]) > 1);
+  assert(moved.length > sim.animals.length / 3, `${moved.length} moved`);
+  for (const a of sim.animals) {
+    const key = Math.floor(a.z) * sim.world.sizeX + Math.floor(a.x);
+    assertEquals(sim.world.waterTop[key] >= 0, SPECIES[a.species].habitat === "water");
+    assert(!sim.world.propSolid[key], "never inside a tree");
+  }
+
+  sim.setTimeOfDay(0.95);
+  for (let i = 0; i < 400; i++) sim.step();
+  assert(sim.animals.filter((a) => a.anim === AnimalAnim.Sleep).length > sim.animals.length / 2);
+
+  // A farmer with wheat standing near a sheep draws it in.
+  sim.setTimeOfDay(0.4);
+  run(sim, "s", "join", { name: "Hazel" });
+  const hazel = sim.agents[0];
+  hazel.inventory.wheat = 3;
+  const sheep = sim.animals.find((a) => a.species === 0)!;
+  hazel.x = sheep.x + 4, hazel.z = sheep.z;
+  const before = Math.hypot(hazel.x - sheep.x, hazel.z - sheep.z);
+  for (let i = 0; i < 200; i++) sim.step();
+  assert(Math.hypot(hazel.x - sheep.x, hazel.z - sheep.z) < before - 1);
+
+  assertEquals(Sim.load(sim.save(0)).animals, sim.animals);
+  assert(run(sim, "s", "look").text.includes("Animals nearby"));
 });

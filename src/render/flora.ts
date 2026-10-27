@@ -112,7 +112,7 @@ const builders: Record<number, (b: MeshBuilder, variant: number) => void> = {
       b.cylinder(tilt, 0.012, 0.01, h, { color: STEM, sway: [0, 1] }, { segments: 3, caps: false });
       const head = translate(tilt, 0, h, 0);
       const petal = PETALS[v % PETALS.length];
-      b.box(head, [0.09, 0.04, 0.09], { color: petal, sway: 1 });
+      b.box(rotateY(head, 0.8), [0.07, 0.025, 0.07], { color: petal, sway: 1 });
     }
   },
   [PropKind.Reeds](b, v) {

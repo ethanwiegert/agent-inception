@@ -1,3 +1,4 @@
+import { SPECIES } from "./animals.ts";
 import { findPath, octile } from "./path.ts";
 import { PROP_DEFS, PropKind } from "./props.ts";
 import {
@@ -652,6 +653,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         if (g >= 1) ripe++;
         else growing++, soonest = Math.min(soonest, (1 - g) * WHEAT_GROW_TICKS);
       }
+      const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
+      if (animal) c = SPECIES[animal.species].mark;
       const other = others.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (other) c = other.name[0].toUpperCase();
       if (x === ax && z === az) c = "@";
@@ -670,13 +673,39 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     } left→right (east), z top→bottom (south). Height vs. you on the right.`,
     `Legend: @ you  . grass  , farmland  s seedling  w growing wheat  W ripe wheat  d dirt  # stone  ` +
     `: sand/gravel  ~ shallow water (wade)  ≈ deep water  T tree  A pine  t sapling  o rock  b bush  ` +
-    `* flowers  | reeds  % lily pads  A-Z other farmers (trees, pines and rocks block walking) | ` +
+    `* flowers  | reeds  % lily pads  ${
+      SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
+    }  A-Z other farmers (trees, pines and rocks block walking) | ` +
     `height = same, 1-9 higher, a-i lower`,
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
   if (ripe || growing) {
     const soon = growing ? `; next ripens in ~${gameDuration(soonest)}` : "";
     lines.push("", `Crops in view: ${ripe} ripe, ${growing} growing${soon}.`);
+  }
+  const seen = sim.animals
+    .map((a) => ({ a, d: Math.hypot(a.x - agent.x, a.z - agent.z) }))
+    .filter(({ d }) => d <= r * 1.5);
+  if (seen.length) {
+    lines.push("", "Animals nearby:");
+    SPECIES.forEach((def, species) => {
+      const mine = seen.filter(({ a }) => a.species === species).sort((p, q) => p.d - q.d);
+      if (!mine.length) return;
+      const n = mine[0].a;
+      const ready = def.product
+        ? `, ${mine.filter(({ a }) => sim.tick >= a.readyAt).length} with ${def.product.item} ready`
+        : "";
+      lines.push(
+        `  ${mine.length} ${def.name}${
+          mine.length === 1 || def.name === "sheep" ? "" : "s"
+        } — nearest at x=${Math.floor(n.x)} z=${Math.floor(n.z)} (${
+          Math.round(mine[0].d)
+        } tiles)${ready}`,
+      );
+    });
+    lines.push(
+      "  (Animals shy away from farmers walking right at them, and follow anyone carrying wheat.)",
+    );
   }
   if (others.length) {
     lines.push("", "Other farmers:");

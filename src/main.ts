@@ -216,6 +216,7 @@ function draw(now: number) {
 
   renderer.render(camera, LOOKS[look] ?? LOOKS.natural, client.timeOfDay, now / 1000, {
     agents,
+    animals: client.animals(now),
     crops: client.crops,
     cropsVersion: client.cropsVersion,
     blocks: client.blocks,

@@ -4,6 +4,10 @@ import type { CallResult, SimEvent, Sprite } from "./sim.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
 export const AGENT_STRIDE = 8;
+/** Floats per animal in `TickMessage.animals`: id, species, x, y, z, yaw, anim, stride, flags. */
+export const ANIMAL_STRIDE = 9;
+/** Animal flag: its product (wool, milk, egg) is ready to collect. */
+export const ANIMAL_READY = 1;
 /** Floats per crop in `TickMessage.crops`: x, y, z, growth. */
 export const CROP_STRIDE = 4;
 
@@ -41,6 +45,7 @@ export interface TickMessage {
   speed: number;
   clouds: number;
   agents: Float32Array<ArrayBuffer>;
+  animals: Float32Array<ArrayBuffer>;
   /** Agent-defined blocks, sent when the registry changes. */
   blocks?: BlockDef[];
   /** Per agent, in `agents` order. Sent when agents join or change how they look. */
