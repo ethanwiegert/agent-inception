@@ -1,5 +1,6 @@
 import { type BlockDef, BlockRegistry } from "./blocks.ts";
 import { perlin2 } from "./noise.ts";
+import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
@@ -65,6 +66,8 @@ export interface SaveData {
   crops: [number, number][];
   agents: Omit<Agent, "queue" | "anim" | "stride">[];
   blocks?: BlockDef[];
+  /** Trees, rocks, flowers etc. that differ from generation. */
+  props?: PropDiff;
   weatherOverride?: { clouds: number; until: number } | null;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
@@ -79,6 +82,7 @@ export class Sim {
   /** Shifts the clock so a new world starts in the morning. */
   dayOffset = Math.round(TICKS_PER_DAY * 0.3);
   readonly world: World;
+  readonly props: Props;
   readonly blocks = new BlockRegistry();
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
@@ -97,6 +101,7 @@ export class Sim {
 
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
+    this.props = new Props(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
   }
 
@@ -135,6 +140,8 @@ export class Sim {
       this.crops.delete(key);
       this.cropsVersion++;
     }
+    // Whatever stood on the column (flowers, a lily pad) goes with the change.
+    if (this.props.at(x, z)) this.props.set(x, z, null);
   }
 
   cropGrowth(crop: Crop): number {
@@ -153,7 +160,7 @@ export class Sim {
       yaw: 0,
       anim: Anim.Idle,
       stride: 0,
-      inventory: { wheat_seeds: 16 },
+      inventory: { wheat_seeds: 16, oak_sapling: 1, birch_sapling: 1, pine_sapling: 1 },
       journal: [],
       sprite: null,
       queue: [],
@@ -200,7 +207,8 @@ export class Sim {
         const flat = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) =>
           w.heightAt(x + dx, z + dz) === h
         );
-        if (h >= 0 && flat && w.get(x, h, z) === Block.Grass) return [x, z];
+        const free = !w.propSolid[z * w.sizeX + x];
+        if (h >= 0 && flat && free && w.get(x, h, z) === Block.Grass) return [x, z];
       }
     }
     return [cx, cz];
@@ -216,6 +224,7 @@ export class Sim {
       edits: [...this.edits].flat(),
       crops: [...this.crops].map(([key, crop]) => [key, crop.planted]),
       blocks: this.blocks.customs(),
+      props: this.props.diff(),
       weatherOverride: this.weatherOverride,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, ...rest }) =>
@@ -238,6 +247,7 @@ export class Sim {
       const y = Math.floor(index / (w.sizeX * w.sizeZ));
       sim.setBlock(x, y, z, block);
     }
+    if (data.props) sim.props.applyDiff(data.props);
     for (const [key, planted] of data.crops) sim.crops.set(key, { kind: "wheat", planted });
     for (const a of data.agents) {
       const agent = structuredClone(a);

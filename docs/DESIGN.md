@@ -146,10 +146,14 @@ To do, in order:
    templates change). `InstanceBatch` groups instances (mat4 + tint + wind weight) by template
    without per-frame allocation; one `drawIndexed` per template, shadows, wind in the vertex shader.
    The farmer is rounded parts tinted per agent; sprite dolls use the `cube` template.
-3. **Props in the sim** (trees, bushes, flowers, reeds, rocks, lily pads): deterministic worldgen
-   placement (jittered grid + density noise, by habitat), stored as generated list + diff (removed
-   ids, added props) in saves, streamed to the page. Species: oak, birch, pine (2-3 variants each).
-   Saplings grow from the clock like crops.
+3. ~~**Props in the sim**~~ (done, `sim/props.ts` + `render/flora.ts`): oak, birch, pine (3 variants
+   each), bushes, flower patches (4 colors), reeds, rocks and lily pads, one per tile, placed
+   deterministically from the seed (trees on a jittered 3×3 grid by forest noise, the rest by
+   habitat; a clearing around spawn). Saves keep a diff against generation; the page regenerates and
+   applies the streamed diff. Trees and rocks block walking, tilling and building; `plant` takes
+   `seed: oak|birch|pine` (new farmers carry one sapling of each), saplings grow over 2 game days.
+   Ground cover is a separate no-shadow batch that fades out past 70 blocks. `look` shows props,
+   sand and water.
 4. **Animals** (`src/sim/animals.ts`): data-driven species (parts with bones + behavior: speed,
    habitat land/water, herding, diet, product): sheep (wool), chicken (eggs), cow (milk), duck
    (swims). Wander/graze/flee/follow-wheat/sleep-at-night AI on the sim RNG; streamed like agents
@@ -183,6 +187,8 @@ To do, in order:
 - Choosing a new seed (panel or `?seed=`) rebuilds the `Renderer` without destroying the old GPU
   resources. Fine for dev; fix before it matters.
 - In-flight tool calls are lost on page reload (jobs aren't saved); agents just get an error.
+- Props draw every instance (~3.6k, ~0.45 ms GPU at the default view); per-chunk culling and tree
+  LODs would cut that when the world fills up. Chopping trees comes with `interact`.
 - Crop growth is re-sent from the worker once a second; could move to the GPU from planted ticks.
 - WebMCP (`navigator.modelContext`), audio hooks and the reverse CAPTCHA aren't started.
 - Old saves from the flat meadow load onto the new island generator (blocks diffs still apply);

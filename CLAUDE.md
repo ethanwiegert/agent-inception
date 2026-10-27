@@ -30,7 +30,7 @@ pillars, decisions, art direction, status and next steps before making architect
 URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
 `time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
 `storybook`), `bridge` (WebSocket URL override), `debug` (comma list of passes to skip for
-profiling: `shadow,terrain,grass,water,sky,bodies`).
+profiling: `shadow,terrain,grass,water,sky,bodies,props`).
 
 ## Code map
 
@@ -44,12 +44,14 @@ src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), blocks.ts (block registry, patterns),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
+                    props.ts (trees/flowers/rocks…: generation, saplings, save diff),
                     path.ts (A* over floors, wading), protocol.ts, noise.ts, rng.ts
 src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
                     common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
                     surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
                     water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
-                    (instanced draws, wind) + body.ts (farmer parts, sprite dolls), sky.ts,
+                    (instanced draws, wind) + body.ts (farmer parts, sprite dolls) + flora.ts
+                    (prop templates and instances), sky.ts,
                     post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
@@ -63,7 +65,7 @@ must stay identical.
 ## Current work
 
 `docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-props in the sim). Pick up from there.
+animals). Pick up from there.
 
 ## Testing and debugging
 

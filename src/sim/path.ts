@@ -9,6 +9,7 @@ export const MAX_WADE = 1;
 export function step(world: World, fromFloor: number, tx: number, tz: number): number {
   const to = world.floorBelow(tx, tz, fromFloor + MAX_STEP_UP);
   if (to < 0 || fromFloor - to > MAX_STEP_DOWN) return -1;
+  if (world.propSolid[tz * world.sizeX + tx]) return -1; // trees and rocks are in the way
   return world.waterDepth(tx, tz, to) > MAX_WADE ? -1 : to;
 }
 

@@ -1,4 +1,5 @@
 import type { BlockDef } from "./blocks.ts";
+import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
@@ -28,6 +29,8 @@ export interface ReadyMessage {
   caughtUp: number;
   /** Agent-defined blocks. */
   blocks: BlockDef[];
+  /** Props that differ from generation (the page regenerates the rest from the seed). */
+  props: PropDiff;
 }
 
 export interface TickMessage {
@@ -43,6 +46,8 @@ export interface TickMessage {
   /** Per agent, in `agents` order. Sent when agents join or change how they look. */
   profiles?: AgentProfile[];
   edits: Int32Array<ArrayBuffer>;
+  /** All prop differences from generation, sent when props change. */
+  props?: PropDiff;
   /** Sent when crops change and once a second while they grow. */
   crops?: Float32Array<ArrayBuffer>;
   events: SimEvent[];

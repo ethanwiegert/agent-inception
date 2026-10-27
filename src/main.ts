@@ -219,6 +219,8 @@ function draw(now: number) {
     crops: client.crops,
     cropsVersion: client.cropsVersion,
     blocks: client.blocks,
+    props: client.props,
+    tick: client.tick,
     day: client.day,
     weather: { clouds: client.clouds },
   });

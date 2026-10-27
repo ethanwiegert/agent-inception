@@ -17,6 +17,8 @@ import type { Layouts } from "./renderer.ts";
 const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 struct Instance { model: mat4x4f, tint: vec4f };
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
+/** x: distance beyond which instances aren't drawn (0 = always), y: fade band width. */
+@group(1) @binding(1) var<uniform> batch: vec4f;
 
 struct VIn {
   @location(0) pos: vec3f,
@@ -53,7 +55,15 @@ fn place(v: VIn, ii: u32) -> vec3f {
   let world = place(v, ii);
   let n = normalize((inst.model * vec4f(v.normal.xyz, 0.0)).xyz);
   let albedo = pow(v.color.rgb, vec3f(2.2)) * inst.tint.rgb;
-  return Out(frame.viewProj * vec4f(world, 1.0), world, n, albedo);
+  var clip = frame.viewProj * vec4f(world, 1.0);
+  if (batch.x > 0.0) {
+    // Small things shrink into the ground past the fade distance, then aren't rasterized at all.
+    let d = distance(inst.model[3].xyz, frame.cameraPos.xyz);
+    let k = 1.0 - smoothstep(batch.x - batch.y, batch.x, d);
+    let sunk = mix(inst.model[3].xyz, world, k);
+    clip = select(frame.viewProj * vec4f(sunk, 1.0), vec4f(0.0, 0.0, 2.0, 1.0), k <= 0.0);
+  }
+  return Out(clip, world, n, albedo);
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -78,15 +88,28 @@ const vertexLayout: GPUVertexBufferLayout = {
 /** GPU copy of an `InstanceBatch`. */
 export class ModelBatch {
   private buffer: GPUBuffer | null = null;
+  private params: GPUBuffer | null = null;
   bindGroup: GPUBindGroup | null = null;
 
-  constructor(readonly instances: InstanceBatch) {}
+  /** `fade`: instances farther than this from the camera aren't drawn (0 = always drawn). */
+  constructor(readonly instances: InstanceBatch, readonly fade = 0) {}
 
   upload(device: GPUDevice, layout: GPUBindGroupLayout, templates: number) {
     const b = this.instances;
     b.sort(templates);
     if (!b.count) return;
     const bytes = b.count * INSTANCE_FLOATS * 4;
+    if (!this.params) {
+      this.params = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      device.queue.writeBuffer(
+        this.params,
+        0,
+        new Float32Array([this.fade, this.fade * 0.2, 0, 0]),
+      );
+    }
     if (!this.buffer || this.buffer.size < bytes) {
       this.buffer?.destroy();
       this.buffer = device.createBuffer({
@@ -95,7 +118,10 @@ export class ModelBatch {
       });
       this.bindGroup = device.createBindGroup({
         layout,
-        entries: [{ binding: 0, resource: { buffer: this.buffer } }],
+        entries: [
+          { binding: 0, resource: { buffer: this.buffer } },
+          { binding: 1, resource: { buffer: this.params } },
+        ],
       });
     }
     device.queue.writeBuffer(this.buffer, 0, b.sorted, 0, b.count * INSTANCE_FLOATS);
@@ -113,11 +139,10 @@ export class ModelRenderer {
 
   constructor(private device: GPUDevice, layouts: Layouts, readonly library: MeshLibrary) {
     this.layout = device.createBindGroupLayout({
-      entries: [{
-        binding: 0,
-        visibility: GPUShaderStage.VERTEX,
-        buffer: { type: "read-only-storage" },
-      }],
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {} },
+      ],
     });
     const module = device.createShaderModule({ code: shader, label: "models" });
     this.pipeline = device.createRenderPipeline({

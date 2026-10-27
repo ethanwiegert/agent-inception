@@ -32,6 +32,8 @@ export class World {
   readonly top: Int16Array;
   /** Height of the topmost water block above the ground per (x, z), or -1. */
   readonly waterTop: Int16Array;
+  /** 1 where a solid prop (tree, rock) stands on the column; set by `Props`. */
+  readonly propSolid: Uint8Array;
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
@@ -40,6 +42,7 @@ export class World {
     this.blocks = new Uint8Array(sizeX * sizeY * sizeZ);
     this.top = new Int16Array(sizeX * sizeZ).fill(-1);
     this.waterTop = new Int16Array(sizeX * sizeZ).fill(-1);
+    this.propSolid = new Uint8Array(sizeX * sizeZ);
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);

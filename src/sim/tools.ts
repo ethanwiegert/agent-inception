@@ -1,4 +1,5 @@
 import { findPath, octile } from "./path.ts";
+import { PROP_DEFS, PropKind } from "./props.ts";
 import {
   type Agent,
   Anim,
@@ -83,8 +84,22 @@ export const TOOL_DEFS: ToolDef[] = [
     description: `Plant wheat seeds on empty farmland, one seed per tile. ` +
       `Wheat ripens in about ${
         Math.round((WHEAT_GROW_TICKS / TICKS_PER_DAY) * 24)
-      } game hours. ${areaNote}`,
-    inputSchema: { type: "object", properties: area, required: ["x", "z"] },
+      } game hours. Or plant a tree sapling (oak, birch or pine) on grass or dirt; trees take ` +
+      `about ${
+        Math.round(PROP_DEFS[PropKind.Oak].growTicks / TICKS_PER_DAY)
+      } game days to grow and block the tile. ${areaNote}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...area,
+        seed: {
+          type: "string",
+          enum: ["wheat", "oak", "birch", "pine"],
+          description: "What to plant, default wheat. Trees use saplings from your inventory.",
+        },
+      },
+      required: ["x", "z"],
+    },
   },
   {
     name: "harvest",
@@ -254,14 +269,18 @@ const HANDLERS: Record<string, Handler> = {
     eachTile(sim, agent, args, "Tilled", Anim.Till, 24, {
       check(x, y, z) {
         const b = sim.world.get(x, y, z);
+        const blocked = solidProp(sim, x, z);
+        if (blocked) return blocked;
         if (b === Block.Farmland) return "already farmland";
         if (b !== Block.Grass && b !== Block.Dirt) return `${sim.blocks.name(b)} can't be tilled`;
       },
       apply: (x, y, z) => sim.setBlock(x, y, z, Block.Farmland),
     }),
 
-  plant: (sim, agent, args) =>
-    eachTile(sim, agent, args, "Planted", Anim.Plant, 16, {
+  plant(sim, agent, args) {
+    const seed = String(args.seed ?? "wheat");
+    if (seed !== "wheat") return plantTrees(sim, agent, args, seed);
+    return eachTile(sim, agent, args, "Planted", Anim.Plant, 16, {
       check(x, y, z) {
         if (sim.world.get(x, y, z) !== Block.Farmland) return "not farmland";
         if (sim.crops.has(z * sim.world.sizeX + x)) return "already planted";
@@ -272,7 +291,8 @@ const HANDLERS: Record<string, Handler> = {
         sim.crops.set(z * sim.world.sizeX + x, { kind: "wheat", planted: sim.tick });
         sim.cropsVersion++;
       },
-    }),
+    });
+  },
 
   harvest: (sim, agent, args) =>
     eachTile(sim, agent, args, "Harvested", Anim.Harvest, 20, {
@@ -297,6 +317,8 @@ const HANDLERS: Record<string, Handler> = {
     if (!agent.inventory[name]) throw new Error(`You have no ${name}. Dig some with break_block.`);
     return (function* () {
       yield* reach(sim, agent, x, z);
+      const blocked = solidProp(sim, x, z);
+      if (blocked) throw new Error(`Can't build there: ${blocked}.`);
       const y = sim.world.heightAt(x, z) + 1;
       if (y >= sim.world.sizeY - 2) throw new Error("That column is as tall as it can get.");
       if (y > agent.y + 3) throw new Error("Too high to reach from here.");
@@ -311,6 +333,8 @@ const HANDLERS: Record<string, Handler> = {
     const x = num(args.x, "x"), z = num(args.z, "z");
     return (function* () {
       yield* reach(sim, agent, x, z);
+      const blocked = solidProp(sim, x, z);
+      if (blocked) throw new Error(`Can't dig there: ${blocked}.`);
       const y = sim.world.heightAt(x, z);
       if (y <= 1) throw new Error("Bedrock. You can't dig any deeper here.");
       const b = sim.world.get(x, y, z);
@@ -477,6 +501,45 @@ function eachTile(
 
 // ---------------------------------------------------------------- helpers
 
+/** Why a solid prop stops work on a tile, or nothing. */
+function solidProp(sim: Sim, x: number, z: number): string | undefined {
+  const p = sim.props.at(x, z);
+  if (!p || !PROP_DEFS[p.kind].solid) return undefined;
+  const def = PROP_DEFS[p.kind];
+  const what = sim.props.growth(p, sim.tick) < 1 ? `${def.name} sapling` : def.name;
+  return `a ${what} is in the way`;
+}
+
+const TREES: Record<string, number> = {
+  oak: PropKind.Oak,
+  birch: PropKind.Birch,
+  pine: PropKind.Pine,
+};
+
+function plantTrees(sim: Sim, agent: Agent, args: Args, seed: string): Job {
+  const kind = TREES[seed];
+  if (kind === undefined) throw new Error('seed must be "wheat", "oak", "birch" or "pine".');
+  const item = `${seed}_sapling`;
+  if (!agent.inventory[item]) throw new Error(`You have no ${item}.`);
+  return eachTile(sim, agent, args, `Planted ${seed} on`, Anim.Plant, 30, {
+    check(x, y, z) {
+      const b = sim.world.get(x, y, z);
+      if (sim.props.at(x, z)) return `${PROP_DEFS[sim.props.at(x, z)!.kind].name} already there`;
+      if (b !== Block.Grass && b !== Block.Dirt) {
+        return `can't plant a tree in ${sim.blocks.name(b)}`;
+      }
+      if (sim.world.waterTop[z * sim.world.sizeX + x] >= 0) return "under water";
+      if (Math.floor(agent.x) === x && Math.floor(agent.z) === z) return "you're standing there";
+      if (!agent.inventory[item]) return `out of ${item}`;
+    },
+    apply(x, _y, z) {
+      agent.inventory[item]--;
+      const variant = (x * 7 + z * 13) % PROP_DEFS[kind].variants;
+      sim.props.set(x, z, { kind, variant, planted: sim.tick });
+    },
+  });
+}
+
 function parseColor(value: unknown, key: string): number {
   const hex = String(value ?? "").trim().replace(/^#/, "");
   if (/^[0-9a-f]{3}$/i.test(hex)) return parseInt([...hex].map((c) => c + c).join(""), 16);
@@ -575,7 +638,13 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         [Block.Dirt]: "d",
         [Block.Stone]: "#",
         [Block.Farmland]: ",",
+        [Block.Sand]: ":",
+        [Block.Gravel]: ":",
+        [Block.Clay]: ":",
       } as Record<number, string>)[w.get(x, h, z)] ?? "?";
+      if (w.waterTop[z * w.sizeX + x] >= 0) c = w.waterTop[z * w.sizeX + x] - h > 1 ? "≈" : "~";
+      const prop = sim.props.at(x, z);
+      if (prop) c = sim.props.growth(prop, sim.tick) < 1 ? "t" : PROP_DEFS[prop.kind].mark;
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
         const g = sim.cropGrowth(crop);
@@ -600,7 +669,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       ax + r
     } left→right (east), z top→bottom (south). Height vs. you on the right.`,
     `Legend: @ you  . grass  , farmland  s seedling  w growing wheat  W ripe wheat  d dirt  # stone  ` +
-    `A-Z other farmers | height = same, 1-9 higher, a-i lower`,
+    `: sand/gravel  ~ shallow water (wade)  ≈ deep water  T tree  A pine  t sapling  o rock  b bush  ` +
+    `* flowers  | reeds  % lily pads  A-Z other farmers (trees, pines and rocks block walking) | ` +
+    `height = same, 1-9 higher, a-i lower`,
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
   if (ripe || growing) {

@@ -6,6 +6,7 @@ import {
   type ToWorker,
 } from "./sim/protocol.ts";
 import { BlockRegistry } from "./sim/blocks.ts";
+import { Props } from "./sim/props.ts";
 import type { SimEvent, Sprite } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
 import { generateWorld } from "./sim/worldgen.ts";
@@ -42,6 +43,8 @@ export class SimClient {
   clouds = 0.35;
   /** Mirror of the sim's block registry (built-ins plus agent-defined blocks). */
   blocks = new BlockRegistry();
+  /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
+  props: Props | null = null;
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
   cropsVersion = 0;
   profiles: AgentProfile[] = [];
@@ -102,6 +105,8 @@ export class SimClient {
       this.blocks = new BlockRegistry();
       this.blocks.load(msg.blocks);
       const world = generateWorld({ seed: msg.seed });
+      this.props = new Props(world, msg.seed); // from the pristine terrain, like the sim
+      this.props.applyDiff(msg.props);
       applyEdits(world, msg.edits);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
@@ -126,6 +131,7 @@ export class SimClient {
     this.clouds = msg.clouds;
     if (msg.blocks) this.blocks.load(msg.blocks);
     if (msg.profiles) this.profiles = msg.profiles;
+    if (msg.props && this.props) this.props.reset(msg.props);
     if (msg.crops) {
       this.crops = msg.crops;
       this.cropsVersion++;

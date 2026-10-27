@@ -1,5 +1,6 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
 import { type CallResult, Sim, WHEAT_GROW_TICKS } from "./sim.ts";
+import { GROWN, PROP_DEFS, PropKind } from "./props.ts";
 import { callTool } from "./tools.ts";
 import { Block } from "./world.ts";
 
@@ -95,4 +96,50 @@ Deno.test("agents can set, validate, keep and reset a sprite", () => {
 
   run(sim, "s", "set_sprite", { reset: true });
   assertEquals(sim.agents[0].sprite, null);
+});
+
+Deno.test("props generate per seed: groves, ground cover, a clearing at spawn", () => {
+  const a = new Sim(7), b = new Sim(7);
+  assertEquals([...a.props.map], [...b.props.map]);
+  const counts = new Map<number, number>();
+  for (const p of a.props.map.values()) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1);
+  for (const kind of [PropKind.Oak, PropKind.Flowers, PropKind.Reeds, PropKind.Rock]) {
+    assert((counts.get(kind) ?? 0) > 20, `${PROP_DEFS[kind].name}: ${counts.get(kind)}`);
+  }
+  const c = a.world.sizeX / 2;
+  for (let z = c - 8; z <= c + 8; z++) {
+    for (let x = c - 8; x <= c + 8; x++) assert(!a.world.propSolid[z * a.world.sizeX + x]);
+  }
+});
+
+Deno.test("trees block walking and building; saplings grow and survive a save", () => {
+  const sim = new Sim(3);
+  run(sim, "s", "join", { name: "Rowan" });
+  const me = sim.agents[0];
+  const x = Math.floor(me.x) + 2, z = Math.floor(me.z);
+  sim.setBlock(x, sim.world.heightAt(x, z), z, Block.Grass);
+  const planted = run(sim, "s", "plant", { x, z, seed: "oak" });
+  assert(planted.text.startsWith("Planted oak on 1 tile"), planted.text);
+  assertEquals(me.inventory.oak_sapling, 0);
+  assert(run(sim, "s", "plant", { x, z, seed: "oak" }).isError, "no saplings left");
+
+  assert(run(sim, "s", "look").text.includes("t"), "a sapling shows on the map");
+  assert(run(sim, "s", "till", { x, z }).text.includes("in the way"));
+  assert(run(sim, "s", "place_block", { x, z, block: "dirt" }).isError);
+  assert(run(sim, "s", "walk_to", { x, z }).isError, "can't stand in a tree");
+
+  const prop = sim.props.at(x, z)!;
+  assertEquals(sim.props.growth(prop, sim.tick + PROP_DEFS[PropKind.Oak].growTicks), 1);
+  const loaded = Sim.load(sim.save(0));
+  assertEquals(loaded.props.at(x, z), prop);
+  assertEquals(loaded.world.propSolid, sim.world.propSolid);
+
+  // Clearing a generated prop is remembered too.
+  const [key, flower] = [...sim.props.map].find(([, p]) =>
+    p.planted === GROWN && !PROP_DEFS[p.kind].solid
+  )!;
+  const fx = key % sim.world.sizeX, fz = Math.floor(key / sim.world.sizeX);
+  assert(flower);
+  sim.setBlock(fx, sim.world.heightAt(fx, fz) + 1, fz, Block.Stone);
+  assertEquals(Sim.load(sim.save(0)).props.at(fx, fz), undefined);
 });

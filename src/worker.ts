@@ -25,6 +25,7 @@ let lastSave = 0;
 let sentAgentsVersion = -1;
 let sentBlocksVersion = -1;
 let sentCropsVersion = -1;
+let sentPropsVersion = -1;
 let cropsSentAt = 0;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
@@ -88,12 +89,14 @@ function start(caughtUp: number) {
   s.pendingEdits = [];
   sentAgentsVersion = sentCropsVersion = -1;
   sentBlocksVersion = s.blocks.version;
+  sentPropsVersion = s.props.version;
   post({
     type: "ready",
     seed: s.seed,
     edits: Int32Array.from(edits),
     caughtUp,
     blocks: s.blocks.customs(),
+    props: s.props.diff(),
   });
   lastStep = performance.now();
   budget = 0;
@@ -153,6 +156,9 @@ function send(now: number) {
     clouds: s.clouds(),
     blocks: s.blocks.version !== sentBlocksVersion
       ? (sentBlocksVersion = s.blocks.version, s.blocks.customs())
+      : undefined,
+    props: s.props.version !== sentPropsVersion
+      ? (sentPropsVersion = s.props.version, s.props.diff())
       : undefined,
     agents,
     profiles,

@@ -1,11 +1,13 @@
 import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import type { BlockRegistry } from "../sim/blocks.ts";
+import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
 import type { Camera } from "../camera.ts";
 import type { AgentView } from "../simclient.ts";
 import { type BodyModels, buildBodies, defineBodyModels } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
+import { anyGrowing, buildProps, defineFloraModels, type FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
@@ -35,6 +37,8 @@ export interface SceneState {
   crops: Float32Array;
   cropsVersion: number;
   blocks: BlockRegistry;
+  props: Props | null;
+  tick: number;
   day: number;
   weather: Weather;
 }
@@ -47,7 +51,8 @@ export interface RenderStats {
 
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
-  /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies". */
+  /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
+   * "props". */
   debug = new Set<string>();
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
@@ -67,6 +72,11 @@ export class Renderer {
   private models: ModelRenderer;
   private bodyModels: BodyModels;
   private bodies = new ModelBatch(new InstanceBatch());
+  private floraModels: FloraModels;
+  private flora = new ModelBatch(new InstanceBatch());
+  private groundCover = new ModelBatch(new InstanceBatch(), 70);
+  private floraVersion = -1;
+  private floraBuiltAt = 0;
   private crops: CropRenderer;
   private targets: {
     width: number;
@@ -141,6 +151,7 @@ export class Renderer {
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts, format);
     this.bodyModels = defineBodyModels(this.library);
+    this.floraModels = defineFloraModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
@@ -159,6 +170,7 @@ export class Renderer {
     this.bodies.instances.clear();
     buildBodies(scene.agents, time, this.bodies.instances, camera.yaw, this.bodyModels);
     this.models.upload(this.bodies);
+    this.updateFlora(scene, time);
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -197,6 +209,7 @@ export class Renderer {
     if (!this.debug.has("shadow")) {
       this.terrain.drawShadow(shadowPass);
       this.models.drawShadow(shadowPass, this.bodies);
+      if (!this.debug.has("props")) this.models.drawShadow(shadowPass, this.flora);
     }
     shadowPass.end();
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
@@ -220,6 +233,10 @@ export class Renderer {
     const skip = this.debug;
     if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
     if (!skip.has("bodies")) this.models.draw(main, this.bodies);
+    if (!skip.has("props")) {
+      this.models.draw(main, this.flora);
+      this.models.draw(main, this.groundCover);
+    }
     this.crops.draw(main);
     if (!skip.has("grass")) this.grass.draw(main);
     if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);
@@ -243,6 +260,28 @@ export class Renderer {
     this.timer?.resolve(encoder);
     device.queue.submit([encoder.finish()]);
     this.timer?.read((ms) => (this.stats.gpuMs = ms));
+  }
+
+  /** Rebuild the prop instances when props change, and every couple of seconds while some grow. */
+  private updateFlora(scene: SceneState, time: number) {
+    const props = scene.props;
+    if (!props) return;
+    const stale = props.version !== this.floraVersion ||
+      (time - this.floraBuiltAt > 2 && anyGrowing(props, scene.tick));
+    if (!stale) return;
+    this.floraVersion = props.version;
+    this.floraBuiltAt = time;
+    const { flora, groundCover } = this;
+    buildProps(
+      props,
+      props.world,
+      scene.tick,
+      flora.instances,
+      groundCover.instances,
+      this.floraModels,
+    );
+    this.models.upload(flora);
+    this.models.upload(groundCover);
   }
 
   /** Orthographic sun/moon shadow volume around the view target, snapped to texels to stop shimmer. */
