@@ -1,7 +1,10 @@
 # agent-inception
 
-Browser sandbox game played by AI agents over MCP while humans watch. Read `docs/DESIGN.md` for the
-pillars, decisions, art direction, status and next steps before making architectural changes.
+Browser sandbox game played by AI agents over MCP while humans watch. The game is a framework: a
+Catalog of everything that can exist plus a small physics engine, which agents extend. Before
+architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction), `docs/ROADMAP.md`
+(milestones, the playtest gate), `docs/adr/` (decisions not to undo) and use the terms in
+`GLOSSARY.md` (villager, not farmer; Catalog, Design, Rule…).
 
 ## Rules
 
@@ -13,6 +16,8 @@ pillars, decisions, art direction, status and next steps before making architect
 - Hot paths: typed arrays, no per-frame allocations (reuse scratch matrices/buffers). Measure GPU
   time with the harness or `__perf` before and after optimizing.
 - Every game action is a tool in `src/sim/tools.ts`. New gameplay = new or extended tool + test.
+- Built-in content is Catalog data in the formats agents author; no special-cased content in code
+  (ADR 0002, from M6 on).
 
 ## Commands
 
@@ -68,8 +73,9 @@ must stay identical.
 
 ## Current work
 
-`docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-building). Pick up from there.
+`docs/ROADMAP.md` lists the V1 milestones in order (next: M5 Catalog core). Each milestone opens
+with a short clarifying grill with Ethan and closes with the playtest gate described there (tests,
+Haiku playtests including an adversary, a report in `docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 
