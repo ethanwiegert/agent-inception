@@ -1,6 +1,7 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
 import { type CallResult, Sim, WHEAT_GROW_TICKS } from "./sim.ts";
 import { AnimalAnim, SPECIES } from "./animals.ts";
+import { FISH, waterHabitat } from "./fish.ts";
 import { GROWN, PROP_DEFS, PropKind } from "./props.ts";
 import { callTool } from "./tools.ts";
 import { Block } from "./world.ts";
@@ -184,4 +185,47 @@ Deno.test("herds spawn per seed, wander, sleep at night and follow wheat", () =>
 
   assertEquals(Sim.load(sim.save(0)).animals, sim.animals);
   assert(run(sim, "s", "look").text.includes("Animals nearby"));
+});
+
+Deno.test("fish schools keep to their water, and casting near one catches fish", () => {
+  const sim = new Sim(11);
+  assertEquals(new Sim(11).schools, sim.schools);
+  assert(FISH.every((_, s) => sim.schools.some((f) => f.species === s)), "every species spawns");
+  for (let i = 0; i < 2000; i++) sim.step();
+  for (const f of sim.schools) {
+    assertEquals(
+      waterHabitat(sim.world, Math.floor(f.x), Math.floor(f.z)),
+      FISH[f.species].habitat,
+    );
+  }
+
+  // Stand on the bank next to a river school at dawn and cast a few times.
+  run(sim, "s", "join", { name: "Wren" });
+  const wren = sim.agents[0];
+  const w = sim.world;
+  let spot: { f: typeof sim.schools[0]; x: number; z: number } | null = null;
+  for (const f of sim.schools.filter((f) => FISH[f.species].habitat === "river")) {
+    for (let dz = -3; dz <= 3 && !spot; dz++) {
+      for (let dx = -3; dx <= 3 && !spot; dx++) {
+        const x = Math.floor(f.x) + dx, z = Math.floor(f.z) + dz;
+        if (
+          w.heightAt(x, z) >= 0 && w.waterTop[z * w.sizeX + x] < 0 && !w.propSolid[z * w.sizeX + x]
+        ) {
+          spot = { f, x, z };
+        }
+      }
+    }
+    if (spot) break;
+  }
+  assert(spot, "a river school with a bank");
+  wren.x = spot.x + 0.5, wren.z = spot.z + 0.5, wren.y = w.surfaceY(wren.x, wren.z);
+  sim.setTimeOfDay(0.25);
+  const before = spot.f.count;
+  const r = run(sim, "s", "fish", { x: Math.floor(spot.f.x), z: Math.floor(spot.f.z), casts: 5 });
+  assert(!r.isError && r.text.includes("caught"), r.text);
+  const name = FISH[spot.f.species].name;
+  assert((wren.inventory[name] ?? 0) > 0, JSON.stringify(wren.inventory));
+  assertEquals(spot.f.count, before - wren.inventory[name]);
+  assert(run(sim, "s", "look").text.includes("Fish in view") || spot.f.count === 0);
+  assert(run(sim, "s", "fish", { x: spot.x, z: spot.z }).isError, "not water");
 });

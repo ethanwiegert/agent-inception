@@ -7,7 +7,13 @@ import type { Camera } from "../camera.ts";
 import type { AgentView, AnimalView } from "../simclient.ts";
 import { type BodyModels, buildBodies, defineBodyModels } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
-import { buildAnimals, defineFaunaModels, type FaunaModels } from "./fauna.ts";
+import {
+  buildAnimals,
+  buildFish,
+  defineFaunaModels,
+  defineFishModels,
+  type FaunaModels,
+} from "./fauna.ts";
 import { anyGrowing, buildProps, defineFloraModels, type FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
@@ -36,6 +42,7 @@ const SHADOW_SIZE = 2048;
 export interface SceneState {
   agents: AgentView[];
   animals: AnimalView[];
+  schools: Float32Array;
   crops: Float32Array;
   cropsVersion: number;
   blocks: BlockRegistry;
@@ -76,6 +83,7 @@ export class Renderer {
   private bodies = new ModelBatch(new InstanceBatch());
   private floraModels: FloraModels;
   private faunaModels: FaunaModels;
+  private fishModels: number[];
   private flora = new ModelBatch(new InstanceBatch());
   private groundCover = new ModelBatch(new InstanceBatch(), 70);
   private floraVersion = -1;
@@ -96,7 +104,7 @@ export class Renderer {
     private device: GPUDevice,
     private context: GPUCanvasContext,
     format: GPUTextureFormat,
-    world: World,
+    private world: World,
   ) {
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
@@ -156,6 +164,7 @@ export class Renderer {
     this.bodyModels = defineBodyModels(this.library);
     this.floraModels = defineFloraModels(this.library);
     this.faunaModels = defineFaunaModels(this.library);
+    this.fishModels = defineFishModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
@@ -174,6 +183,7 @@ export class Renderer {
     this.bodies.instances.clear();
     buildBodies(scene.agents, time, this.bodies.instances, camera.yaw, this.bodyModels);
     buildAnimals(scene.animals, time, this.bodies.instances, this.faunaModels);
+    buildFish(scene.schools, this.world, time, this.bodies.instances, this.fishModels);
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);
 
@@ -279,7 +289,7 @@ export class Renderer {
     const { flora, groundCover } = this;
     buildProps(
       props,
-      props.world,
+      this.world,
       scene.tick,
       flora.instances,
       groundCover.instances,

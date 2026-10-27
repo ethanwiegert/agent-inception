@@ -70,6 +70,8 @@ export class SimClient {
   private prevAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
   private currAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
   private animalViews: AnimalView[] = [];
+  /** Fish schools, straight from the last tick (they drift too slowly to need interpolation). */
+  schools: Float32Array<ArrayBuffer> = new Float32Array(0);
   private currAt = 0;
   private interval = 50;
   private pending = new Map<number, (r: ToolResult) => void>();
@@ -171,6 +173,7 @@ export class SimClient {
     this.curr = msg.agents;
     this.prevAnimals = this.currAnimals;
     this.currAnimals = msg.animals;
+    this.schools = msg.schools;
     this.currAt = now;
     this.tick = msg.tick;
     this.day = msg.day;

@@ -1,6 +1,8 @@
 import { type Animal, type Farmer, spawnAnimals, stepAnimals } from "./animals.ts";
 import { type BlockDef, BlockRegistry } from "./blocks.ts";
+import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
+import { standY } from "./path.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { Block, World } from "./world.ts";
@@ -11,7 +13,7 @@ export const TICK_HZ = 20;
 export const TICKS_PER_DAY = TICK_HZ * 600;
 export const WHEAT_GROW_TICKS = Math.round(TICKS_PER_DAY * 0.75);
 
-export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5 } as const;
+export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5, Fish: 6 } as const;
 
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
@@ -48,7 +50,8 @@ export interface Crop {
 
 export type SimEvent =
   | { type: "say"; agent: number; text: string }
-  | { type: "joined"; agent: number };
+  | { type: "joined"; agent: number }
+  | { type: "catch"; agent: number; fish: string };
 
 export interface CallResult {
   callId: number;
@@ -71,6 +74,7 @@ export interface SaveData {
   props?: PropDiff;
   /** Missing in old saves: those worlds get freshly spawned herds. */
   animals?: Animal[];
+  schools?: School[];
   weatherOverride?: { clouds: number; until: number } | null;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
@@ -87,6 +91,8 @@ export class Sim {
   readonly world: World;
   readonly props: Props;
   animals: Animal[];
+  /** Fish schools in rivers and the sea. */
+  schools: School[];
   readonly blocks = new BlockRegistry();
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
@@ -107,6 +113,7 @@ export class Sim {
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed);
     this.animals = spawnAnimals(this.world, seed);
+    this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
   }
 
@@ -183,9 +190,10 @@ export class Sim {
   step() {
     this.tick++;
     this.stepAnimals();
+    stepSchools(this.schools, this.world, this.rng, this.tick, TICK_HZ);
     for (const agent of this.agents) {
       // Bodies follow the ground: slopes while walking, edits while standing still.
-      agent.y += (this.world.surfaceY(agent.x, agent.z, agent.y) - agent.y) * 0.35;
+      agent.y += (standY(this.world, agent.x, agent.z, agent.y) - agent.y) * 0.35;
       const current = agent.queue[0];
       if (!current) continue;
       try {
@@ -245,6 +253,7 @@ export class Sim {
       blocks: this.blocks.customs(),
       props: this.props.diff(),
       animals: structuredClone(this.animals),
+      schools: structuredClone(this.schools),
       weatherOverride: this.weatherOverride,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, ...rest }) =>
@@ -269,6 +278,10 @@ export class Sim {
     }
     if (data.props) sim.props.applyDiff(data.props);
     if (data.animals) sim.animals = structuredClone(data.animals);
+    // Saves from before a placement change get fresh schools.
+    if (data.schools?.every((f) => schoolFits(sim.world, f))) {
+      sim.schools = structuredClone(data.schools);
+    }
     for (const [key, planted] of data.crops) sim.crops.set(key, { kind: "wheat", planted });
     for (const a of data.agents) {
       const agent = structuredClone(a);

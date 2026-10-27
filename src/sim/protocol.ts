@@ -8,6 +8,8 @@ export const AGENT_STRIDE = 8;
 export const ANIMAL_STRIDE = 9;
 /** Animal flag: its product (wool, milk, egg) is ready to collect. */
 export const ANIMAL_READY = 1;
+/** Floats per fish school in `TickMessage.schools`: id, species, x, z, count. */
+export const SCHOOL_STRIDE = 5;
 /** Floats per crop in `TickMessage.crops`: x, y, z, growth. */
 export const CROP_STRIDE = 4;
 
@@ -46,6 +48,7 @@ export interface TickMessage {
   clouds: number;
   agents: Float32Array<ArrayBuffer>;
   animals: Float32Array<ArrayBuffer>;
+  schools: Float32Array<ArrayBuffer>;
   /** Agent-defined blocks, sent when the registry changes. */
   blocks?: BlockDef[];
   /** Per agent, in `agents` order. Sent when agents join or change how they look. */

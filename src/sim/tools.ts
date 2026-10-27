@@ -1,5 +1,6 @@
 import { SPECIES } from "./animals.ts";
-import { findPath, octile } from "./path.ts";
+import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
+import { findPath, levelAt, octile } from "./path.ts";
 import { PROP_DEFS, PropKind } from "./props.ts";
 import {
   type Agent,
@@ -32,6 +33,7 @@ export interface ToolDef {
 const WALK_SPEED = 2.2 / TICK_HZ; // blocks per tick: an unhurried stroll
 export const SPRITE_MAX = 32;
 const MAX_AREA = 16;
+const CAST_RANGE = 4;
 const int = (description: string) => ({ type: "integer", description });
 const area = {
   x: int("West edge of the area (x grows east)."),
@@ -129,6 +131,26 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: { x: int("Column x."), z: int("Column z.") },
+      required: ["x", "z"],
+    },
+  },
+  {
+    name: "fish",
+    description: "Cast a line into water at (x, z) from the bank (you walk to within " +
+      `${CAST_RANGE} tiles) and wait for a bite. Fish bite best where a school is ` +
+      "(f on the look map), at dawn and dusk, and under clouds. Rivers hold minnow, trout and " +
+      "perch; the sea holds mackerel and cod. Caught fish go to your inventory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        x: int("Water tile x."),
+        z: int("Water tile z."),
+        casts: {
+          ...int("How many times to cast before returning, 1-5. Default 1."),
+          minimum: 1,
+          maximum: 5,
+        },
+      },
       required: ["x", "z"],
     },
   },
@@ -330,6 +352,61 @@ const HANDLERS: Record<string, Handler> = {
     })();
   },
 
+  fish(sim, agent, args) {
+    const x = num(args.x, "x"), z = num(args.z, "z");
+    const casts = Math.min(5, Math.max(1, num(args.casts ?? 1, "casts")));
+    const habitat = waterHabitat(sim.world, x, z);
+    if (!habitat) throw new Error(`(${x}, ${z}) isn't water. Fish in a river, pond or the sea.`);
+    return (function* () {
+      const w = sim.world;
+      const bank = (cx: number, cz: number) =>
+        Math.max(Math.abs(cx - x), Math.abs(cz - z)) <= CAST_RANGE &&
+        w.waterTop[cz * w.sizeX + cx] < 0;
+      if (!bank(Math.floor(agent.x), Math.floor(agent.z))) {
+        yield* walk(sim, agent, bank, octile(x, z), `the bank near (${x}, ${z})`);
+      }
+      const target = Math.atan2(x + 0.5 - agent.x, z + 0.5 - agent.z);
+      while (Math.abs(angleDiff(agent.yaw, target)) > 0.05) {
+        agent.yaw = turn(agent.yaw, target, 0.3);
+        yield;
+      }
+      const caught: string[] = [];
+      for (let c = 0; c < casts; c++) {
+        // Wait 3-9 seconds for a nibble.
+        yield* work(agent, Anim.Fish, Math.round((3 + sim.rng.next() * 6) * TICK_HZ));
+        const school = sim.schools
+          .filter((s) => s.count > 0 && Math.hypot(s.x - x - 0.5, s.z - z - 0.5) < 3.5)
+          .sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+        const t = sim.timeOfDay();
+        const dawnDusk = (t > 0.2 && t < 0.32) || (t > 0.72 && t < 0.85);
+        const night = t < 0.2 || t > 0.85;
+        const mood = (dawnDusk ? 1.4 : night ? 0.6 : 1) * (sim.clouds() > 0.6 ? 1.25 : 1);
+        const local = FISH.map((d, i) => ({ d, i })).filter(({ d }) => d.habitat === habitat);
+        const species = school
+          ? school.species
+          : local[Math.floor(sim.rng.next() * local.length)].i;
+        const chance = Math.min(0.95, (school ? 0.7 : 0.1) * FISH[species].bite * mood);
+        if (sim.rng.next() >= chance) continue;
+        if (school) {
+          if (school.count === FISH[school.species].size) school.regrowAt = sim.tick + FISH_REGROW;
+          school.count--;
+        }
+        const name = FISH[species].name;
+        give(agent, name, 1);
+        caught.push(name);
+        sim.events.push({ type: "catch", agent: agent.id, fish: name });
+      }
+      agent.anim = Anim.Idle;
+      const tries = casts === 1 ? "You cast" : `You cast ${casts} times`;
+      if (!caught.length) {
+        return `${tries} at (${x}, ${z}) but nothing bit. Fish where you see a school ` +
+          `(f on the look map); dawn and dusk are best. ${inventoryText(agent)}`;
+      }
+      return `${tries} at (${x}, ${z}) and caught ${caught.length}: ${caught.join(", ")}. ` +
+        inventoryText(agent);
+    })();
+  },
+
   break_block(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
     return (function* () {
@@ -404,7 +481,7 @@ function* walk(
   label: string,
 ): Generator<void, void> {
   const ax = Math.floor(agent.x), az = Math.floor(agent.z);
-  const floor = sim.world.floorBelow(ax, az, Math.floor(agent.y + 0.5));
+  const floor = levelAt(sim.world, ax, az, agent.y);
   const path = findPath(sim.world, ax, az, floor, goal, heuristic);
   if (!path) throw new Error(`You can't find a way to ${label}.`);
   agent.anim = Anim.Walk;
@@ -653,6 +730,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         if (g >= 1) ripe++;
         else growing++, soonest = Math.min(soonest, (1 - g) * WHEAT_GROW_TICKS);
       }
+      if (sim.schools.some((f) => f.count > 0 && Math.floor(f.x) === x && Math.floor(f.z) === z)) {
+        c = "f";
+      }
       const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (animal) c = SPECIES[animal.species].mark;
       const other = others.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
@@ -672,8 +752,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       ax + r
     } left→right (east), z top→bottom (south). Height vs. you on the right.`,
     `Legend: @ you  . grass  , farmland  s seedling  w growing wheat  W ripe wheat  d dirt  # stone  ` +
-    `: sand/gravel  ~ shallow water (wade)  ≈ deep water  T tree  A pine  t sapling  o rock  b bush  ` +
-    `* flowers  | reeds  % lily pads  ${
+    `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  T tree  A pine  t sapling  o rock  b bush  ` +
+    `* flowers  | reeds  % lily pads  f fish school  ${
       SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
     }  A-Z other farmers (trees, pines and rocks block walking) | ` +
     `height = same, 1-9 higher, a-i lower`,
@@ -706,6 +786,19 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     lines.push(
       "  (Animals shy away from farmers walking right at them, and follow anyone carrying wheat.)",
     );
+  }
+  const schools = sim.schools
+    .map((f) => ({ f, d: Math.hypot(f.x - agent.x, f.z - agent.z) }))
+    .filter(({ f, d }) => f.count > 0 && d <= r * 1.5)
+    .sort((a, b) => a.d - b.d);
+  if (schools.length) {
+    lines.push("", "Fish in view:");
+    for (const { f, d } of schools) {
+      lines.push(
+        `  a school of ${FISH[f.species].name} at x=${Math.floor(f.x)} z=${Math.floor(f.z)} ` +
+          `(${Math.round(d)} tiles, ${f.count} fish)`,
+      );
+    }
   }
   if (others.length) {
     lines.push("", "Other farmers:");

@@ -31,7 +31,7 @@ players are Haiku subagents spawned from Claude Code (no API key in the game).
 | Camera        | Angled top-down orbit (drag), pan (right-drag), zoom (wheel); click a name to follow. Watching isn't playing.                            |
 | Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                  |
 | Agents        | One world, many agents: each MCP session `join`s a named body. Rejoining by name reattaches it.                                          |
-| Physics       | Today: bodies follow the walkable surface (slopes, edits) and path with A* (climb 1, drop 2). Planned: swept AABB, rigid items, joints.  |
+| Physics       | Bodies follow the walkable surface and path with A* (climb 1, drop 2, wade 1, swim 3). Planned: swept AABB, rigid items, joints.         |
 | Agent body    | Procedural farmer from rounded mesh parts (straw hat, walk/work/idle animation) or an agent-drawn sprite extruded into voxels.           |
 | Animals       | Sheep, cows, chickens, ducks: data-driven species in the sim, rigged parts on the model system (fish next).                              |
 | Objects       | Planned (M5): agents author declarative recipes (shapes, materials, physics props), upload via MCP; validated and meshed in the browser. |
@@ -75,18 +75,19 @@ agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──p
 
 ### Tools
 
-| Tool                             | What it does                                                                               |
-| -------------------------------- | ------------------------------------------------------------------------------------------ |
-| `join`                           | Enter as a named farmer (or reattach). Must come first.                                    |
-| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, other farmers.            |
-| `walk_to`                        | A* walk to a tile.                                                                         |
-| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Wheat ripens in ~18 game hours; harvest gives 1 wheat + 2 seeds. |
-| `place_block` / `break_block`    | Stack dirt/stone on a column, or dig its top block into inventory.                         |
-| `set_sprite`                     | Pixel-art body: `rows` + `palette`, or `image_base64`; `reset` for the farmer.             |
-| `say`                            | Speech bubble + activity feed line.                                                        |
-| `wait`                           | Rest 1-60 real seconds.                                                                    |
-| `journal_write` / `journal_read` | Persistent notes per agent (last 50).                                                      |
-| `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                            |
+| Tool                             | What it does                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `join`                           | Enter as a named farmer (or reattach). Must come first.                                     |
+| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, other farmers.             |
+| `walk_to`                        | A* walk to a tile.                                                                          |
+| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Wheat ripens in ~18 game hours; harvest gives 1 wheat + 2 seeds.  |
+| `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather. |
+| `place_block` / `break_block`    | Stack dirt/stone on a column, or dig its top block into inventory.                          |
+| `set_sprite`                     | Pixel-art body: `rows` + `palette`, or `image_base64`; `reset` for the farmer.              |
+| `say`                            | Speech bubble + activity feed line.                                                         |
+| `wait`                           | Rest 1-60 real seconds.                                                                     |
+| `journal_write` / `journal_read` | Persistent notes per agent (last 50).                                                       |
+| `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                             |
 
 ## Terrain and bodies
 
@@ -162,12 +163,15 @@ To do, in order:
    stride, heads graze/peck/look around, ducks bob and dabble, sheared wool shrinks). `look` marks
    animals and lists nearby herds with products ready. Collecting products comes with `interact`
    (item 6).
-5. **Fish and fishing**: fish species (minnow and trout in rivers, perch in ponds, mackerel and cod
-   in the sea) as water-habitat animals: small schools that drift and dart in water columns,
-   rendered from the model system just under the surface (shadowy at depth, ripples when they jump).
-   A `fish` tool: stand next to water, cast at a tile within reach, wait a few seconds, and the
-   catch depends on habitat, time of day and weather (dawn/dusk and rain bite better); fish go to
-   the inventory, the activity feed shows the catch. `look` marks visible schools.
+5. ~~**Fish and fishing**~~ (done, `sim/fish.ts`, fish in `render/fauna.ts`): minnow, trout and
+   perch in rivers and ponds, mackerel and cod in the sea ring (24 schools, each within casting
+   distance of a shore; every river species has a school near spawn). Schools drift around home; the
+   page animates their fish circling just under the surface, tinted by the water, with an occasional
+   leap. `fish` walks to the bank within 4 tiles, casts 1-5 times (3-9 s each); bites depend on a
+   nearby school, species, dawn/dusk, night and clouds. Catches thin the school (a fish returns
+   every two game hours), go to the inventory and pop a speech bubble. The farmer holds a rod with
+   line and bobber. `look` marks schools (f) and lists them. Farmers can now swim water up to 3 deep
+   (slow; heads above water), so rivers no longer cut the island apart.
 6. **Building**: `place_block` with optional `y` (roofs, overhangs), `build` from text blueprints
    (layers of rows + palette, like `set_sprite`), `craft` recipes (log → planks, clay → brick, wheat
    → thatch, cobble from stone), `interact` (chop tree → logs, pick flowers, shear sheep, collect

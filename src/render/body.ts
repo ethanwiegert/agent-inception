@@ -64,6 +64,16 @@ export function defineBodyModels(lib: MeshLibrary) {
       b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
       b.box(at(0, -0.72, 0.68), [0.2, 0.22, 0.04], { color: IRON }, 0.01);
     }),
+    rod: lib.define("tool.rod", (b) => {
+      // Held in the right hand: the rod points forward and up, the line hangs straight down.
+      b.cylinder(rotateX(at(0, -0.6, 0), 2.214), 0.022, 0.01, 1.6, { color: WOOD, sway: [0, 0.3] });
+      b.cylinder(rotateX(at(0, -1.56, 1.28), -1.845), 0.004, 0.004, 1.3, {
+        color: [0.8, 0.8, 0.75],
+      });
+      b.sphere(translate(rotateX(at(0, -1.56, 1.28), -1.845), 0, 1.3, 0), [0.04, 0.04, 0.04], {
+        color: [0.7, 0.05, 0.03],
+      }, { detail: 0 });
+    }),
     hammer: lib.define("tool.hammer", (b) => {
       b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
       b.box(at(0, -0.62, 0.66), [0.16, 0.16, 0.12], { color: IRON }, 0.02);
@@ -199,6 +209,14 @@ export function buildBodies(
         lean = 0.3;
         headPitch = 0.35;
         break;
+      case Anim.Fish: {
+        const twitch = Math.sin(t * 1.5) * 0.04 + Math.max(0, Math.sin(t * 7)) * 0.03;
+        armR = -1.3 + twitch;
+        armL = -1.05 + twitch;
+        lean = 0.04;
+        headPitch = 0.25;
+        break;
+      }
       case Anim.Build:
         armR = -2.4 + work * 1.4;
         armL = -0.3;
@@ -241,6 +259,7 @@ export function buildBodies(
       add(ids.hand, limb, skin);
       if (side > 0 && a.anim === Anim.Till) add(ids.hoe, limb);
       if (side > 0 && a.anim === Anim.Build) add(ids.hammer, limb);
+      if (side > 0 && a.anim === Anim.Fish) add(ids.rod, limb);
     }
 
     // Head on the neck, with blinking eyes and a straw hat.

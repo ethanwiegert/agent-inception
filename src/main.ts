@@ -74,6 +74,8 @@ client.onEvent = (event) => {
   if (event.type === "say") {
     overlay.say(event.agent, event.text, performance.now());
     overlay.log(agentName(event.agent), `says “${event.text}”`);
+  } else if (event.type === "catch") {
+    overlay.say(event.agent, `Caught a ${event.fish}!`, performance.now());
   } else if (event.type === "joined") {
     overlay.log(agentName(event.agent), "arrived in the meadow");
   }
@@ -217,6 +219,7 @@ function draw(now: number) {
   renderer.render(camera, LOOKS[look] ?? LOOKS.natural, client.timeOfDay, now / 1000, {
     agents,
     animals: client.animals(now),
+    schools: client.schools,
     crops: client.crops,
     cropsVersion: client.cropsVersion,
     blocks: client.blocks,

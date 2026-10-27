@@ -46,13 +46,14 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (trees/flowers/rocks…: generation, saplings, save diff),
                     animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),
-                    path.ts (A* over floors, wading), protocol.ts, noise.ts, rng.ts
+                    fish.ts (fish species, schools, river/sea habitat),
+                    path.ts (A* over floors, wading, swimming), protocol.ts, noise.ts, rng.ts
 src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
                     common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
                     surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
                     water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
                     (instanced draws, wind) + body.ts (farmer parts, sprite dolls) + flora.ts
-                    (prop templates and instances) + fauna.ts (species rigs: parts with roles),
+                    (prop templates and instances) + fauna.ts (species rigs: parts with roles; fish schools),
                     sky.ts,
                     post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
@@ -67,7 +68,7 @@ must stay identical.
 ## Current work
 
 `docs/DESIGN.md` → "Upgrade checklist" lists what's left of the big upgrade goal, in order (next:
-fish and fishing). Pick up from there.
+building). Pick up from there.
 
 ## Testing and debugging
 
@@ -97,6 +98,8 @@ fish and fishing). Pick up from there.
 - Typed arrays crossing `postMessage` are typed `Float32Array<ArrayBuffer>` in `protocol.ts`.
 - `deno fmt` reflows code and markdown; match formatted text when editing by exact string.
 - Don't `pkill -f` with a pattern that also matches your own shell command.
+- The bridge reads `TOOL_DEFS` when the dev server starts: after adding or changing a tool's schema,
+  restart `deno task dev` (the game bundle rebuilds on its own).
 
 ## Playing
 

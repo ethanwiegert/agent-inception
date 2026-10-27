@@ -1,8 +1,10 @@
 import {
   deepStrictEqual as assertEquals,
   notDeepStrictEqual as assertNotEquals,
+  ok as assert,
 } from "node:assert/strict";
 import { meshChunk } from "../render/mesher.ts";
+import { findPath, levelAt, standY, step } from "./path.ts";
 import { Block, CHUNK, solid, World } from "./world.ts";
 import { generateWorld, SEA_LEVEL } from "./worldgen.ts";
 
@@ -87,4 +89,22 @@ Deno.test("a body buried in solid ground stands on the top surface", () => {
   const w = new World(4, 8, 4);
   for (let y = 0; y < 5; y++) w.set(1, y, 1, Block.Stone);
   assertEquals(w.surfaceY(1.5, 1.5, 0), 5);
+});
+
+Deno.test("bodies swim across water up to three deep, and float while they do", () => {
+  // Banks at height 4 on both sides of a channel whose bed is at 1 with water up to 4.
+  const w = new World(5, 10, 1);
+  for (let x = 0; x < 5; x++) {
+    const bank = x === 0 || x === 4;
+    for (let y = 0; y <= (bank ? 4 : 1); y++) w.set(x, y, 0, Block.Dirt);
+    if (!bank) { for (let y = 2; y <= 4; y++) w.set(x, y, 0, Block.Water); }
+  }
+  assertEquals(step(w, 4, 1, 0), 4, "into the water at the surface level");
+  assertEquals(step(w, 4, 4, 0), 4, "and out onto the far bank");
+  const path = findPath(w, 0, 0, 4, (x) => x === 4, (x) => 4 - x);
+  assertEquals(path, [1, 0, 2, 0, 3, 0, 4, 0]);
+  assertEquals(levelAt(w, 2, 0, 3.6), 4);
+  assert(standY(w, 2.5, 0.5, 3.6) > 2.5, "treading water, not walking the bed");
+  w.set(2, 0, 0, Block.Water), w.set(2, 1, 0, Block.Water);
+  assertEquals(step(w, 4, 2, 0), -1, "too deep to swim");
 });

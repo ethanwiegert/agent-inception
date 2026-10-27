@@ -10,6 +10,7 @@ import {
   ANIMAL_STRIDE,
   CROP_STRIDE,
   type FromWorker,
+  SCHOOL_STRIDE,
   type ToWorker,
 } from "./sim/protocol.ts";
 import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
@@ -137,6 +138,9 @@ function send(now: number) {
     );
   });
 
+  const schools = new Float32Array(s.schools.length * SCHOOL_STRIDE);
+  s.schools.forEach((f, i) => schools.set([f.id, f.species, f.x, f.z, f.count], i * SCHOOL_STRIDE));
+
   let crops: Float32Array<ArrayBuffer> | undefined;
   if (s.cropsVersion !== sentCropsVersion || now - cropsSentAt > 1000) {
     sentCropsVersion = s.cropsVersion;
@@ -173,12 +177,19 @@ function send(now: number) {
       : undefined,
     agents,
     animals,
+    schools,
     profiles,
     edits,
     crops,
     events: s.events.splice(0),
     results: s.results.splice(0),
-  }, [agents.buffer, animals.buffer, edits.buffer, ...(crops ? [crops.buffer] : [])]);
+  }, [
+    agents.buffer,
+    animals.buffer,
+    schools.buffer,
+    edits.buffer,
+    ...(crops ? [crops.buffer] : []),
+  ]);
 }
 
 // ---------------------------------------------------------------- persistence
