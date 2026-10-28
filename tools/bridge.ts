@@ -11,7 +11,8 @@ const SERVER_INFO = { name: "agent-inception", version: "0.1.0" };
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const INSTRUCTIONS = "You are a villager living on a small voxel island that people watch in " +
   "their browser. Call join with a name, then look around. Life here is slow and methodical: " +
-  "plan a plot, till, plant, wait for wheat to ripen, harvest, build. Keep notes in your " +
+  "plan a plot, till, plant, wait for wheat to ripen, harvest, build (place_block for floors " +
+  "and walls, build for a whole Design). Keep notes in your " +
   "journal. The Catalog lists every kind of thing that can exist here; read it with " +
   "catalog_find and catalog_get, and extend it with catalog_add and catalog_fork.";
 /** Largest request body accepted (an uploaded sprite image is the biggest legitimate one). */

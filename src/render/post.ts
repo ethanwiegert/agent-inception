@@ -40,11 +40,13 @@ fn toSrgb(c: vec3f) -> vec3f {
 `;
 
 export class PostRenderer {
-  private pipeline: GPURenderPipeline;
+  /** One pipeline per output format: the canvas's, and rgba8unorm for captures. */
+  private pipelines = new Map<GPUTextureFormat, GPURenderPipeline>();
   private layout: GPUBindGroupLayout;
-  private bindGroup: GPUBindGroup | null = null;
+  private module: GPUShaderModule;
+  private pipelineLayout: GPUPipelineLayout;
 
-  constructor(private device: GPUDevice, layouts: Layouts, outputFormat: GPUTextureFormat) {
+  constructor(private device: GPUDevice, layouts: Layouts) {
     this.layout = device.createBindGroupLayout({
       entries: [{
         binding: 0,
@@ -52,26 +54,43 @@ export class PostRenderer {
         texture: { sampleType: "unfilterable-float" },
       }],
     });
-    const module = device.createShaderModule({ code: shader, label: "post" });
-    this.pipeline = device.createRenderPipeline({
-      label: "post",
-      layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.shadowFrame, this.layout] }),
-      vertex: { module, entryPoint: "vs" },
-      fragment: { module, entryPoint: "fs", targets: [{ format: outputFormat }] },
+    this.module = device.createShaderModule({ code: shader, label: "post" });
+    this.pipelineLayout = device.createPipelineLayout({
+      bindGroupLayouts: [layouts.shadowFrame, this.layout],
     });
   }
 
-  setInput(view: GPUTextureView) {
-    this.bindGroup = this.device.createBindGroup({
+  /** A bind group that reads `view` as the HDR scene. */
+  bindInput(view: GPUTextureView): GPUBindGroup {
+    return this.device.createBindGroup({
       layout: this.layout,
       entries: [{ binding: 0, resource: view }],
     });
   }
 
-  draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup) {
-    pass.setPipeline(this.pipeline);
+  draw(
+    pass: GPURenderPassEncoder,
+    frameBindGroup: GPUBindGroup,
+    input: GPUBindGroup,
+    format: GPUTextureFormat,
+  ) {
+    pass.setPipeline(this.pipeline(format));
     pass.setBindGroup(0, frameBindGroup);
-    pass.setBindGroup(1, this.bindGroup!);
+    pass.setBindGroup(1, input);
     pass.draw(3);
+  }
+
+  private pipeline(format: GPUTextureFormat): GPURenderPipeline {
+    let p = this.pipelines.get(format);
+    if (!p) {
+      p = this.device.createRenderPipeline({
+        label: `post-${format}`,
+        layout: this.pipelineLayout,
+        vertex: { module: this.module, entryPoint: "vs" },
+        fragment: { module: this.module, entryPoint: "fs", targets: [{ format }] },
+      });
+      this.pipelines.set(format, p);
+    }
+    return p;
   }
 }

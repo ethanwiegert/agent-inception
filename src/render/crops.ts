@@ -7,7 +7,8 @@ const STALKS = 10;
 /**
  * Crops drawn like grass: blades generated in the vertex shader, ten per tile in two rows. Each
  * crop brings its colors from the Catalog: young stalks in its stalk Material, ripe ears in the
- * color of what it drops.
+ * color of what it drops. Growth comes from the planting tick and the frame's tick, so fields
+ * ripen smoothly without re-sending anything.
  */
 const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 @group(1) @binding(0) var<storage, read> crops: array<vec4f>;
@@ -40,7 +41,7 @@ struct Out {
   let crop = crops[(ii / STALKS) * 2u];
   let look = crops[(ii / STALKS) * 2u + 1u];
   let k = ii % STALKS;
-  let g = crop.w;
+  let g = select(clamp((frame.weather.z - crop.w) / look.z, 0.0, 1.0), 1.0, look.z <= 0.0);
   var seed = pcg((u32(crop.x) * 73856093u) ^ (u32(crop.z) * 19349663u) ^ (k * 83492791u));
   let col = f32(k % 5u);
   let row = f32(k / 5u);

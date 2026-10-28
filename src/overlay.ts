@@ -28,6 +28,30 @@ const css = `
 .ai-feed i{color:#8a94a3;font-style:normal}
 `;
 
+/** Name tags float this far above a villager's feet. */
+export const TAG_HEIGHT = 2.3;
+const at: [number, number] = [0, 0];
+
+/**
+ * Project a world point to pixels of a `width` × `height` view into `out`. False when the point
+ * is behind the camera.
+ */
+export function project(
+  m: Mat4,
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  height: number,
+  out: [number, number],
+): boolean {
+  const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+  if (cw <= 0) return false;
+  out[0] = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw * 0.5 + 0.5) * width;
+  out[1] = (0.5 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw * 0.5) * height;
+  return true;
+}
+
 /** DOM layer over the canvas: name tags, speech bubbles and an activity feed for spectators. */
 export class Overlay {
   private tags = new Map<number, Tag>();
@@ -88,17 +112,12 @@ export class Overlay {
       let tag = this.tags.get(a.id);
       if (!tag) tag = this.createTag(a);
       tag.name.classList.toggle("followed", a.id === followed);
-      const m = viewProj, x = a.x, y = a.y + 2.3, z = a.z;
-      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-      if (cw <= 0) {
+      if (!project(viewProj, a.x, a.y + TAG_HEIGHT, a.z, width, height, at)) {
         tag.root.style.display = "none";
         continue;
       }
-      const cx = (m[0] * x + m[4] * y + m[8] * z + m[12]) / cw;
-      const cy = (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw;
-      const px = (cx * 0.5 + 0.5) * width, py = (0.5 - cy * 0.5) * height;
       tag.root.style.display = "";
-      tag.root.style.transform = `translate(${px}px, ${py}px) translate(-50%, -100%)`;
+      tag.root.style.transform = `translate(${at[0]}px, ${at[1]}px) translate(-50%, -100%)`;
       if (tag.until && now > tag.until) {
         tag.bubble.style.opacity = "0";
         tag.until = 0;

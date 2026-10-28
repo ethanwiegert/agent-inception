@@ -1,3 +1,5 @@
+import { aabbVisible } from "../math.ts";
+import { CHUNK } from "../sim/world.ts";
 import { frameWgsl, lightingWgsl } from "./frame.ts";
 import type { Layouts } from "./renderer.ts";
 import type { SurfaceTexture } from "./surface.ts";
@@ -6,9 +8,12 @@ import type { SurfaceTexture } from "./surface.ts";
  * Water: one quad per wet column, generated in the vertex shader from the
  * shared surface texture (no meshes to rebuild when agents dig ponds), plus an
  * ocean plane out to the horizon. Waves, reflections and foam are procedural.
+ * Wet columns are listed once per surface change, grouped by chunk, so a frame
+ * draws only the wet columns of visible chunks.
  */
 const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 @group(1) @binding(0) var surface: texture_2d<u32>;
+@group(1) @binding(1) var<storage, read> wet: array<u32>;
 
 const SURFACE_DROP = 0.12;
 const OCEAN_REACH = 3000.0;
@@ -30,7 +35,8 @@ fn corner(vi: u32) -> vec2f {
 
 @vertex fn vsColumns(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
   let size = vec2i(textureDimensions(surface));
-  let cell = vec2i(i32(ii) % size.x, i32(ii) / size.x);
+  let key = i32(wet[ii]);
+  let cell = vec2i(key % size.x, key / size.x);
   let s = textureLoad(surface, cell, 0);
   if (s.a == 0u) { return culled(); }
   let p = vec3f(f32(cell.x), f32(s.a) - SURFACE_DROP, f32(cell.y)) + vec3f(corner(vi).x, 0.0, corner(vi).y);
@@ -124,29 +130,43 @@ fn shadeWater(world: vec3f) -> vec4f {
 `;
 
 export class WaterRenderer {
-  private bindGroup: GPUBindGroup;
+  private layout: GPUBindGroupLayout;
+  private bindGroup: GPUBindGroup | null = null;
   private columns: GPURenderPipeline;
   private ocean: GPURenderPipeline;
-  private cells: number;
+  private wet: GPUBuffer | null = null;
+  private keys: Uint32Array;
+  /** Per chunk: first entry and count in `wet`. */
+  private first: Uint32Array;
+  private counts: Uint32Array;
+  private version = -1;
+  private chunksX: number;
 
-  constructor(device: GPUDevice, surface: SurfaceTexture, layouts: Layouts) {
-    this.cells = surface.texture.width * surface.texture.height;
-    const layout = device.createBindGroupLayout({
-      entries: [{
-        binding: 0,
-        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-        texture: { sampleType: "uint" },
-      }],
-    });
-    this.bindGroup = device.createBindGroup({
-      layout,
-      entries: [{ binding: 0, resource: surface.view }],
+  constructor(
+    private device: GPUDevice,
+    private surface: SurfaceTexture,
+    layouts: Layouts,
+    /** World height, the top of each chunk's bounds. */
+    private worldHeight: number,
+  ) {
+    const { width, height } = surface.texture;
+    this.keys = new Uint32Array(width * height);
+    this.chunksX = Math.ceil(width / CHUNK);
+    const chunks = this.chunksX * Math.ceil(height / CHUNK);
+    this.first = new Uint32Array(chunks);
+    this.counts = new Uint32Array(chunks);
+    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    this.layout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: VF, texture: { sampleType: "uint" } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+      ],
     });
     const module = device.createShaderModule({ code: shader, label: "water" });
     const pipeline = (vs: string, fs: string) =>
       device.createRenderPipeline({
         label: `water-${vs}`,
-        layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layout] }),
+        layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, this.layout] }),
         vertex: { module, entryPoint: vs },
         fragment: {
           module,
@@ -171,12 +191,56 @@ export class WaterRenderer {
     this.ocean = pipeline("vsOcean", "fsOcean");
   }
 
-  /** Draw after all opaque geometry. */
-  draw(pass: GPURenderPassEncoder) {
+  /** Relist the wet columns, chunk by chunk, after the surface changed. */
+  private update() {
+    const s = this.surface;
+    if (s.version === this.version) return;
+    this.version = s.version;
+    const { width, height } = s.texture;
+    let n = 0;
+    for (let c = 0; c < this.counts.length; c++) {
+      const x0 = (c % this.chunksX) * CHUNK, z0 = Math.floor(c / this.chunksX) * CHUNK;
+      this.first[c] = n;
+      for (let z = z0; z < Math.min(height, z0 + CHUNK); z++) {
+        for (let x = x0; x < Math.min(width, x0 + CHUNK); x++) {
+          const key = z * width + x;
+          if (s.texels[key * 4 + 3] > 0) this.keys[n++] = key;
+        }
+      }
+      this.counts[c] = n - this.first[c];
+    }
+    const bytes = Math.max(4, n * 4);
+    if (!this.wet || this.wet.size < bytes) {
+      this.wet?.destroy();
+      this.wet = this.device.createBuffer({
+        size: Math.max(bytes, this.keys.byteLength / 4),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      this.bindGroup = this.device.createBindGroup({
+        layout: this.layout,
+        entries: [
+          { binding: 0, resource: this.surface.view },
+          { binding: 1, resource: { buffer: this.wet } },
+        ],
+      });
+    }
+    if (n) this.device.queue.writeBuffer(this.wet, 0, this.keys, 0, n);
+  }
+
+  /** Draw after all opaque geometry; `planes` cull chunks outside the view. */
+  draw(pass: GPURenderPassEncoder, planes: Float32Array) {
+    this.update();
+    if (!this.bindGroup) return;
     pass.setBindGroup(1, this.bindGroup);
     pass.setPipeline(this.ocean);
     pass.draw(4);
     pass.setPipeline(this.columns);
-    pass.draw(4, this.cells);
+    for (let c = 0; c < this.counts.length; c++) {
+      const n = this.counts[c];
+      if (!n) continue;
+      const x = (c % this.chunksX) * CHUNK, z = Math.floor(c / this.chunksX) * CHUNK;
+      if (!aabbVisible(planes, x, 0, z, x + CHUNK, this.worldHeight, z + CHUNK)) continue;
+      pass.draw(4, n, 0, this.first[c]);
+    }
   }
 }

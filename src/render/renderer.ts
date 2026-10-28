@@ -40,6 +40,8 @@ export interface SceneState {
   schools: Float32Array;
   crops: Float32Array;
   cropsVersion: number;
+  /** The tick the crops' planting times are relative to. */
+  cropsTick: number;
   blocks: BlockRegistry;
   /** What everything looks like: Materials and Designs. */
   catalog: Catalog;
@@ -47,6 +49,21 @@ export interface SceneState {
   tick: number;
   day: number;
   weather: Weather;
+}
+
+/** Where a frame ends up: the canvas, or an offscreen texture for captures. */
+export interface RenderTarget {
+  view: GPUTextureView;
+  width: number;
+  height: number;
+  format: GPUTextureFormat;
+}
+
+/** Pixels read back from a capture: tightly packed RGBA8, top row first. */
+export interface Capture {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray<ArrayBuffer>;
 }
 
 export interface RenderStats {
@@ -86,23 +103,15 @@ export class Renderer {
   private floraVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
-  private targets: {
-    width: number;
-    height: number;
-    color: GPUTexture;
-    resolve: GPUTexture;
-    depth: GPUTexture;
-  } | null = null;
+  /** MSAA scene targets for the view, and a separate set for captures at their own size. */
+  private viewTargets: SceneTargets | null = null;
+  private shotTargets: SceneTargets | null = null;
+  private shot: { texture: GPUTexture; buffer: GPUBuffer; bytesPerRow: number } | null = null;
   private timer: GpuTimer | null;
   private lightView = mat4();
   private lightProj = mat4();
 
-  constructor(
-    private device: GPUDevice,
-    private context: GPUCanvasContext,
-    format: GPUTextureFormat,
-    private world: World,
-  ) {
+  constructor(private device: GPUDevice, private world: World) {
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     this.layouts = {
@@ -155,9 +164,9 @@ export class Renderer {
     this.surface = new SurfaceTexture(device, world);
     this.terrain = new TerrainRenderer(device, world, this.surface, this.layouts);
     this.grass = new GrassRenderer(device, this.surface, this.layouts);
-    this.water = new WaterRenderer(device, this.surface, this.layouts);
+    this.water = new WaterRenderer(device, this.surface, this.layouts, world.sizeY);
     this.sky = new SkyRenderer(device, this.layouts);
-    this.post = new PostRenderer(device, this.layouts, format);
+    this.post = new PostRenderer(device, this.layouts);
     this.bodyModels = new BodyModels(this.library);
     this.floraModels = new FloraModels(this.library);
     this.faunaModels = new FaunaModels(this.library);
@@ -167,11 +176,20 @@ export class Renderer {
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
 
-  render(camera: Camera, look: Look, timeOfDay: number, time: number, scene: SceneState) {
+  /** Draw one frame into `out`; `capture` renders use their own scene targets. */
+  render(
+    camera: Camera,
+    look: Look,
+    timeOfDay: number,
+    time: number,
+    scene: SceneState,
+    out: RenderTarget,
+    capture = false,
+  ) {
     const { device } = this;
-    const canvas = this.context.canvas as HTMLCanvasElement;
-    this.ensureTargets(canvas.width, canvas.height);
-    const targets = this.targets!;
+    const targets = capture
+      ? (this.shotTargets = this.sceneTargets(this.shotTargets, out.width, out.height))
+      : (this.viewTargets = this.sceneTargets(this.viewTargets, out.width, out.height));
 
     this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
@@ -199,6 +217,7 @@ export class Renderer {
     fd[F.cameraPos + 3] = time;
     applyLook(fd, look, timeOfDay, scene.day, scene.weather);
     fd[F.extra + 2] = SEA_LEVEL;
+    fd[F.weather + 2] = scene.tick - scene.cropsTick;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
 
@@ -235,14 +254,14 @@ export class Renderer {
 
     const main = encoder.beginRenderPass({
       colorAttachments: [{
-        view: targets.color.createView(),
-        resolveTarget: targets.resolve.createView(),
+        view: targets.colorView,
+        resolveTarget: targets.resolveView,
         loadOp: "clear",
         storeOp: "discard",
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
       }],
       depthStencilAttachment: {
-        view: targets.depth.createView(),
+        view: targets.depthView,
         depthClearValue: 1,
         depthLoadOp: "clear",
         depthStoreOp: "discard",
@@ -261,19 +280,19 @@ export class Renderer {
     if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);
     // Transparent last: water blends over everything opaque, including the sky at the horizon.
     main.setBindGroup(0, this.frameBindGroup);
-    if (!skip.has("water")) this.water.draw(main);
+    if (!skip.has("water")) this.water.draw(main, this.planes);
     main.end();
 
     const post = encoder.beginRenderPass({
       colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
+        view: out.view,
         loadOp: "clear",
         storeOp: "store",
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
       }],
       timestampWrites: this.timer?.writes(1),
     });
-    this.post.draw(post, this.plainFrameBindGroup);
+    this.post.draw(post, this.plainFrameBindGroup, targets.post, out.format);
     post.end();
 
     this.timer?.resolve(encoder);
@@ -324,28 +343,96 @@ export class Renderer {
     m[13] += (Math.round(oy) - oy) / texels;
   }
 
-  private ensureTargets(width: number, height: number) {
-    if (this.targets && this.targets.width === width && this.targets.height === height) return;
-    if (this.targets) {
-      this.targets.color.destroy();
-      this.targets.resolve.destroy();
-      this.targets.depth.destroy();
+  private sceneTargets(have: SceneTargets | null, width: number, height: number): SceneTargets {
+    if (have && have.width === width && have.height === height) return have;
+    have?.destroy();
+    return new SceneTargets(this.device, this.layouts, this.post, width, height);
+  }
+
+  /**
+   * Render one frame offscreen at `width` × `height` and read it back. `draw` renders the frame
+   * into the target it's given (so the caller can pose the camera for it).
+   */
+  async capture(
+    width: number,
+    height: number,
+    draw: (target: RenderTarget) => void,
+  ): Promise<Capture> {
+    const { device } = this;
+    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    let shot = this.shot;
+    if (!shot || shot.texture.width !== width || shot.texture.height !== height) {
+      shot?.texture.destroy();
+      shot?.buffer.destroy();
+      shot = this.shot = {
+        texture: device.createTexture({
+          size: [width, height],
+          format: "rgba8unorm",
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        }),
+        buffer: device.createBuffer({
+          size: bytesPerRow * height,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        }),
+        bytesPerRow,
+      };
     }
-    const { samples, colorFormat, depthFormat } = this.layouts;
+    draw({ view: shot.texture.createView(), width, height, format: "rgba8unorm" });
+    const encoder = device.createCommandEncoder();
+    encoder.copyTextureToBuffer(
+      { texture: shot.texture },
+      { buffer: shot.buffer, bytesPerRow },
+      [width, height],
+    );
+    device.queue.submit([encoder.finish()]);
+    await shot.buffer.mapAsync(GPUMapMode.READ);
+    const src = new Uint8Array(shot.buffer.getMappedRange());
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      data.set(src.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4);
+    }
+    shot.buffer.unmap();
+    return { width, height, data };
+  }
+}
+
+/** The multisampled HDR scene, its resolve, depth, and the post pass's binding of the resolve. */
+class SceneTargets {
+  readonly color: GPUTexture;
+  readonly resolve: GPUTexture;
+  readonly depth: GPUTexture;
+  readonly colorView: GPUTextureView;
+  readonly resolveView: GPUTextureView;
+  readonly depthView: GPUTextureView;
+  readonly post: GPUBindGroup;
+
+  constructor(
+    device: GPUDevice,
+    layouts: Layouts,
+    post: PostRenderer,
+    readonly width: number,
+    readonly height: number,
+  ) {
+    const { samples, colorFormat, depthFormat } = layouts;
     const make = (format: GPUTextureFormat, sampleCount: number, usage: number) =>
-      this.device.createTexture({ size: [width, height], format, sampleCount, usage });
-    this.targets = {
-      width,
-      height,
-      color: make(colorFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT),
-      resolve: make(
-        colorFormat,
-        1,
-        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-      ),
-      depth: make(depthFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT),
-    };
-    this.post.setInput(this.targets.resolve.createView());
+      device.createTexture({ size: [width, height], format, sampleCount, usage });
+    this.color = make(colorFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT);
+    this.resolve = make(
+      colorFormat,
+      1,
+      GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    );
+    this.depth = make(depthFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT);
+    this.colorView = this.color.createView();
+    this.resolveView = this.resolve.createView();
+    this.depthView = this.depth.createView();
+    this.post = post.bindInput(this.resolveView);
+  }
+
+  destroy() {
+    this.color.destroy();
+    this.resolve.destroy();
+    this.depth.destroy();
   }
 }
 
@@ -390,7 +477,7 @@ class GpuTimer {
       this.readBuffer.unmap();
       this.busy = false;
       const ms = Number(end - start) / 1e6;
-      if (ms > 0 && ms < 1000) {
+      if (ms > 0 && ms < 60_000) { // software adapters take seconds
         this.smoothed = this.smoothed ? this.smoothed * 0.9 + ms * 0.1 : ms;
         onMs(this.smoothed);
       }

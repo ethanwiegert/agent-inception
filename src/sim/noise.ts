@@ -2,9 +2,30 @@ import { hash2 } from "./rng.ts";
 
 const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 
+/**
+ * Gradients memoized per lattice point. Neighbouring samples share corners, so nearly every lookup
+ * hits; a miss recomputes exactly the same doubles, so the noise is bit-identical either way.
+ */
+const CACHE_BITS = 12;
+const cacheX = new Int32Array(1 << CACHE_BITS);
+const cacheZ = new Int32Array(1 << CACHE_BITS);
+const cacheSeed = new Int32Array(1 << CACHE_BITS);
+const cacheUsed = new Uint8Array(1 << CACHE_BITS);
+const cacheGx = new Float64Array(1 << CACHE_BITS);
+const cacheGz = new Float64Array(1 << CACHE_BITS);
+
 function grad(ix: number, iz: number, seed: number, dx: number, dz: number): number {
-  const a = hash2(ix, iz, seed) * Math.PI * 2;
-  return Math.cos(a) * dx + Math.sin(a) * dz;
+  const slot = (Math.imul(ix, 0x9e3779b1) ^ Math.imul(iz, 0x85ebca77) ^
+    Math.imul(seed, 0xc2b2ae35)) >>> (32 - CACHE_BITS);
+  if (
+    !cacheUsed[slot] || cacheX[slot] !== ix || cacheZ[slot] !== iz || cacheSeed[slot] !== seed
+  ) {
+    const a = hash2(ix, iz, seed) * Math.PI * 2;
+    cacheGx[slot] = Math.cos(a);
+    cacheGz[slot] = Math.sin(a);
+    cacheX[slot] = ix, cacheZ[slot] = iz, cacheSeed[slot] = seed, cacheUsed[slot] = 1;
+  }
+  return cacheGx[slot] * dx + cacheGz[slot] * dz;
 }
 
 /** Seeded 2D gradient noise in roughly [-0.7, 0.7]. */

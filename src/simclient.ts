@@ -11,7 +11,6 @@ import { Catalog } from "./sim/catalog.ts";
 import { Props } from "./sim/props.ts";
 import type { SimEvent, Sprite } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
-import { generateWorld } from "./sim/worldgen.ts";
 
 export interface AgentView {
   id: number;
@@ -44,8 +43,8 @@ export interface ToolResult {
 }
 
 /**
- * The page's view of the simulation. Mirrors the world (regenerated from the
- * seed, then patched with streamed edits) and interpolates agents between ticks.
+ * The page's view of the simulation. Mirrors the world (sent whole by the worker
+ * once, then patched with streamed edits) and interpolates agents between ticks.
  */
 export class SimClient {
   world: World | null = null;
@@ -62,6 +61,8 @@ export class SimClient {
   catalog = new Catalog();
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
   cropsVersion = 0;
+  /** The tick `crops` planting times are relative to. */
+  cropsTick = 0;
   profiles: AgentProfile[] = [];
   onReady: (world: World, caughtUp: number) => void = () => {};
 
@@ -77,6 +78,7 @@ export class SimClient {
   private prevAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
   private currAnimals: Float32Array<ArrayBuffer> = new Float32Array(0);
   private animalViews: AnimalView[] = [];
+  private agentViews: AgentView[] = [];
   /** Fish schools, straight from the last tick (they drift too slowly to need interpolation). */
   schools: Float32Array<ArrayBuffer> = new Float32Array(0);
   private currAt = 0;
@@ -100,28 +102,36 @@ export class SimClient {
     return new Promise((resolve) => this.pending.set(callId, resolve));
   }
 
-  /** Agents interpolated for render time `now` (ms). */
+  /** Agents interpolated for render time `now` (ms). The returned views are reused. */
   agents(now: number): AgentView[] {
     const t = Math.min(1, Math.max(0, (now - this.currAt) / this.interval));
-    const out: AgentView[] = [];
-    for (let i = 0; i < this.curr.length; i += AGENT_STRIDE) {
-      const c = this.curr, p = this.prev.length > i && this.prev[i] === c[i] ? this.prev : c;
-      const lerp = (k: number) => p[i + k] + (c[i + k] - p[i + k]) * t;
+    const c = this.curr, n = c.length / AGENT_STRIDE;
+    const views = this.agentViews;
+    views.length = n;
+    for (let j = 0; j < n; j++) {
+      const i = j * AGENT_STRIDE;
+      const p = this.prev.length > i && this.prev[i] === c[i] ? this.prev : c;
       const dyaw = Math.atan2(Math.sin(c[i + 4] - p[i + 4]), Math.cos(c[i + 4] - p[i + 4]));
-      out.push({
-        id: c[i],
-        name: this.profiles[i / AGENT_STRIDE]?.name ?? "?",
-        sprite: this.profiles[i / AGENT_STRIDE]?.sprite ?? null,
-        x: lerp(1),
-        y: lerp(2),
-        z: lerp(3),
-        yaw: p[i + 4] + dyaw * t,
-        anim: c[i + 5],
-        stride: lerp(6),
-        color: c[i + 7],
-      });
+      const v = views[j] ??= {
+        id: 0,
+        name: "",
+        x: 0,
+        y: 0,
+        z: 0,
+        yaw: 0,
+        anim: 0,
+        stride: 0,
+        color: 0,
+        sprite: null,
+      };
+      v.id = c[i];
+      v.name = this.profiles[j]?.name ?? "?";
+      v.sprite = this.profiles[j]?.sprite ?? null;
+      v.x = mix(p, c, i + 1, t), v.y = mix(p, c, i + 2, t), v.z = mix(p, c, i + 3, t);
+      v.yaw = p[i + 4] + dyaw * t, v.anim = c[i + 5], v.stride = mix(p, c, i + 6, t);
+      v.color = c[i + 7];
     }
-    return out;
+    return views;
   }
 
   /** Animals interpolated for render time `now` (ms). The returned views are reused. */
@@ -157,11 +167,10 @@ export class SimClient {
     if (msg.type === "ready") {
       this.seed = msg.seed;
       this.catalog = Catalog.load(msg.catalog);
-      const world = generateWorld({ seed: msg.seed });
-      // From the pristine terrain, like the sim.
-      this.props = new Props(world, msg.seed, this.catalog);
-      this.props.applyDiff(msg.props);
-      applyEdits(world, msg.edits);
+      // The worker's world and props as they stand: nothing to regenerate on the main thread.
+      const world = World.fromData(msg.world);
+      this.props = new Props(world, msg.props.generated, this.catalog);
+      this.props.applyDiff(msg.props.diff);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
       this.prevAnimals = this.currAnimals = new Float32Array(0);
@@ -170,7 +179,15 @@ export class SimClient {
       this.onReady(world, msg.caughtUp);
       return;
     }
+    if (msg.type === "results") return this.resolve(msg.results);
     this.tickMessage(msg);
+  }
+
+  private resolve(results: { callId: number; text: string; isError: boolean }[]) {
+    for (const r of results) {
+      this.pending.get(r.callId)?.({ text: r.text, isError: r.isError });
+      this.pending.delete(r.callId);
+    }
   }
 
   private tickMessage(msg: TickMessage) {
@@ -195,14 +212,12 @@ export class SimClient {
     if (msg.props && this.props) this.props.reset(msg.props);
     if (msg.crops) {
       this.crops = msg.crops;
+      this.cropsTick = msg.tick;
       this.cropsVersion++;
     }
     if (this.world) applyEdits(this.world, msg.edits);
     for (const event of msg.events) this.onEvent(event);
-    for (const r of msg.results) {
-      this.pending.get(r.callId)?.({ text: r.text, isError: r.isError });
-      this.pending.delete(r.callId);
-    }
+    this.resolve(msg.results);
   }
 }
 

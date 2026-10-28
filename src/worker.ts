@@ -28,11 +28,11 @@ let budget = 0;
 let lastSave = 0;
 let sentAgentsVersion = -1;
 let sentCropsVersion = -1;
+let sentCropsCatalog = -1;
 let sentPropsVersion = -1;
 let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
-let cropsSentAt = 0;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
 
@@ -70,7 +70,11 @@ async function handle(msg: ToWorker) {
       await persist();
       break;
     case "call":
-      if (sim) callTool(sim, msg.session, msg.tool, msg.args, msg.callId);
+      if (!sim) break;
+      callTool(sim, msg.session, msg.tool, msg.args, msg.callId);
+      // Instant tools answer now; jobs answer from a later tick. Events (a say, a Rule's reply)
+      // and state still travel with the next tick, which lands within 50 ms.
+      if (sim.results.length) post({ type: "results", results: sim.results.splice(0) });
       break;
     case "speed":
       speed = Math.max(0, Math.min(120, msg.speed));
@@ -86,30 +90,22 @@ async function handle(msg: ToWorker) {
 
 function start(caughtUp: number) {
   const s = sim!;
-  const edits: number[] = [];
-  const w = s.world;
-  for (const [index, block] of s.edits) {
-    edits.push(
-      index % w.sizeX,
-      Math.floor(index / (w.sizeX * w.sizeZ)),
-      Math.floor(index / w.sizeX) % w.sizeZ,
-      block,
-    );
-  }
   s.pendingEdits = [];
-  sentAgentsVersion = sentCropsVersion = -1;
+  sentAgentsVersion = sentCropsVersion = sentCropsCatalog = -1;
   sentPropsVersion = s.props.version;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
+  const world = s.world.data();
+  const generated = s.props.packGenerated();
   post({
     type: "ready",
     seed: s.seed,
-    edits: Int32Array.from(edits),
+    world,
     caughtUp,
-    props: s.props.diff(),
+    props: { generated, diff: s.props.diff() },
     catalog: s.catalog.save(),
-  });
+  }, [world.blocks.buffer, world.top.buffer, world.waterTop.buffer, generated.buffer]);
   lastStep = performance.now();
   budget = 0;
 }
@@ -124,14 +120,14 @@ setInterval(() => {
   budget -= steps;
   if (budget > 4000) budget = 0;
   for (let i = 0; i < steps; i++) sim.step();
-  send(now);
+  send();
   if (now - lastSave > SAVE_EVERY_MS) {
     lastSave = now;
     persist();
   }
 }, 1000 / TICK_HZ);
 
-function send(now: number) {
+function send() {
   const s = sim!;
   const agents = new Float32Array(s.agents.length * AGENT_STRIDE);
   s.agents.forEach((a, i) => {
@@ -151,15 +147,17 @@ function send(now: number) {
   s.schools.forEach((f, i) => schools.set([f.id, f.species, f.x, f.z, f.count], i * SCHOOL_STRIDE));
 
   let crops: Float32Array<ArrayBuffer> | undefined;
-  if (s.cropsVersion !== sentCropsVersion || now - cropsSentAt > 1000) {
+  if (s.cropsVersion !== sentCropsVersion || s.catalog.version !== sentCropsCatalog) {
     sentCropsVersion = s.cropsVersion;
-    cropsSentAt = now;
+    sentCropsCatalog = s.catalog.version;
     crops = new Float32Array(s.crops.size * CROP_STRIDE);
     let i = 0;
     for (const [key, crop] of s.crops) {
       const x = key % s.world.sizeX, z = Math.floor(key / s.world.sizeX);
       const [stalk, ripe] = s.cropColors(crop.design);
-      crops.set([x, s.world.heightAt(x, z) + 1, z, s.cropGrowth(crop), stalk, ripe], i);
+      // Relative to now, so float32 stays exact however old the world gets.
+      const planted = crop.planted - s.tick;
+      crops.set([x, s.world.heightAt(x, z) + 1, z, planted, stalk, ripe, crop.grow], i);
       i += CROP_STRIDE;
     }
   }

@@ -21,7 +21,7 @@ export const F = {
   extra: 96, // star visibility, daylight, sea level, -
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
-  weather: 108, // cloud cover 0-1, cloud drift speed, -, -
+  weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, -
   size: 112,
 } as const;
 
