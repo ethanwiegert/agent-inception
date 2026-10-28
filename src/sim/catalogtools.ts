@@ -7,6 +7,7 @@ import {
   type MaterialContent,
   type Proposal,
   type RelationContent,
+  ZONES,
 } from "./catalog.ts";
 import { type Args, clock, type Handler } from "./jobs.ts";
 import { RULE_EVENTS, RULE_LIMITS, type RuleContent } from "./rules.ts";
@@ -62,14 +63,21 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
     description: "Add a new entry to the Catalog. Entries are permanent and shared: anyone can " +
       "read, fork and use them, and they never change (fork to make a variant). " +
       `You can add ${AUTHOR_LIMITS.hour} entries per game hour. The content per kind:\n` +
-      '- material: {"color": "#a0522d", "pattern": "planks", "density": 0.6, "hardness": 2, ' +
-      '"burns": true, "glows": 0}. density in g/cm³ (water 1), hardness 0-10, glows 0-1. ' +
+      '- material: {"form": "item", "color": "#a0522d", "pattern": "planks", "density": 0.6, ' +
+      '"hardness": 2, "burns": true, "glows": 0}. form is "block" (the default; it can be a ' +
+      'placeable block), "item" (carried: seeds, wool, fish) or "liquid" (nature only). ' +
+      "density in g/cm³ (water 1), hardness 0-10, glows 0-1. " +
       `Patterns: ${Object.keys(Pattern).join(", ")}.\n` +
       '- design: {"blocks": {"palette": {"s": "stone"}, "layers": [["sss", "s.s"]]}, "parts": ' +
-      '[{"part": "box", "material": "planks", "at": [1.5, 1, 0.5], "size": [3, 0.2, 1], ' +
-      '"turn": 0}]}. layers go bottom up; a layer is rows along z, each row characters along x, ' +
-      '"." empty. Up to 16×16×16 blocks and 32 parts (box, sphere, cylinder). Designs are ' +
-      "plans for now; building them comes later.\n" +
+      '[{"part": "cone", "material": "planks", "at": [0.5, 0.5, 0.5], "size": [0.2, 1, 0.2], ' +
+      '"turn": 0, "tilt": 10, "role": "head"}], "joints": {"head": [0.5, 0.2, 0.5]}, ' +
+      '"mark": "T", "habitat": {"on": ["grass"], "zones": ["meadow"], "share": 0.25}}. ' +
+      "layers go bottom up; a layer is rows along z, each row characters along x, " +
+      `"." empty. Parts: box, sphere, cylinder, cone. turn is yaw in degrees, tilt leans that ` +
+      "way. role and joints make a body move (body, head, eyes, left arm, left leg, front left " +
+      "leg, product, …). mark is one look-map character. habitat says the ground it grows on " +
+      `and where nature plants it (zones: ${ZONES.join(", ")}); (0.5, 0, 0.5) is the tile ` +
+      "center on the ground. Up to 16×16×16 blocks and 32 parts. Building comes later.\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
       `when: {"event": "harvested", "what": "wheat"} (events: ${RULE_EVENTS.join(", ")}; ` +
       'optional "what" matches the block, crop, fish or villager, or words for said), ' +
@@ -80,14 +88,20 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `{"not": {...}}. do (1-${RULE_LIMITS.effects}): ` +
       `{"give": {"item": "wheat_seeds", "count": 1}} (≤${RULE_LIMITS.give}), ` +
       '{"take": {"item": "wheat", "count": 1}}, {"set_block": {"at": [0, 1, 0], "to": ' +
-      `"cobble"}} ("air" clears), {"say": "text"}, {"weather": {"clouds": 0.8, "hours": 3}}. ` +
+      `"cobble"}} ("air" clears), {"say": "text"}, {"weather": {"clouds": 0.8, "hours": 3}}, ` +
+      `{"spread": {"what": "poppies", "count": 2}} (≤${RULE_LIMITS.spread}; copies that many ` +
+      "fully grown plants onto free neighbouring tiles the habitat allows, and stops where " +
+      `${RULE_LIMITS.crowd} neighbours already hold it). ` +
       `"at" is an offset (each -${RULE_LIMITS.reach}..${RULE_LIMITS.reach}) from the event's ` +
-      "block; give, take, has, block and set_block need an event trigger. A rule fires at most " +
+      "block; give, take, has, block and set_block need an event trigger. spread works on a " +
+      "timer. A rule fires at most " +
       `${RULE_LIMITS.firingsPerHour} times per game hour and can't trigger other rules.\n` +
-      '- relation: {"type": "made_from", "from": "planks", "to": "log", "count": 4}. Engine ' +
+      '- relation: {"type": "grows_into", "from": "wheat seeds", "to": "wheat crop", "count": 1, ' +
+      '"hours": 18}. hours is only for grows_into: game hours from planting to grown. Engine ' +
       `types the world will enforce: ${ENGINE_RELATIONS.join(", ")}; or your own ` +
       'lower_snake_case label like "sacred_to" that just records knowledge. No name needed.\n' +
-      'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "stone bench".',
+      'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "wildflowers ' +
+      'spread", "stone bench".',
     inputSchema: {
       type: "object",
       properties: {

@@ -1,4 +1,6 @@
-import type { Catalog, Entry, MaterialContent, Vec3 } from "./catalog.ts";
+import type { Catalog, DesignContent, Entry, MaterialContent, Vec3 } from "./catalog.ts";
+import { GROWN, habitatRefusal, plantInfo } from "./props.ts";
+import { hash2 } from "./rng.ts";
 import type { Agent, Sim } from "./sim.ts";
 import { Block } from "./world.ts";
 
@@ -38,7 +40,8 @@ export type Effect =
   | { take: { item: string; count: number } }
   | { set_block: { at: Vec3; to: string } }
   | { say: string }
-  | { weather: { clouds: number; hours: number } };
+  | { weather: { clouds: number; hours: number } }
+  | { spread: { what: string; count: number } };
 
 export interface RuleContent {
   when: Trigger;
@@ -55,6 +58,13 @@ export const RULE_LIMITS = {
   reach: 4,
   give: 4,
   take: 16,
+  /** Copies one spread effect may place. */
+  spread: 4,
+  /**
+   * A free tile is too crowded to receive a spread when this many of its 8 neighbours already
+   * hold that Design.
+   */
+  crowd: 3,
   weatherHours: 12,
   /** Each Rule fires at most this often per game hour. */
   firingsPerHour: 20,
@@ -73,7 +83,7 @@ const CONDITIONS = [
   "any",
   "not",
 ];
-const EFFECTS = ["give", "take", "set_block", "say", "weather"];
+const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread"];
 
 // ---------------------------------------------------------------- validation
 
@@ -144,6 +154,19 @@ export function heldMaterial(catalog: Catalog, v: unknown, where: string): Entry
     throw new Error(
       `${where}: "${v}" isn't something you can hold. Items are Materials, like "wheat", ` +
         '"wheat seeds", "stone" or "trout"; find more with catalog_find kind "material".',
+    );
+  }
+  if (e.retired) throw new Error(`${where}: "${e.name}" is retired.`);
+  return e;
+}
+
+/** A Design with a habitat: the kind of plant `spread` copies. Underscores read as spaces. */
+function plantDesign(catalog: Catalog, v: unknown, where: string): Entry {
+  const raw = String(v ?? "").trim().toLowerCase();
+  const e = catalog.byName(raw) ?? catalog.byName(raw.replace(/_/g, " "));
+  if (!e || e.kind !== "design" || !(e.content as DesignContent).habitat) {
+    throw new Error(
+      `${where}: "${v}" isn't a plant. Spread copies a Design with a habitat, like "poppies".`,
     );
   }
   if (e.retired) throw new Error(`${where}: "${e.name}" is retired.`);
@@ -268,6 +291,15 @@ function effect(v: unknown, c: Check, where: string): Effect {
       }
       return { say: plainText(val) };
     }
+    case "spread": {
+      const o = fields(val, ["what", "count"], at);
+      return {
+        spread: {
+          what: plantDesign(c.catalog, o.what, `${at}.what`).name,
+          count: Math.round(num(o.count ?? 1, 1, RULE_LIMITS.spread, `${at}.count`)),
+        },
+      };
+    }
     default: {
       const o = fields(val, ["clouds", "hours"], at);
       return {
@@ -326,6 +358,18 @@ export function saysWords(text: string, words: string): boolean {
   return norm(text).includes(norm(words));
 }
 
+/** The eight tiles around a plant, orthogonal first. */
+const NEIGHBOURS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+];
+
 export class Rules {
   stats = new Map<number, RuleStat>();
   /** Steps left this tick. */
@@ -334,6 +378,10 @@ export class Rules {
   private indexedFor: Catalog | null = null;
   private byEvent = new Map<RuleEvent, Entry[]>();
   private timers: Entry[] = [];
+  /** Tile keys of the Design a spread is copying, reused across firings. */
+  private spreadKeys: number[] = [];
+  /** Shuffled index into NEIGHBOURS, reused so a firing doesn't allocate. */
+  private neighbourOrder = [0, 1, 2, 3, 4, 5, 6, 7];
 
   constructor(private readonly sim: Sim) {}
 
@@ -444,6 +492,7 @@ export class Rules {
       sim.weatherOverride = { clouds: fx.weather.clouds, until };
       return;
     }
+    if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);
     if (!agent) return "no villager to act on";
     if ("give" in fx) {
       const name = sim.produce(fx.give.item);
@@ -484,5 +533,96 @@ export class Rules {
       if (body) return `${body.name} is standing there`;
     }
     sim.setBlock(x, y, z, block);
+  }
+
+  /**
+   * Copy `count` fully grown plants of `what` onto free neighbouring tiles. `what` follows
+   * `replaced_by`, and so does each existing prop, so a replaced Design spreads as its replacement.
+   * Returns why nothing could be placed.
+   */
+  private spread(what: string, count: number): string | void {
+    const sim = this.sim;
+    const named = sim.catalog.byName(what);
+    const design = named && sim.catalog.current(named);
+    if (!design || design.kind !== "design") return `${what} is retired`;
+    const info = plantInfo(sim.catalog, design.id);
+    if (!info?.habitat) return `${what} isn't a plant`;
+    const keys = this.spreadKeys;
+    keys.length = 0;
+    for (const [key, p] of sim.props.map) {
+      const src = sim.catalog.get(p.design);
+      const live = src && sim.catalog.current(src);
+      if (live?.id === design.id) keys.push(key);
+    }
+    if (!keys.length) return `no ${design.name} to spread from`;
+    let placed = 0, why = "";
+    for (let n = 0; n < count; n++) {
+      // Hashed from the tick, not the shared rng, so a spreading meadow doesn't
+      // change where animals walk or whether another rule's chance comes up.
+      const key = keys[Math.floor(hash2(sim.tick, n, sim.seed + design.id) * keys.length)];
+      const placedKey = this.spreadFrom(key, design.id, info);
+      if (typeof placedKey === "number") keys.push(placedKey), placed++;
+      else why = placedKey;
+    }
+    if (!placed) return why;
+  }
+
+  /** Place one copy beside the plant at `key`. A new tile key, or why this source couldn't. */
+  private spreadFrom(
+    key: number,
+    designId: number,
+    info: NonNullable<ReturnType<typeof plantInfo>>,
+  ): number | string {
+    const sim = this.sim, w = sim.world, size = w.sizeX;
+    const sx = key % size, sz = Math.floor(key / size);
+    const order = this.neighbourOrder;
+    for (let i = 0; i < order.length; i++) order[i] = i;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(hash2(sx + designId, sz, sim.tick * 8 + i) * (i + 1));
+      const t = order[i];
+      order[i] = order[j];
+      order[j] = t;
+    }
+    let crowded = false, standing = "";
+    for (const i of order) {
+      const [dx, dz] = NEIGHBOURS[i];
+      const x = sx + dx, z = sz + dz;
+      const y = w.heightAt(x, z);
+      if (y < 0) continue;
+      if (sim.props.at(x, z) || sim.crops.has(z * size + x)) continue;
+      const ground = sim.blocks.name(w.get(x, y, z));
+      if (habitatRefusal(w, info, x, z, ground)) continue;
+      if (info.solid) {
+        const body = sim.agents.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
+        if (body) {
+          standing = body.name;
+          continue;
+        }
+      }
+      if (this.crowded(x, z, designId)) {
+        crowded = true;
+        continue;
+      }
+      sim.props.set(x, z, { design: designId, planted: GROWN, grow: 0 });
+      return z * size + x;
+    }
+    const name = info.entry.name;
+    if (crowded) return `${name} is too crowded to spread`;
+    if (standing) return `${standing} is standing there`;
+    return `${name} had no free neighbour`;
+  }
+
+  /** True when `crowd` or more neighbours already hold this Design (following replacements). */
+  private crowded(x: number, z: number, designId: number): boolean {
+    const sim = this.sim;
+    let n = 0;
+    for (const [dx, dz] of NEIGHBOURS) {
+      const p = sim.props.at(x + dx, z + dz);
+      if (!p) continue;
+      const src = sim.catalog.get(p.design);
+      const live = src && sim.catalog.current(src);
+      if (live?.id === designId && ++n >= RULE_LIMITS.crowd) return true;
+    }
+    return false;
   }
 }

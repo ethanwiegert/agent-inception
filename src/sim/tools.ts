@@ -17,7 +17,7 @@ import {
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
-import { plantInfo } from "./props.ts";
+import { habitatRefusal, plantInfo } from "./props.ts";
 import {
   type Agent,
   Anim,
@@ -283,8 +283,9 @@ function join(sim: Sim, session: string, args: Args): string {
     "time and narrate now and then with say. Draw how you look with set_sprite.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
     "Materials, Designs, Rules that make things happen, and Relations between them " +
-    "(catalog_find, catalog_get, catalog_add, catalog_fork). Changing shared entries goes " +
-    `through propose and vote. ${catalogSummary(sim)}\nStart with look.` +
+    "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
+    "(seeds, saplings, wheat, wool, milk, eggs, fish), counted by its Catalog name. Changing " +
+    `shared entries goes through propose and vote. ${catalogSummary(sim)}\nStart with look.` +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "");
@@ -323,18 +324,17 @@ const HANDLERS: Record<string, Handler> = {
   plant(sim, agent, args) {
     const { seed, design, grow } = plantable(sim, agent, args.seed);
     const info = plantInfo(sim.catalog, design.id)!;
-    const ground = new Set(info.habitat!.on);
-    const wet = info.floats || info.habitat!.zones.some((z) => z === "shallows" || z === "shore");
     const sizeX = sim.world.sizeX;
     return eachTile(sim, agent, args, `Planted ${design.name} on`, Anim.Plant, 16, {
       check(x, y, z) {
         const key = z * sizeX + x;
         const b = sim.blocks.name(sim.world.get(x, y, z));
-        if (!ground.has(b)) return `${design.name} grows on ${[...ground].join(" or ")}, not ${b}`;
+        const ground = habitatRefusal(sim.world, info, x, z, b);
+        if (ground?.startsWith("grows on")) return `${design.name} ${ground}`;
+        if (ground) return ground;
         if (sim.crops.has(key)) return "already planted";
         const prop = sim.props.at(x, z);
         if (prop) return `${sim.props.info(prop)?.entry.name ?? "something"} already there`;
-        if (!wet && sim.world.waterTop[key] >= 0) return "under water";
         if (info.solid && Math.floor(agent.x) === x && Math.floor(agent.z) === z) {
           return "you're standing there";
         }

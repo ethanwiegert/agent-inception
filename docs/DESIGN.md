@@ -56,8 +56,9 @@ things relate. The World is a separate store of the things that exist here, each
 the entry it was made from.
 
 - **Elements** are what things are made from: **Materials** (a look plus physical properties such as
-  density, hardness, burns, glows; agents can invent new ones from existing ones) and **Parts**
-  (shapes and mechanisms the engine simulates; only the engine adds Parts).
+  density, hardness, burns, glows; a `form` of block, item, or liquid — everything a villager holds
+  is a Material; agents can invent new ones from existing ones) and **Parts** (shapes and mechanisms
+  the engine simulates; only the engine adds Parts).
 - **Designs** are named recipes of Blocks and Parts in Materials. Any villager can build any Design,
   so agents learn from each other. Props are Objects grown from nature-authored Designs.
 - **Relations** connect entries. Engine Relations have effects the world enforces (_made from_,
@@ -131,22 +132,22 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 
 ### Tools today
 
-| Tool                             | What it does                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `join`                           | Enter as a named villager (or reattach). Must come first.                                   |
-| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, props, animals, villagers. |
-| `walk_to`                        | A* walk to a tile.                                                                          |
-| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Wheat ripens in ~18 game hours; harvest gives 1 wheat + 2 seeds.  |
-| `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather. |
-| `place_block` / `break_block`    | Stack dirt/stone on a column, or dig its top block into inventory.                          |
-| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.        |
-| `say`                            | Speech bubble + activity feed line.                                                         |
-| `wait`                           | Rest 1-60 real seconds.                                                                     |
-| `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                    |
-| `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                             |
-| `catalog_find` / `catalog_get`   | Search the Catalog (kind, text, author, property, related_to) or read one entry in full.    |
-| `catalog_add` / `catalog_fork`   | Author a Material, Design, Rule or Relation, or fork an entry with changes on top.          |
-| `propose` / `vote` / `proposals` | Retire or replace an entry by lazy-consensus vote over one game day.                        |
+| Tool                             | What it does                                                                                                                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `join`                           | Enter as a named villager (or reattach). Must come first.                                                                                                                                                                     |
+| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, props, animals, villagers.                                                                                                                                   |
+| `walk_to`                        | A* walk to a tile.                                                                                                                                                                                                            |
+| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Plant a seed, sapling or plant name; ground and growth time come from its habitat and `grows_into` (wheat: ~18 game hours). Harvest gives the ripe crop's drops (wheat: 1 wheat and 2 wheat seeds). |
+| `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather.                                                                                                                                   |
+| `place_block` / `break_block`    | Stack dirt or stone, or dig the top block. Digging gives the block's drops (grass and farmland give dirt), or the block itself; harder blocks take longer.                                                                    |
+| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.                                                                                                                                          |
+| `say`                            | Speech bubble + activity feed line.                                                                                                                                                                                           |
+| `wait`                           | Rest 1-60 real seconds.                                                                                                                                                                                                       |
+| `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                                                                                                                                                      |
+| `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                                                                                                                                                               |
+| `catalog_find` / `catalog_get`   | Search the Catalog (kind, text, author, property, related_to) or read one entry in full.                                                                                                                                      |
+| `catalog_add` / `catalog_fork`   | Author a Material, Design, Rule or Relation, or fork an entry with changes on top.                                                                                                                                            |
+| `propose` / `vote` / `proposals` | Retire or replace an entry by lazy-consensus vote over one game day.                                                                                                                                                          |
 
 ## Terrain and bodies
 

@@ -78,6 +78,24 @@ export function plantInfo(catalog: Catalog, id: number): PlantInfo | null {
   return info;
 }
 
+/**
+ * Why a plant's habitat refuses this tile: the ground isn't in `on`, or it's underwater and the
+ * plant neither floats nor lists shore or shallows. The same check `plant` uses.
+ */
+export function habitatRefusal(
+  world: World,
+  info: PlantInfo,
+  x: number,
+  z: number,
+  ground: string,
+): string | void {
+  const h = info.habitat;
+  if (!h) return "isn't a plant";
+  if (!h.on.includes(ground)) return `grows on ${h.on.join(" or ")}, not ${ground}`;
+  const wet = info.floats || h.zones.some((zone) => zone === "shallows" || zone === "shore");
+  if (!wet && world.waterTop[z * world.sizeX + x] >= 0) return "under water";
+}
+
 export class Props {
   readonly map: Map<number, Prop>;
   version = 0;

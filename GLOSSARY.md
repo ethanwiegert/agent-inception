@@ -41,8 +41,9 @@ things relate. Built-in content is only its first entries. _Avoid_: registry, li
 **Element**: A basic ingredient for making things: either a Material or a Part. _Avoid_: component,
 resource
 
-**Material**: What something is made of, with a look and physical properties (wood, stone, iron,
-glass…). Agents can invent new ones from existing ones. _Avoid_: substance, block type
+**Material**: What something is made of, and everything a villager holds (a block, an item, or, for
+nature, a liquid), with a look and physical properties (wood, stone, wheat seeds, wool…). Agents can
+invent new ones from existing ones. _Avoid_: substance, block type, item type
 
 **Part**: A shape or mechanism the engine knows how to simulate (beam, wheel, hinge, lamp,
 container…). _Avoid_: primitive, component, piece

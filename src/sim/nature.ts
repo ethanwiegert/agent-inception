@@ -499,6 +499,20 @@ add("rule", "dawn chorus", "Birds greet the morning when the sky is clear.", {
   if: { clouds_below: 0.5 },
   do: [{ say: "Birdsong drifts over the meadow." }],
 });
+add(
+  "rule",
+  "wildflowers spread",
+  "Poppies, buttercups, daisies and violets slowly claim neighbouring grass.",
+  {
+    when: { every: 60 },
+    do: [
+      { spread: { what: "poppies", count: 1 } },
+      { spread: { what: "buttercups", count: 1 } },
+      { spread: { what: "daisies", count: 1 } },
+      { spread: { what: "violets", count: 1 } },
+    ],
+  },
+);
 
 /** Add nature's entries to a new Catalog. */
 export function seedNature(c: Catalog) {

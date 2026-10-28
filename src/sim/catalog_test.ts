@@ -47,6 +47,7 @@ Deno.test("a new world's Catalog holds nature's entries", () => {
   assertEquals(stone.author, NATURE);
   assert(c.byName("box")?.kind === "part");
   assert(c.byName("lucky harvest")?.kind === "rule");
+  assert(c.byName("wildflowers spread")?.kind === "rule");
   const planks = c.byName("planks")!;
   assert(c.relationsOf(planks.id).some((r) => r.name === "planks made_from log"));
 });
@@ -284,6 +285,10 @@ Deno.test("rules validate their tree against the vocabulary and caps", () => {
   bad({ when: { event: "said" }, if: wide, do: give }, "at most 24");
   bad({ when: { event: "said" }, do: give, extra: 1 }, 'unknown field "extra"');
   bad({ when: { event: "said" }, do: Array(9).fill({ say: "x" }) }, "1-8 effects");
+  bad({ when: { every: 60 }, do: [{ spread: { what: "stone" } }] }, "isn't a plant");
+  bad({ when: { every: 60 }, do: [{ spread: { what: "farmer" } }] }, "isn't a plant");
+  bad({ when: { every: 60 }, do: [{ spread: { what: "poppies", count: 9 } }] }, "count must be");
+  bad({ when: { every: 60 }, do: [{ spread: { what: "poppies", where: 1 } }] }, "unknown field");
 });
 
 Deno.test("an event rule fires on a villager's action and tells them", () => {
@@ -389,6 +394,131 @@ Deno.test("timer rules run on the clock and can change the weather", () => {
   sim.events = [];
   for (let i = 0; i < TICKS_PER_DAY; i++) sim.step();
   assertEquals(sim.events.filter((e) => e.type === "rule" && e.text === "Dong.").length, 1);
+});
+
+/** Flatten a patch of grass and clear whatever was standing on it. */
+function meadow(sim: Sim, x: number, z: number, r: number) {
+  const y = sim.world.heightAt(x, z);
+  const w = sim.world.sizeX;
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const xx = x + dx, zz = z + dz;
+      while (sim.world.heightAt(xx, zz) > y) {
+        sim.setBlock(xx, sim.world.heightAt(xx, zz), zz, Block.Air);
+      }
+      sim.setBlock(xx, y, zz, Block.Grass);
+      sim.world.waterTop[zz * w + xx] = -1;
+      sim.props.set(xx, zz, null);
+    }
+  }
+}
+
+function ofDesign(sim: Sim, name: string): number {
+  const id = sim.catalog.current(sim.catalog.byName(name)!)!.id;
+  let n = 0;
+  for (const p of sim.props.map.values()) {
+    const src = sim.catalog.get(p.design);
+    if (src && sim.catalog.current(src)?.id === id) n++;
+  }
+  return n;
+}
+
+Deno.test("spread copies a plant onto a free neighbour and stops when crowded", () => {
+  const { sim } = world();
+  const fern = sim.agents[0];
+  const x = Math.floor(fern.x) + 4, z = Math.floor(fern.z);
+  meadow(sim, x, z, 2);
+  const stem = {
+    part: "cylinder",
+    material: "stem",
+    at: [0.5, 0.2, 0.5],
+    size: [0.04, 0.4, 0.04],
+  };
+  sim.catalog.add(
+    {
+      kind: "design",
+      name: "clover",
+      content: { parts: [stem], mark: "c", habitat: { on: ["grass"] } },
+    },
+    "Fern",
+    sim.tick,
+  );
+  const id = sim.catalog.byName("clover")!.id;
+  sim.props.set(x, z, { design: id, planted: 0, grow: 0 });
+  sim.setBlock(x + 1, sim.world.heightAt(x + 1, z), z, Block.Stone);
+  sim.world.waterTop[z * sim.world.sizeX + (x - 1)] = sim.world.heightAt(x - 1, z);
+  addRule(sim, "clover creeps", {
+    when: { every: 10 },
+    do: [{ spread: { what: "clover", count: 2 } }],
+  });
+  const period = Math.max(1, Math.round((10 * sim.ticksPerDay) / 1440));
+  const before = ofDesign(sim, "clover");
+  do sim.step(); while (sim.tick % period !== 0);
+  assertEquals(ofDesign(sim, "clover"), before + 2);
+  assertEquals(sim.props.at(x + 1, z), undefined);
+  assertEquals(sim.props.at(x - 1, z), undefined);
+  const stat = sim.rules.stat(sim.catalog.byName("clover creeps")!.id);
+  assertEquals(stat.fired, 1);
+  assertEquals(stat.skipped, "");
+
+  // Stone the patch, then leave one grass gap beside a full ring of clover. The gap is free
+  // but three neighbours already hold clover, and stone refuses everywhere else.
+  const width = sim.world.sizeX;
+  for (let dz = -2; dz <= 2; dz++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      sim.setBlock(x + dx, sim.world.heightAt(x + dx, z + dz), z + dz, Block.Stone);
+      sim.world.waterTop[(z + dz) * width + (x + dx)] = -1;
+      sim.props.set(x + dx, z + dz, null);
+    }
+  }
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      sim.setBlock(x + dx, sim.world.heightAt(x + dx, z + dz), z + dz, Block.Grass);
+      if (dx === 1 && dz === 0) continue;
+      sim.props.set(x + dx, z + dz, { design: id, planted: 0, grow: 0 });
+    }
+  }
+  const packed = ofDesign(sim, "clover");
+  do sim.step(); while (sim.tick % period !== 0);
+  assertEquals(ofDesign(sim, "clover"), packed);
+  assertEquals(sim.props.at(x + 1, z), undefined);
+  assert(stat.skipped.includes("too crowded"), stat.skipped);
+});
+
+Deno.test("spread follows a replaced Design", () => {
+  const { sim } = world();
+  const fern = sim.agents[0];
+  const x = Math.floor(fern.x) + 4, z = Math.floor(fern.z) + 4;
+  meadow(sim, x, z, 1);
+  const id = sim.catalog.byName("poppies")!.id;
+  const width = sim.world.sizeX;
+  for (const [key, p] of [...sim.props.map]) {
+    if (p.design === id) sim.props.set(key % width, Math.floor(key / width), null);
+  }
+  sim.props.set(x, z, { design: id, planted: 0, grow: 0 });
+  addRule(sim, "poppies creep", {
+    when: { every: 10 },
+    do: [{ spread: { what: "poppies", count: 1 } }],
+  });
+  ok(run(sim, "a", "catalog_fork", { from: "poppies", name: "giant poppies" }));
+  ok(run(sim, "a", "propose", {
+    entry: "poppies",
+    action: "replace",
+    replacement: "giant poppies",
+    reason: "taller",
+  }));
+  const giant = sim.catalog.byName("giant poppies")!.id;
+  const period = Math.max(1, Math.round((10 * sim.ticksPerDay) / 1440));
+  do sim.step(); while (sim.tick % period !== 0);
+  let placed = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dz) continue;
+      if (sim.props.at(x + dx, z + dz)?.design === giant) placed++;
+    }
+  }
+  assertEquals(placed, 1);
+  assertEquals(sim.props.at(x, z)?.design, id);
 });
 
 Deno.test("nature's lucky harvest rule fires on harvests", () => {

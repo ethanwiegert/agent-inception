@@ -142,8 +142,16 @@ Decided in the build:
 - `look` lists the plants in view by name ("Plants: T birch/oak * daisies…"); Rule `what` matches
   whole words for every event, so "wheat" matches "wheat crop".
 - Save format is version 2; older saves start the same island afresh.
+- **Spread** is a Rule effect: `{"spread": {"what": "poppies", "count": 2}}` (count 1–4) places that
+  many fully grown copies, each beside a random existing prop of that Design. The name follows
+  `replaced_by`, and so does each prop, so a replaced plant spreads as its replacement. A tile has
+  to be free and pass the same habitat check as `plant` (ground in `on`; underwater only when the
+  plant floats or its zones include shore or shallows). Zones are not re-classified. A tile with 3
+  of its 8 neighbours already holding that Design is too crowded. It needs no villager, so a timer
+  can run it. Nature's "wildflowers spread" does this once a game hour, one each of poppies,
+  buttercups, daisies and violets.
 
-Done so far (commit "M6 part 1"):
+Done so far (commit "M6 part 1", plus the uncommitted continuation):
 
 - Sim: `sim/nature.ts` holds all of nature's entries; Materials with `form`; Designs with cones,
   tilt, roles, joints, mark, habitat; `grows_into` hours; block registry from the Catalog; generic
@@ -155,25 +163,31 @@ Done so far (commit "M6 part 1"):
 - Checked in the browser: forests, bushes, rocks (new `fieldstone` Material, darker like the old
   boulders), cows, the farmer (hat, tinted shirt, denim), planted saplings and growing wheat. GPU
   ~2.9 ms at the wide harness view (was ~2.7 ms; re-measure in the gate).
+- Spread is in, with tests for a free neighbour, the crowding cap, and a replaced Design. It picks
+  with `hash2` of the tick and the tile, so it does not move the sim RNG (harvest luck and fish
+  schools stay where the older tests put them).
+- Agent-facing text matches the grill: `catalog_add` covers form, cone, tilt, role, joints, mark,
+  habitat, hours and spread; `join` says what you carry is a Material; `DESIGN.md`'s till, plant,
+  harvest, place and break rows, the Material glossary entry, and `farmer.md` say the same.
+
+Visual pass (seed 7, daytime), closed without editing `nature.ts`:
+
+- Flowers, reeds and cattails, lily pads and the water lily, chickens, ducks and sheep read as the
+  old meshes. Parts sit on the tile center. Sheep ears are small. Wool stays full: shearing is M7's
+  `interact`, sheep start with wool grown, and the product-role shrink (0.78 until it grows back)
+  has nothing to show yet.
+- Ripe wheat uses the `wheat` Material `#e6c76f`, the sRGB of the old blade shader's linear ear
+  `(0.8, 0.58, 0.16)`. Daylight ripe stalks are that pale gold.
+- The farmer's straw hat, red band, tinted shirt, denim and boots read in daylight. Eyes are the
+  same ink boxes as the old head, and arm swing is the same pose code. A close face frame cropped at
+  the shoulders and a stride frame missed the walker, so those two were not judged from a picture.
 
 Left to do:
 
-1. Look closely at the remaining Designs against the old meshes (before/after shots were at
-   `deno task camshot … "seed=7&time=0.42&speed=0" '{"distance":45,"pitch":0.55,"yaw":2.1,
-   "dx":-20,"dz":10}'`
-   and a close one at distance 14): flowers, reeds and cattails, lily pads and water lily
-   (floating), ripe wheat colors, sheep (wool shrinks when sheared), chicken, duck, the farmer's
-   face, eyes and arm swing. Tune Design data in `nature.ts`, not renderer code.
-2. Spreading: a Rule effect (e.g. `{"spread": {"what": "poppies", "count": 2}}` on timer triggers,
-   copying a random existing prop of that Design onto a free neighbouring tile its habitat allows,
-   with a crowding cap) and a nature Rule "wildflowers spread".
-3. Agent-facing text: `catalog_add`'s description should cover `form`, cone/tilt/role/joints,
-   `mark`, `habitat` and `hours`; `join` should point at the items-are-Materials idea; update the
-   Tools table in `DESIGN.md` (plant/harvest/break wording) and `.claude/agents/farmer.md` if it
-   names items.
-4. The gate: Haiku playtest (builder, steward, adversary aimed at the new schema fields, habitats,
-   planting odd things, replacing the farmer/wheat/animal Designs), report
-   `docs/playtests/0002-m6-built-ins.md`, perf against `DESIGN.md`, screenshots.
+- The gate: Haiku playtest (builder, steward, adversary aimed at the new schema fields, habitats,
+  planting odd things, replacing the farmer/wheat/animal Designs), report
+  `docs/playtests/0002-m6-built-ins.md`, perf against `DESIGN.md`, screenshots. M6 stays open until
+  that holds.
 
 ### M7 — building, crafting, physics phase 1
 

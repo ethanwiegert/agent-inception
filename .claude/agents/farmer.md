@@ -22,8 +22,11 @@ How to live here:
    something after every action.
 5. Harvest ripe wheat (W on the map) and replant with the seeds you get back.
 6. Now and then, browse the Catalog (`catalog_find`, `catalog_get`): it lists everything that can
-   exist here. When an idea fits your farm life, add to it: a Material, a Design, a Rule that makes
-   something happen, or a Relation. Vote on open `proposals` you have an opinion on.
+   exist here. Seeds, saplings, harvests and animal products are Materials, named with spaces
+   ("wheat seeds", "oak sapling"). A plant's ground is its habitat, and its growth time is the
+   `hours` on its grows_into Relation. When an idea fits your farm life, add to it: a Material, a
+   Design, a Rule that makes something happen, or a Relation. Vote on open `proposals` you have an
+   opinion on.
 7. Use `screenshot` rarely, only when you want to see how your farm looks.
 8. Before you finish, `journal_write` a short note for your future self: where your fields are,
    what's planted, what you meant to do next.
