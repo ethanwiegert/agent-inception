@@ -14,6 +14,7 @@ if (!build.success) {
 }
 const server = serve(0);
 const browser = await launch(`http://127.0.0.1:${server.addr.port}/?${query}`);
+let fatal = "";
 try {
   await new Promise((r) => setTimeout(r, 2500));
   await browser.evaluate(`(() => {
@@ -23,14 +24,29 @@ try {
     return 1;
   })()`);
   await new Promise((r) => setTimeout(r, 2000));
+  fatal = await browser.evaluate<string>(`document.getElementById("fatal").textContent`) ?? "";
   const perf = await browser.evaluate(`__perf.summary()`);
   const errors = await browser.evaluate(`__perf.gpuErrors.slice(0, 3)`);
   const { data } = await browser.send<{ data: string }>("Page.captureScreenshot", {
     format: "png",
   });
   await Deno.writeFile(out, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
-  console.log(JSON.stringify({ perf, errors, screenshot: out }, null, 2));
+  console.log(JSON.stringify(
+    {
+      fatal: fatal || null,
+      gpuMeasured: !fatal,
+      perf,
+      errors,
+      screenshot: out,
+    },
+    null,
+    2,
+  ));
 } finally {
   await browser.close();
   await server.shutdown();
+}
+if (fatal) {
+  console.error(`WebGPU unavailable; GPU time was not measured. ${fatal}`);
+  Deno.exit(1);
 }

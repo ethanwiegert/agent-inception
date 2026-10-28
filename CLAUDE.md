@@ -81,10 +81,10 @@ must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M6 is done; M7 is next). Each milestone opens
-with a short clarifying grill with Ethan and closes with the playtest gate described there (tests,
-playtests with cost-effective agents including an adversary, a report in `docs/playtests/`, fixes,
-perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M6 is in progress: the hardware GPU remeasure is
+still open). Each milestone opens with a short clarifying grill with Ethan and closes with the
+playtest gate described there (tests, playtests with cost-effective agents including an adversary, a
+report in `docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 

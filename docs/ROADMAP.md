@@ -39,8 +39,6 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
-- **M6 — built-ins become entries.** Nature's blocks, items, plants, the farmer and the animals are
-  Catalog data the sim and the renderer read; playtest [0002](playtests/0002-m6-built-ins.md).
 
 ## V1
 
@@ -96,7 +94,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries
+### M6 — built-ins become entries (in progress)
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -184,7 +182,13 @@ Visual pass (seed 7, daytime), closed without editing `nature.ts`:
   same ink boxes as the old head, and arm swing is the same pose code. A close face frame cropped at
   the shoulders and a stride frame missed the walker, so those two were not judged from a picture.
 
-Gate: playtest [0002](playtests/0002-m6-built-ins.md).
+Playtest [0002](playtests/0002-m6-built-ins.md) covers the bridge sessions, the fixes, check, and
+test. Still open:
+
+- **TODO: hardware GPU remeasure.** Run `deno task shot "seed=7&time=0.62&speed=0"` on a machine
+  with a real GPU and record the milliseconds. The gate VM only got SwiftShader, then lost the
+  device, so no GPU time was measured. The older ~2.9 ms figure is not this gate's number. M6 stays
+  open until that shot is in the playtest report.
 
 ### M7 — building, crafting, physics phase 1
 

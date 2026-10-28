@@ -83,10 +83,15 @@ name (the retire passed), and a grown "2 clover" whose look mark is `c`.
 - 66 sim tests pass (4 for these fixes). `deno task check` passes.
 - Sim step 0.009 ms (6000 steps, seed 7), under the 2 ms budget.
 - Minified JS is 185 KB + 104 KB, under the 2 MB first-frame budget.
-- `deno task shot "seed=7&time=0.62&speed=0"` on this machine: adapter `google/swiftshader`, GPU
-  device lost (`Could not find SharedImageBackingFactory` for a WebGPU swapchain), so GPU
-  milliseconds were not remeasured. The frame loop still paced at p50 16.7 ms, 615k blades, gpu n/a.
-  The last hardware figure in the roadmap stands: about 2.9 ms GPU at the wide harness view after M6
-  part 1, on a machine with a GPU. Blade count matches playtest 0001 (615k).
+- `deno task shot "seed=7&time=0.62&speed=0"` on this machine: adapter `google/swiftshader`, then
+  `GPU device lost: Device was destroyed` (no WebGPU swapchain backing). **GPU milliseconds were not
+  measured. Do not treat any older figure as this gate's result.** The frame loop paced at p50 16.7
+  ms with 615k blades and gpu n/a. `shot` now exits non-zero in that case and reports gpuMeasured
+  false.
+
+**TODO:** remeasure on hardware. Run `deno task shot "seed=7&time=0.62&speed=0"` where WebGPU stays
+up (the dev box's GPU, not SwiftShader) and paste `gpuMs` here. M6 stays open until that number is
+in this report. The ~2.9 ms note in the roadmap is from M6 part 1, before this gate, and is not a
+substitute.
 
 ![Panel and feed after the playtest. The center line is this machine's missing WebGPU swapchain.](0002-m6-built-ins.png)
