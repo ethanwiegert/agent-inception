@@ -8,6 +8,7 @@ import {
   type AgentProfile,
   ANIMAL_READY,
   ANIMAL_STRIDE,
+  type CatalogDelta,
   CROP_STRIDE,
   type FromWorker,
   SCHOOL_STRIDE,
@@ -29,6 +30,9 @@ let sentAgentsVersion = -1;
 let sentBlocksVersion = -1;
 let sentCropsVersion = -1;
 let sentPropsVersion = -1;
+let sentCatalogVersion = -1;
+let sentStatusVersion = -1;
+let sentEntries = 0;
 let cropsSentAt = 0;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
@@ -93,6 +97,9 @@ function start(caughtUp: number) {
   sentAgentsVersion = sentCropsVersion = -1;
   sentBlocksVersion = s.blocks.version;
   sentPropsVersion = s.props.version;
+  sentCatalogVersion = s.catalog.version;
+  sentStatusVersion = s.catalog.statusVersion;
+  sentEntries = s.catalog.entries.length;
   post({
     type: "ready",
     seed: s.seed,
@@ -100,6 +107,7 @@ function start(caughtUp: number) {
     caughtUp,
     blocks: s.blocks.customs(),
     props: s.props.diff(),
+    catalog: s.catalog.save(),
   });
   lastStep = performance.now();
   budget = 0;
@@ -160,6 +168,18 @@ function send(now: number) {
     profiles = s.agents.map((a) => ({ name: a.name, sprite: a.sprite }));
   }
 
+  let catalog: CatalogDelta | undefined;
+  if (s.catalog.version !== sentCatalogVersion) {
+    const c = s.catalog;
+    sentCatalogVersion = c.version;
+    catalog = { entries: c.entries.slice(sentEntries), proposals: c.proposals.slice(-50) };
+    sentEntries = c.entries.length;
+    if (c.statusVersion !== sentStatusVersion) {
+      sentStatusVersion = c.statusVersion;
+      catalog.status = c.statuses();
+    }
+  }
+
   const edits = Int32Array.from(s.pendingEdits);
   s.pendingEdits = [];
   post({
@@ -179,6 +199,7 @@ function send(now: number) {
     animals,
     schools,
     profiles,
+    catalog,
     edits,
     crops,
     events: s.events.splice(0),

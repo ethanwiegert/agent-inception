@@ -3,6 +3,7 @@ import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
 import {
   angleDiff,
   type Args,
+  clock,
   give,
   type Handler,
   inventoryText,
@@ -13,6 +14,7 @@ import {
   walk,
   work,
 } from "./jobs.ts";
+import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import { PROP_DEFS, PropKind } from "./props.ts";
 import {
@@ -59,7 +61,7 @@ const areaNote = `Covers width × depth tiles (at most ${MAX_AREA}) starting at 
 export const TOOL_DEFS: ToolDef[] = [
   {
     name: "join",
-    description: "Enter the world as a farmer with this name. Call this first. " +
+    description: "Enter the world as a villager with this name. Call this first. " +
       "Using a name that already exists puts you back in that body, with its inventory and journal.",
     inputSchema: {
       type: "object",
@@ -231,6 +233,7 @@ export const TOOL_DEFS: ToolDef[] = [
     description: "Read your journal.",
     inputSchema: { type: "object", properties: {} },
   },
+  ...CATALOG_TOOL_DEFS,
   {
     name: "screenshot",
     description: "See the world as an image, centered on you. Costs more than look; use sparingly.",
@@ -244,14 +247,19 @@ export const TOOL_DEFS: ToolDef[] = [
  * queued as jobs on the agent and resolve as the sim steps.
  */
 export function callTool(sim: Sim, session: string, name: string, args: Args, callId: number) {
-  const done = (text: string, isError = false) => sim.results.push({ callId, text, isError });
+  let agent = sim.sessions.get(session) ?? null;
+  const done = (text: string, isError = false) => sim.finish(agent, callId, text, isError);
   try {
-    if (name === "join") return done(join(sim, session, args));
-    const agent = sim.sessions.get(session);
+    if (name === "join") {
+      const text = join(sim, session, args);
+      agent = sim.sessions.get(session)!;
+      return done(text);
+    }
     if (!agent) return done('Call "join" with your name first.', true);
     const handler = HANDLERS[name];
     if (!handler) return done(`Unknown tool "${name}".`, true);
-    const out = handler(sim, agent, args);
+    if (name !== "_whoami") agent.lastActive = sim.tick;
+    const out = handler(sim, agent, args ?? {});
     if (typeof out === "string") done(out);
     else sim.enqueue(agent, callId, out);
   } catch (e) {
@@ -268,17 +276,25 @@ function join(sim: Sim, session: string, args: Args): string {
   const returning = !!agent;
   agent ??= sim.addAgent(name);
   sim.sessions.set(session, agent);
+  agent.lastActive = sim.tick;
+  const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
+  sim.fire("joined", agent, fx, sim.world.heightAt(fx, fz), fz, agent.name);
   return (returning ? `Welcome back, ${agent.name}.` : `Welcome, ${agent.name}.`) +
     ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
     "to ripen, harvest, and build what you like. People are watching you live here, so take your " +
-    "time and narrate now and then with say. Draw how you look with set_sprite. Start with look." +
+    "time and narrate now and then with say. Draw how you look with set_sprite.\n" +
+    "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
+    "Materials, Designs, Rules that make things happen, and Relations between them " +
+    "(catalog_find, catalog_get, catalog_add, catalog_fork). Changing shared entries goes " +
+    `through propose and vote. ${catalogSummary(sim)}\nStart with look.` +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "");
 }
 
 const HANDLERS: Record<string, Handler> = {
+  ...CATALOG_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -300,7 +316,11 @@ const HANDLERS: Record<string, Handler> = {
         if (b === Block.Farmland) return "already farmland";
         if (b !== Block.Grass && b !== Block.Dirt) return `${sim.blocks.name(b)} can't be tilled`;
       },
-      apply: (x, y, z) => sim.setBlock(x, y, z, Block.Farmland),
+      apply(x, y, z) {
+        const was = sim.blocks.name(sim.world.get(x, y, z));
+        sim.setBlock(x, y, z, Block.Farmland);
+        sim.fire("tilled", agent, x, y, z, was);
+      },
     }),
 
   plant(sim, agent, args) {
@@ -312,10 +332,11 @@ const HANDLERS: Record<string, Handler> = {
         if (sim.crops.has(z * sim.world.sizeX + x)) return "already planted";
         if (!agent.inventory.wheat_seeds) return "out of seeds";
       },
-      apply(x, _y, z) {
+      apply(x, y, z) {
         agent.inventory.wheat_seeds--;
         sim.crops.set(z * sim.world.sizeX + x, { kind: "wheat", planted: sim.tick });
         sim.cropsVersion++;
+        sim.fire("planted", agent, x, y, z, "wheat");
       },
     });
   },
@@ -327,11 +348,12 @@ const HANDLERS: Record<string, Handler> = {
         if (!crop) return "nothing planted";
         if (sim.cropGrowth(crop) < 1) return "not ripe yet";
       },
-      apply(x, _y, z) {
+      apply(x, y, z) {
         sim.crops.delete(z * sim.world.sizeX + x);
         sim.cropsVersion++;
         give(agent, "wheat", 1);
         give(agent, "wheat_seeds", 2);
+        sim.fire("harvested", agent, x, y, z, "wheat");
       },
     }),
 
@@ -351,6 +373,7 @@ const HANDLERS: Record<string, Handler> = {
       yield* work(agent, Anim.Build, 20);
       agent.inventory[name]--;
       sim.setBlock(x, y, z, block);
+      sim.fire("placed", agent, x, y, z, name);
       return `Placed ${name} at x=${x} y=${y} z=${z}. ${inventoryText(agent)}`;
     })();
   },
@@ -398,6 +421,7 @@ const HANDLERS: Record<string, Handler> = {
         give(agent, name, 1);
         caught.push(name);
         sim.events.push({ type: "catch", agent: agent.id, fish: name });
+        sim.fire("caught", agent, x, Math.max(0, w.waterTop[z * w.sizeX + x]), z, name);
       }
       agent.anim = Anim.Idle;
       const tries = casts === 1 ? "You cast" : `You cast ${casts} times`;
@@ -423,6 +447,7 @@ const HANDLERS: Record<string, Handler> = {
       sim.setBlock(x, y, z, Block.Air);
       const got = b === Block.Stone ? "stone" : "dirt";
       give(agent, got, 1);
+      sim.fire("broken", agent, x, y, z, sim.blocks.name(b));
       return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got 1 ${got}. ${
         inventoryText(agent)
       }`;
@@ -448,6 +473,8 @@ const HANDLERS: Record<string, Handler> = {
     const text = String(args.text ?? "").slice(0, 140).trim();
     if (!text) throw new Error("Say something.");
     sim.events.push({ type: "say", agent: agent.id, text });
+    const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
+    sim.fire("said", agent, fx, sim.world.heightAt(fx, fz), fz, text);
     return "Said.";
   },
 
@@ -552,10 +579,11 @@ function plantTrees(sim: Sim, agent: Agent, args: Args, seed: string): Job {
       if (Math.floor(agent.x) === x && Math.floor(agent.z) === z) return "you're standing there";
       if (!agent.inventory[item]) return `out of ${item}`;
     },
-    apply(x, _y, z) {
+    apply(x, y, z) {
       agent.inventory[item]--;
       const variant = (x * 7 + z * 13) % PROP_DEFS[kind].variants;
       sim.props.set(x, z, { kind, variant, planted: sim.tick });
+      sim.fire("planted", agent, x, y, z, seed);
     },
   });
 }
@@ -602,11 +630,6 @@ function fromPixels(value: unknown): Sprite {
   return { width, height, pixels: [...pixels] };
 }
 
-function clock(t: number): string {
-  const m = Math.floor(t * 24 * 60);
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-}
-
 function partOfDay(t: number): string {
   const h = t * 24;
   if (h < 5) return "night";
@@ -629,7 +652,11 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   const ax = Math.floor(agent.x), az = Math.floor(agent.z);
   const ah = w.heightAt(ax, az);
   const t = sim.timeOfDay();
-  const others = sim.agents.filter((a) => a !== agent);
+  // Nearest first: the map marks them 1-9 (letters would read as wheat, trees or animals).
+  const others = sim.agents.filter((a) => a !== agent)
+    .sort((a, b) =>
+      Math.hypot(a.x - agent.x, a.z - agent.z) - Math.hypot(b.x - agent.x, b.z - agent.z)
+    );
   const tiles: string[] = [], heights: string[] = [];
   let ripe = 0, growing = 0, soonest = Infinity;
 
@@ -666,7 +693,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (animal) c = SPECIES[animal.species].mark;
       const other = others.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
-      if (other) c = other.name[0].toUpperCase();
+      if (other) c = others.indexOf(other) < 9 ? String(others.indexOf(other) + 1) : "+";
       if (x === ax && z === az) c = "@";
       row += c, hrow += heightMark(h - ah);
     }
@@ -685,7 +712,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  T tree  A pine  t sapling  o rock  b bush  ` +
     `* flowers  | reeds  % lily pads  f fish school  ${
       SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
-    }  A-Z other farmers (trees, pines and rocks block walking) | ` +
+    }  1-9 other villagers (trees, pines and rocks block walking) | ` +
     `height = same, 1-9 higher, a-i lower`,
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
@@ -731,16 +758,17 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
   }
   if (others.length) {
-    lines.push("", "Other farmers:");
-    for (const o of others) {
+    lines.push("", "Other villagers:");
+    for (const [i, o] of others.entries()) {
       const d = Math.hypot(o.x - agent.x, o.z - agent.z);
       lines.push(
-        `  ${o.name} at x=${Math.floor(o.x)} z=${Math.floor(o.z)} (${Math.round(d)} tile${
-          Math.round(d) === 1 ? "" : "s"
-        } away)`,
+        `  ${i < 9 ? i + 1 : "+"} ${o.name} at x=${Math.floor(o.x)} z=${Math.floor(o.z)} (${
+          Math.round(d)
+        } tile${Math.round(d) === 1 ? "" : "s"} away)`,
       );
     }
   }
+  lines.push("", catalogSummary(sim));
   return lines.join("\n");
 }
 

@@ -78,6 +78,11 @@ client.onEvent = (event) => {
     overlay.say(event.agent, `Caught a ${event.fish}!`, performance.now());
   } else if (event.type === "joined") {
     overlay.log(agentName(event.agent), "arrived in the meadow");
+  } else if (event.type === "rule") {
+    if (event.agent) overlay.say(event.agent, event.text, performance.now());
+    overlay.log(`✦ ${event.rule}`, event.text);
+  } else if (event.type === "catalog") {
+    overlay.log(event.agent ? agentName(event.agent) : "catalog", event.text);
   }
 };
 
@@ -85,7 +90,18 @@ const agentName = (id: number) => client.profiles[id - 1]?.name ?? `#${id}`;
 
 // ---------------------------------------------------------------- agents
 
-const QUIET_TOOLS = new Set(["look", "journal_read", "_whoami", "wait", "join"]);
+const QUIET_TOOLS = new Set([
+  "look",
+  "journal_read",
+  "_whoami",
+  "wait",
+  "join",
+  "catalog_find",
+  "catalog_get",
+  "proposals",
+]);
+/** Catalog authoring is announced by the sim itself, with names instead of raw JSON. */
+const ANNOUNCED_TOOLS = new Set(["catalog_add", "catalog_fork", "propose", "vote"]);
 
 async function handleTool(
   session: string,
@@ -105,9 +121,14 @@ async function handleTool(
   }
   const who = await client.call(session, "_whoami", {});
   const label = who.isError ? String(args.name ?? "someone") : agentName(Number(who.text));
-  if (!QUIET_TOOLS.has(name)) overlay.log(label, `${name} ${JSON.stringify(args)}`);
+  if (!QUIET_TOOLS.has(name) && !ANNOUNCED_TOOLS.has(name)) {
+    overlay.log(label, `${name} ${clip(JSON.stringify(args), 120)}`);
+  }
   const r = await client.call(session, name, args);
-  if (!QUIET_TOOLS.has(name) && name !== "say") {
+  if (ANNOUNCED_TOOLS.has(name) && r.isError) {
+    overlay.log(label, `${name}: ${clip(r.text, 160)}`, true);
+  }
+  if (!QUIET_TOOLS.has(name) && !ANNOUNCED_TOOLS.has(name) && name !== "say") {
     overlay.log(label, firstSentence(r.text), r.isError);
   }
   return { content: [{ type: "text", text: r.text }], isError: r.isError };
@@ -132,6 +153,7 @@ async function decodeSprite(base64: string): Promise<Sprite> {
 }
 
 const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0];
+const clip = (text: string, n: number) => text.length > n ? text.slice(0, n - 1) + "…" : text;
 
 /** Center the view on the caller, let the camera settle, then grab a frame. */
 async function screenshot(session: string): Promise<CallReply> {
@@ -250,6 +272,7 @@ function draw(now: number) {
       bridge: bridgeConnected,
       agents: agents.map((a) => ({ id: a.id, name: a.name })),
       following: camera.follow,
+      catalog: client.catalog,
       stats: [
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,

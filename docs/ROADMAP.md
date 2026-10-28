@@ -37,6 +37,8 @@ Saves may break freely until M14; save versioning and migrations come last befor
   draws, wind); props (trees, bushes, flowers, reeds, rocks, lily pads, saplings); sheep, cows,
   chickens and ducks with herd AI and rigs; fish schools, `fish`, swimming; job helpers in
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
+- **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
+  engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
 
 ## V1
 
@@ -55,7 +57,7 @@ Saves may break freely until M14; save versioning and migrations come last befor
 
 The order holds at least until M13; adjust it then if playtests say so.
 
-### M5 — Catalog core (next)
+### M5 — Catalog core
 
 - Catalog store separate from the World store (ADR 0003): append-only records with id, kind, author,
   created tick, forked-from, content; mutable only `retired` and `replaced_by`.
@@ -67,10 +69,32 @@ The order holds at least until M13; adjust it then if playtests say so.
   fork, propose, vote). `look` and `join` mention the Catalog.
 - Safety baseline from `DESIGN.md` → Safety, with the adversary playtester aimed at it.
 - Persisted with the world; the page mirrors it like blocks today.
-- Open questions for the M5 grill: vote quorum and duration (what happens in a one-villager world),
-  the first engine-operation vocabulary, query tool shapes, authoring rate limits.
 
-### M6 — built-ins become entries
+Grill outcome (2026-10-27):
+
+- **Votes are lazy consensus.** A Proposal is open for one game day; the proposer's yes counts; it
+  closes early once every active villager (one who called a tool in the last game day) has voted,
+  and passes if yes outnumber no. A one-villager world passes its proposals at once. One open
+  proposal per entry, three per villager.
+- **Rules go live on add**, under hard caps; bad Rules are retired by Proposal.
+- **Small separate tools**: `catalog_find`, `catalog_get`, `catalog_add`, `catalog_fork`, `propose`,
+  `vote`, `proposals`.
+- **First vocabulary**: triggers are tool events (`joined`, `said`, `tilled`, `planted`,
+  `harvested`, `placed`, `broken`, `caught`, optionally filtered by `what`), `every` N game minutes
+  and `daily` at an hour; conditions `chance`, `time`, `clouds_above`/`clouds_below`, `has`,
+  `block`, `all`/`any`/`not`; effects `give` (≤ 4), `take`, `set_block` (±4 of the event, air or a
+  placeable block), `say`, `weather`. Rules don't trigger Rules.
+- **Limits** (chosen in the build): 5 entries per villager per game hour and 50 per day; names 1-40
+  characters, descriptions and reasons ≤ 280, content ≤ 8 KB of JSON, 5000 entries per world;
+  Designs ≤ 16³ blocks and 32 Parts; Rules ≤ 24 nodes, depth 5, 8 effects, 20 firings per game hour,
+  400 Rule steps per tick across all Rules; bridge requests ≤ 1 MB.
+- Built-in blocks are seeded as nature's Materials now (with density, hardness, burns), plus the
+  engine's first Parts (box, sphere, cylinder), the made-from/drops Relations the code already
+  follows, and worked examples (`stone bench`, `lucky harvest`, `dawn chorus`). M6 makes the
+  renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
+  tools keep their coded drops until M6.
+
+### M6 — built-ins become entries (next)
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -78,6 +102,9 @@ The order holds at least until M13; adjust it then if playtests say so.
 - The farmer look → a Design. Species stay code until V2 (ADR 0002), but their products, food and
   drops come from the Catalog.
 - Renderer and worldgen read looks and placement from the Catalog; nothing special-cased.
+- From playtest 0001: items and crops (wheat, seeds, fish, wool, milk, eggs) become entries, so
+  Relations like "wheat is_food_for cow" can be written; tools' drops follow `replaced_by` like Rule
+  `give` already does.
 
 ### M7 — building, crafting, physics phase 1
 
@@ -143,6 +170,12 @@ Budget: sim tick < 4 ms with 500 awake bodies.
 
 Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;
 agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is solid.
+
+## Catalog ideas from playtests
+
+- Per-villager Rule cooldowns ("once per villager per game hour") on top of the per-Rule cap.
+- Withdraw your own open proposal; let an author retire their own entry within a short grace window.
+- Rules that read Relations ("if this farmland is fertilized by compost, wheat grows faster").
 
 ## Known gaps (polish backlog)
 

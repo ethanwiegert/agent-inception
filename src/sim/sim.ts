@@ -1,10 +1,12 @@
 import { type Animal, type Farmer, spawnAnimals, stepAnimals } from "./animals.ts";
 import { type BlockDef, BlockRegistry } from "./blocks.ts";
+import { Catalog, type CatalogSave } from "./catalog.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
 import { standY } from "./path.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
+import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
 
@@ -40,6 +42,12 @@ export interface Agent {
   journal: string[];
   /** Custom look; null means the default farmer body. */
   sprite: Sprite | null;
+  /** Last tick this villager called a tool; villagers active within a game day vote. */
+  lastActive: number;
+  /** Ticks of recent Catalog entries this villager added (rate limit). */
+  authored: number[];
+  /** Things Rules did to this villager, told with the next tool result. Not saved. */
+  notes: string[];
   queue: { callId: number; job: Job }[];
 }
 
@@ -51,7 +59,11 @@ export interface Crop {
 export type SimEvent =
   | { type: "say"; agent: number; text: string }
   | { type: "joined"; agent: number }
-  | { type: "catch"; agent: number; fish: string };
+  | { type: "catch"; agent: number; fish: string }
+  /** A Rule's `say` effect; agent is 0 for timer Rules. */
+  | { type: "rule"; agent: number; rule: string; text: string }
+  /** Catalog news: entries added, proposals opened, votes, outcomes. */
+  | { type: "catalog"; agent: number; text: string };
 
 export interface CallResult {
   callId: number;
@@ -68,7 +80,7 @@ export interface SaveData {
   savedAt: number;
   edits: number[];
   crops: [number, number][];
-  agents: Omit<Agent, "queue" | "anim" | "stride">[];
+  agents: Omit<Agent, "queue" | "anim" | "stride" | "notes">[];
   blocks?: BlockDef[];
   /** Trees, rocks, flowers etc. that differ from generation. */
   props?: PropDiff;
@@ -76,6 +88,9 @@ export interface SaveData {
   animals?: Animal[];
   schools?: School[];
   weatherOverride?: { clouds: number; until: number } | null;
+  /** Missing in saves from before the Catalog: those worlds get nature's entries. */
+  catalog?: CatalogSave;
+  ruleStats?: [number, RuleStat][];
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
 }
@@ -94,6 +109,10 @@ export class Sim {
   /** Fish schools in rivers and the sea. */
   schools: School[];
   readonly blocks = new BlockRegistry();
+  /** Kinds of things that can exist (ADR 0003); the World holds the things that do. */
+  catalog = Catalog.create();
+  readonly rules: Rules = new Rules(this);
+  readonly ticksPerDay = TICKS_PER_DAY;
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
   readonly crops = new Map<number, Crop>();
@@ -175,6 +194,9 @@ export class Sim {
       inventory: { wheat_seeds: 16, oak_sapling: 1, birch_sapling: 1, pine_sapling: 1 },
       journal: [],
       sprite: null,
+      lastActive: this.tick,
+      authored: [],
+      notes: [],
       queue: [],
     };
     this.agents.push(agent);
@@ -187,8 +209,48 @@ export class Sim {
     agent.queue.push({ callId, job });
   }
 
+  /** Villagers who acted within the last game day: the ones a Proposal waits for. */
+  activeVillagers(): string[] {
+    return this.agents.filter((a) => this.tick - a.lastActive <= TICKS_PER_DAY).map((a) => a.name);
+  }
+
+  /** What the world produces for `item`: itself, its replacement, or null if it's retired. */
+  produce(item: string): string | null {
+    const entry = this.catalog.byName(item);
+    if (!entry) return item;
+    return this.catalog.current(entry)?.name ?? null;
+  }
+
+  /** A villager did something Rules can listen for, at block (x, y, z). */
+  fire(event: RuleEvent, agent: Agent | null, x: number, y: number, z: number, what: string) {
+    const ctx: RuleCtx = { agent, x, y, z, what };
+    this.rules.fire(event, ctx);
+  }
+
+  /** Close proposals that are due and announce the outcome. */
+  settleProposals() {
+    for (const p of this.catalog.settle(this.tick, this.activeVillagers())) {
+      const e = this.catalog.get(p.entry)!;
+      const what = p.action === "retire"
+        ? `retire "${e.name}"`
+        : `replace "${e.name}" with "${this.catalog.get(p.replacement!)!.name}"`;
+      this.events.push({
+        type: "catalog",
+        agent: 0,
+        text: `Proposal #${p.id} to ${what} ${p.status} (${p.outcome}).`,
+      });
+    }
+  }
+
+  /** Report a call's result, with whatever Rules did to the villager meanwhile. */
+  finish(agent: Agent | null, callId: number, text: string, isError: boolean) {
+    if (agent?.notes.length) text += "\n" + agent.notes.splice(0).join("\n");
+    this.results.push({ callId, text, isError });
+  }
+
   step() {
     this.tick++;
+    this.rules.beginTick();
     this.stepAnimals();
     stepSchools(this.schools, this.world, this.rng, this.tick, TICK_HZ);
     for (const agent of this.agents) {
@@ -199,14 +261,16 @@ export class Sim {
       try {
         const r = current.job.next();
         if (!r.done) continue;
-        this.results.push({ callId: current.callId, text: r.value, isError: false });
+        this.finish(agent, current.callId, r.value, false);
       } catch (e) {
         const text = e instanceof Error ? e.message : String(e);
-        this.results.push({ callId: current.callId, text, isError: true });
+        this.finish(agent, current.callId, text, true);
       }
       agent.queue.shift();
       agent.anim = Anim.Idle;
     }
+    this.rules.tick(this.tick, (this.tick + this.dayOffset) % TICKS_PER_DAY, TICKS_PER_DAY);
+    if (this.tick % TICK_HZ === 0 && this.catalog.open().length) this.settleProposals();
   }
 
   private farmers: Farmer[] = [];
@@ -255,8 +319,10 @@ export class Sim {
       animals: structuredClone(this.animals),
       schools: structuredClone(this.schools),
       weatherOverride: this.weatherOverride,
+      catalog: this.catalog.save(),
+      ruleStats: structuredClone([...this.rules.stats]),
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
-      agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, ...rest }) =>
+      agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, notes: _n, ...rest }) =>
         structuredClone(rest)
       ),
     };
@@ -267,6 +333,8 @@ export class Sim {
     sim.tick = data.tick;
     sim.blocks.load(data.blocks ?? []);
     sim.weatherOverride = data.weatherOverride ?? null;
+    if (data.catalog) sim.catalog = Catalog.load(data.catalog);
+    for (const [id, stat] of data.ruleStats ?? []) sim.rules.stats.set(id, structuredClone(stat));
     sim.dayOffset = data.dayOffset;
     const w = sim.world;
     for (let i = 0; i < data.edits.length; i += 2) {
@@ -288,6 +356,9 @@ export class Sim {
       sim.agents.push({
         ...agent,
         sprite: agent.sprite ?? null,
+        lastActive: agent.lastActive ?? 0,
+        authored: agent.authored ?? [],
+        notes: [],
         anim: Anim.Idle,
         stride: 0,
         queue: [],

@@ -49,6 +49,9 @@ src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
                     shared by handlers), blocks.ts (block registry, patterns),
+                    catalog.ts (append-only Catalog: entries, content schemas, Proposals, nature's
+                    seed entries), rules.ts (Rule schema + engine: triggers, budget, effects),
+                    catalogtools.ts (catalog_* / propose / vote tools),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (trees/flowers/rocks…: generation, saplings, save diff),
                     animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),
@@ -73,9 +76,10 @@ must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (next: M5 Catalog core). Each milestone opens
-with a short clarifying grill with Ethan and closes with the playtest gate described there (tests,
-Haiku playtests including an adversary, a report in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (next: M6 built-ins become entries). Each
+milestone opens with a short clarifying grill with Ethan and closes with the playtest gate described
+there (tests, Haiku playtests including an adversary, a report in `docs/playtests/`, fixes, perf,
+screenshots).
 
 ## Testing and debugging
 

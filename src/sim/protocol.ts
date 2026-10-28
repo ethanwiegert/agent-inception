@@ -1,4 +1,5 @@
 import type { BlockDef } from "./blocks.ts";
+import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
 
@@ -16,6 +17,15 @@ export const CROP_STRIDE = 4;
 export interface AgentProfile {
   name: string;
   sprite: Sprite | null;
+}
+
+/** Catalog changes since the last tick message. The Catalog is append-only, so new entries suffice. */
+export interface CatalogDelta {
+  entries: Entry[];
+  /** [id, retired, replacedBy] for every retired entry; only sent when one changed. */
+  status?: [number, boolean, number | null][];
+  /** Open and recent proposals. */
+  proposals: Proposal[];
 }
 
 export type ToWorker =
@@ -37,6 +47,7 @@ export interface ReadyMessage {
   blocks: BlockDef[];
   /** Props that differ from generation (the page regenerates the rest from the seed). */
   props: PropDiff;
+  catalog: CatalogSave;
 }
 
 export interface TickMessage {
@@ -56,6 +67,7 @@ export interface TickMessage {
   edits: Int32Array<ArrayBuffer>;
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
+  catalog?: CatalogDelta;
   /** Sent when crops change and once a second while they grow. */
   crops?: Float32Array<ArrayBuffer>;
   events: SimEvent[];

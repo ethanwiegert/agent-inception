@@ -99,3 +99,9 @@ export function inventoryText(agent: Agent): string {
   const items = Object.entries(agent.inventory).filter(([, n]) => n > 0);
   return `Inventory: ${items.length ? items.map(([k, n]) => `${k} ${n}`).join(", ") : "empty"}.`;
 }
+
+/** "06:30" for a time of day 0-1. */
+export function clock(t: number): string {
+  const m = Math.floor(t * 24 * 60);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}

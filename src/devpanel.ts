@@ -1,4 +1,5 @@
 import { LOOKS } from "./render/look.ts";
+import type { Catalog } from "./sim/catalog.ts";
 
 export interface DevHandlers {
   look: (id: string) => void;
@@ -17,6 +18,7 @@ export interface DevStatus {
   bridge: boolean;
   agents: { id: number; name: string }[];
   following: number | null;
+  catalog: Catalog;
   stats: string[];
 }
 
@@ -30,7 +32,8 @@ export function createDevPanel(on: DevHandlers) {
   panel.style.cssText =
     "position:fixed;top:12px;right:12px;padding:12px 14px;background:rgba(10,14,18,.72);" +
     "backdrop-filter:blur(6px);border-radius:10px;font:12px/1.5 ui-monospace,monospace;" +
-    "color:#d8dee9;display:grid;gap:8px;width:250px;user-select:none";
+    "color:#d8dee9;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;width:250px;" +
+    "user-select:none";
   document.body.append(panel);
 
   const section = (label: string) => {
@@ -83,6 +86,9 @@ export function createDevPanel(on: DevHandlers) {
   const agents = section("agents");
   let agentsKey = "";
 
+  const catalog = section("catalog");
+  let catalogVersion = -1;
+
   const stats = document.createElement("div");
   stats.style.opacity = "0.8";
   panel.append(stats);
@@ -112,6 +118,32 @@ export function createDevPanel(on: DevHandlers) {
             })
             : [Object.assign(document.createElement("span"), { textContent: "none yet" })]),
         );
+      }
+      if (s.catalog.version !== catalogVersion) {
+        catalogVersion = s.catalog.version;
+        const c = s.catalog;
+        const mine = c.entries.filter((e) => e.author !== "nature");
+        catalog.head.textContent =
+          `catalog · ${c.entries.length} entries, ${mine.length} by villagers`;
+        // Agent-written names go in as text, never HTML.
+        const line = (text: string, color = "") => {
+          const el = document.createElement("div");
+          el.textContent = el.title = text;
+          el.style.cssText = `color:${color};white-space:nowrap;overflow:hidden;` +
+            "text-overflow:ellipsis";
+          return el;
+        };
+        const open = c.proposals.filter((p) => p.status === "open");
+        catalog.body.replaceChildren(
+          ...mine.filter((e) => e.kind !== "relation").slice(-3).reverse().map((e) =>
+            line(`${e.kind} “${e.name}” · ${e.author}`)
+          ),
+          ...open.slice(0, 3).map((p) =>
+            line(`vote #${p.id}: ${p.action} “${c.get(p.entry)?.name}” · ${p.by}`, "#e8c46a")
+          ),
+          ...(open.length > 3 ? [line(`+${open.length - 3} more open votes`, "#e8c46a")] : []),
+        );
+        if (!catalog.body.childElementCount) catalog.body.append(line("nothing by villagers yet"));
       }
       stats.textContent = s.stats.join("  ·  ");
     },

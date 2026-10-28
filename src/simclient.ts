@@ -7,6 +7,7 @@ import {
   type ToWorker,
 } from "./sim/protocol.ts";
 import { BlockRegistry } from "./sim/blocks.ts";
+import { Catalog } from "./sim/catalog.ts";
 import { Props } from "./sim/props.ts";
 import type { SimEvent, Sprite } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
@@ -58,6 +59,8 @@ export class SimClient {
   blocks = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
+  /** Mirror of the sim's Catalog. */
+  catalog = new Catalog();
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
   cropsVersion = 0;
   profiles: AgentProfile[] = [];
@@ -154,6 +157,7 @@ export class SimClient {
       const world = generateWorld({ seed: msg.seed });
       this.props = new Props(world, msg.seed); // from the pristine terrain, like the sim
       this.props.applyDiff(msg.props);
+      this.catalog = Catalog.load(msg.catalog);
       applyEdits(world, msg.edits);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
@@ -182,6 +186,10 @@ export class SimClient {
     this.clouds = msg.clouds;
     if (msg.blocks) this.blocks.load(msg.blocks);
     if (msg.profiles) this.profiles = msg.profiles;
+    if (msg.catalog) {
+      const d = msg.catalog;
+      this.catalog.mirror(d.entries, d.status ?? [], d.proposals);
+    }
     if (msg.props && this.props) this.props.reset(msg.props);
     if (msg.crops) {
       this.crops = msg.crops;

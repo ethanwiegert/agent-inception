@@ -25,6 +25,7 @@ const css = `
 .ai-feed div{background:rgba(10,14,18,.6);color:#d8dee9;padding:3px 8px;border-radius:6px}
 .ai-feed b{color:#9fd36b;font-weight:600}
 .ai-feed .err{color:#e58b7a}
+.ai-feed i{color:#8a94a3;font-style:normal}
 `;
 
 /** DOM layer over the canvas: name tags, speech bubbles and an activity feed for spectators. */
@@ -51,13 +52,23 @@ export class Overlay {
   }
 
   log(who: string, text: string, isError = false) {
+    // A repeat of the newest line (a chatty timer Rule, say) bumps its count instead.
+    const last = this.feed.firstElementChild as HTMLDivElement | null;
+    const key = `${who}\u0000${text}\u0000${isError}`;
+    if (last?.dataset.key === key) {
+      const n = Number(last.dataset.count ?? 1) + 1;
+      last.dataset.count = String(n);
+      last.querySelector("i")!.textContent = ` ×${n}`;
+      return;
+    }
     const line = document.createElement("div");
+    line.dataset.key = key;
     const name = document.createElement("b");
     name.textContent = who;
     const body = document.createElement("span");
     body.textContent = " " + text;
     if (isError) body.className = "err";
-    line.append(name, body);
+    line.append(name, body, document.createElement("i"));
     this.feed.prepend(line);
     while (this.feed.childElementCount > 30) this.feed.lastElementChild!.remove();
   }

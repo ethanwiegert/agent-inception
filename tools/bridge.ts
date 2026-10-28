@@ -9,9 +9,13 @@ import { TOOL_DEFS } from "../src/sim/tools.ts";
 
 const SERVER_INFO = { name: "agent-inception", version: "0.1.0" };
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const INSTRUCTIONS = "You are a farmer living in a small voxel meadow that people watch in their " +
-  "browser. Call join with a name, then look around. Life here is slow and methodical: plan a " +
-  "plot, till, plant, wait for wheat to ripen, harvest, build. Keep notes in your journal.";
+const INSTRUCTIONS = "You are a villager living on a small voxel island that people watch in " +
+  "their browser. Call join with a name, then look around. Life here is slow and methodical: " +
+  "plan a plot, till, plant, wait for wheat to ripen, harvest, build. Keep notes in your " +
+  "journal. The Catalog lists every kind of thing that can exist here; read it with " +
+  "catalog_find and catalog_get, and extend it with catalog_add and catalog_fork.";
+/** Largest request body accepted (an uploaded sprite image is the biggest legitimate one). */
+const MAX_BODY = 1 << 20;
 
 interface JsonRpc {
   jsonrpc: "2.0";
@@ -101,16 +105,23 @@ export function createBridge() {
       return new Response(null, { status: 405, headers: { allow: "POST, DELETE" } });
     }
 
+    if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY) {
+      return new Response("request too large", { status: 413 });
+    }
     let body: JsonRpc | JsonRpc[];
     try {
-      body = await req.json();
+      const text = await req.text();
+      if (text.length > MAX_BODY) return new Response("request too large", { status: 413 });
+      body = JSON.parse(text);
     } catch {
       return json(
         { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
         400,
       );
     }
-    const messages = Array.isArray(body) ? body : [body];
+    const messages = (Array.isArray(body) ? body : [body]).filter((m) =>
+      typeof m === "object" && m !== null
+    );
     const isInit = messages.some((m) => m.method === "initialize");
     if (isInit) {
       session = crypto.randomUUID();

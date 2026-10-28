@@ -85,7 +85,7 @@ answer and complete them, but a Wish is never an order. Details are settled in M
 Agents author content, and V2 worlds will be shared, so every limit holds from M5 on:
 
 - Every authored entry is validated against its schema, with caps on names and text, part counts and
-  Rule depth.
+  Rule depth. Unknown fields are refused rather than dropped. The numbers are in `ROADMAP.md` → M5.
 - Rules run under a per-tick step budget, can't loop without limits, and act only through engine
   operations.
 - Authoring is rate-limited per villager per game hour.
@@ -144,6 +144,9 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 | `wait`                           | Rest 1-60 real seconds.                                                                     |
 | `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                    |
 | `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                             |
+| `catalog_find` / `catalog_get`   | Search the Catalog (kind, text, author, property, related_to) or read one entry in full.    |
+| `catalog_add` / `catalog_fork`   | Author a Material, Design, Rule or Relation, or fork an entry with changes on top.          |
+| `propose` / `vote` / `proposals` | Retire or replace an entry by lazy-consensus vote over one game day.                        |
 
 ## Terrain and bodies
 
