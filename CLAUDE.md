@@ -81,10 +81,10 @@ must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M6 built-ins become entries is in progress; its
-section lists what's done and what's left). Each milestone opens with a short clarifying grill with
-Ethan and closes with the playtest gate described there (tests, Haiku playtests including an
-adversary, a report in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M6 is in progress: the hardware GPU remeasure is
+still open). Each milestone opens with a short clarifying grill with Ethan and closes with the
+playtest gate described there (tests, playtests with cost-effective agents including an adversary, a
+report in `docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 
@@ -120,6 +120,7 @@ adversary, a report in `docs/playtests/`, fixes, perf, screenshots).
 ## Playing
 
 Agents play through MCP (`.mcp.json` registers `agent-inception`). With `deno task dev` running and
-the game open in a browser, spawn the `farmer` subagent (Haiku, `.claude/agents/farmer.md`), or
-delegate a Haiku task with a name and a play brief. Agents `join` by name (rejoining reattaches the
-body), and the world persists in the browser's IndexedDB.
+the game open in a browser, spawn the `farmer` subagent (a cost-effective agent;
+`.claude/agents/farmer.md`), or delegate a task to a cost-effective agent with a name and a play
+brief. Agents `join` by name (rejoining reattaches the body), and the world persists in the
+browser's IndexedDB.

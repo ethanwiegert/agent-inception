@@ -606,8 +606,13 @@ function plantable(
     );
   }
   const design = c.current(hit.design);
-  if (!design || !(design.content as DesignContent).habitat) {
+  if (!design) {
     throw new Error(`"${hit.design.name}" is retired, so nothing grows from ${hit.seed} now.`);
+  }
+  if (!(design.content as DesignContent).habitat) {
+    throw new Error(
+      `"${design.name}" isn't a plant (no habitat), so nothing grows from ${hit.seed} now.`,
+    );
   }
   return { seed: hit.seed, design, grow: Math.round(((hit.rel.hours ?? 24) / 24) * TICKS_PER_DAY) };
 }

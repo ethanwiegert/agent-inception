@@ -2,6 +2,7 @@ import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/stric
 import { AnimalMode } from "./animals.ts";
 import { Block, BlockRegistry, BUILTIN_BLOCKS, FIRST_CUSTOM_BLOCK } from "./blocks.ts";
 import { Catalog, type DesignContent, type MaterialContent } from "./catalog.ts";
+import { plantInfo } from "./props.ts";
 import { type CallResult, gameHours, Sim } from "./sim.ts";
 import { callTool } from "./tools.ts";
 
@@ -302,6 +303,56 @@ Deno.test("animals follow whoever carries their food", () => {
   add(sim, "relation", "", { type: "is_food_for", from: "trout", to: "sheep" });
   assertEquals(sim.foodFor(0), ["wheat", "trout"]);
   assert(follows(), "now it is");
+});
+
+Deno.test("a plant named with a leading digit is not marked as a villager", () => {
+  const sim = new Sim(1);
+  const e = add(sim, "design", "2 clover", {
+    habitat: { on: ["grass"] },
+    parts: [{ part: "sphere", material: "wool", at: [0.5, 0.1, 0.5], size: [0.2, 0.2, 0.2] }],
+  });
+  assertEquals(plantInfo(sim.catalog, e.id)!.mark, "c");
+});
+
+Deno.test("replacing a wheat design recolors the crop; a non-plant replacement stops planting", () => {
+  const { sim, x, z } = farm();
+  ok(run(sim, "a", "till", { x, z }));
+  ok(run(sim, "a", "plant", { x, z }));
+  const id = sim.crops.get(z * sim.world.sizeX + x)!.design;
+  const [stalk0, ripe0] = sim.cropColors(id);
+  add(sim, "material", "ink stalk", { form: "item", color: "#102030" });
+  add(sim, "material", "black grain", { form: "item", color: "#010203" });
+  add(sim, "design", "black wheat", {
+    habitat: { on: ["farmland"] },
+    parts: [{
+      part: "cylinder",
+      material: "ink stalk",
+      at: [0.5, 0.4, 0.5],
+      size: [0.04, 0.8, 0.04],
+    }],
+  });
+  add(sim, "relation", "", { type: "drops", from: "black wheat", to: "black grain" });
+  ok(run(sim, "a", "propose", {
+    entry: "wheat crop",
+    action: "replace",
+    replacement: "black wheat",
+    reason: "a darker field",
+  }));
+  const [stalk1, ripe1] = sim.cropColors(id);
+  assertEquals(stalk1, 0x102030);
+  assertEquals(ripe1, 0x010203);
+  assert(stalk0 !== stalk1 && ripe0 !== ripe1);
+  // A body has no habitat. Seeds then fail with that reason, not "retired".
+  add(sim, "design", "wheat scarecrow", {
+    parts: [{ part: "box", material: "straw", at: [0.5, 0.5, 0.5], size: [0.2, 1, 0.2] }],
+  });
+  ok(run(sim, "a", "propose", {
+    entry: "black wheat",
+    action: "replace",
+    replacement: "wheat scarecrow",
+    reason: "try a body in the field",
+  }));
+  err(run(sim, "a", "plant", { x: x + 1, z }), "isn't a plant (no habitat)");
 });
 
 Deno.test("look names the plants in view from their Designs", () => {

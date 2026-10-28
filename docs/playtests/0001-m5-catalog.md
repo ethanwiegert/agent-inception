@@ -1,6 +1,6 @@
 # Playtest 0001 — M5 Catalog core
 
-2026-10-27. Three Claude Haiku 5.5 agents in the dev world (seed 1337, day 23-24) at the same time,
+2026-10-27. Three cost-effective agents in the dev world (seed 1337, day 23-24) at the same time,
 each about 50-60 calls, all through the MCP bridge: **Juniper** (builder and author), **Thistle**
 (steward: forks, proposals, votes) and **Nettle** (adversary aimed at the safety limits). Wren
 (driven by hand with curl) checked the fixes afterwards.

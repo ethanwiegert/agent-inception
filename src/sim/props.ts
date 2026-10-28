@@ -67,7 +67,10 @@ export function plantInfo(catalog: Catalog, id: number): PlantInfo | null {
   for (const p of d.parts) top = Math.max(top, p.at[1] + p.size[1] / 2);
   const info: PlantInfo = {
     entry,
-    mark: d.mark ?? entry.name[0],
+    // An omitted mark takes the first look-map-safe character. Names may start with a digit
+    // ("2 clover"); a digit would read as another villager.
+    mark: d.mark ?? [...entry.name].find((ch) => ch.charCodeAt(0) >= 33 && !/[\s\d@]/.test(ch)) ??
+      "?",
     solid: d.parts.some((p) => (mat(p.material)?.hardness ?? 0) >= 3),
     small: d.parts.every((p) => Math.min(...p.size) < 0.1),
     floats: top <= 0.25 && d.parts.every((p) => (mat(p.material)?.density ?? 1) < 1),

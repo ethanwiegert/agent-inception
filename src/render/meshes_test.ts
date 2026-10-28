@@ -1,5 +1,7 @@
 import { deepStrictEqual as assertEquals, ok } from "node:assert/strict";
 import { identity, mat4, rotateY, translate } from "../math.ts";
+import { Catalog } from "../sim/catalog.ts";
+import { FaunaModels } from "./fauna.ts";
 import {
   INSTANCE_FLOATS,
   InstanceBatch,
@@ -93,4 +95,35 @@ Deno.test("instance batches group by template without losing data", () => {
     assertEquals(batch.sorted[i * INSTANCE_FLOATS + 12], t);
     assertEquals(t % 3 === 0, i >= 133);
   }
+});
+
+Deno.test("a replaced animal design replaces the cached rig", () => {
+  const catalog = Catalog.create();
+  const fauna = new FaunaModels(new MeshLibrary());
+  const before = fauna.pieces(catalog, 0);
+  ok(before.length > 1, "sheep starts as several parts");
+  const sheep = catalog.byName("sheep")!;
+  const fork = catalog.add(
+    {
+      kind: "design",
+      name: "box sheep",
+      content: {
+        parts: [{
+          part: "box",
+          material: "wool",
+          at: [0.5, 0.5, 0.5],
+          size: [0.4, 0.4, 0.6],
+          role: "body",
+        }],
+      },
+    },
+    "Fern",
+    0,
+  );
+  sheep.retired = true;
+  sheep.replacedBy = fork.id;
+  const after = fauna.pieces(catalog, 0);
+  assertEquals(after.map((p) => p.role), ["body"]);
+  ok(after[0].id !== before[0].id);
+  assertEquals(fauna.pieces(catalog, 0), after);
 });

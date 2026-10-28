@@ -1,6 +1,12 @@
 import { type Animal, type Farmer, spawnAnimals, SPECIES, stepAnimals } from "./animals.ts";
 import { BlockRegistry } from "./blocks.ts";
-import { Catalog, type CatalogSave, type Entry, type MaterialContent } from "./catalog.ts";
+import {
+  Catalog,
+  type CatalogSave,
+  type DesignContent,
+  type Entry,
+  type MaterialContent,
+} from "./catalog.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
 import { standY } from "./path.ts";
@@ -247,6 +253,34 @@ export class Sim {
       if (name) out.push([name, rel.count]);
     }
     return out;
+  }
+
+  /**
+   * Stalk and ripe-ear colors for a crop's Design, as sRGB integers. A replaced Design (and a
+   * replaced drop) changes the color, so a field planted earlier still follows the Catalog.
+   */
+  private cropLooks: { version: number; byDesign: Map<number, [number, number]> } = {
+    version: -1,
+    byDesign: new Map(),
+  };
+  cropColors(designId: number): [number, number] {
+    const c = this.catalog;
+    if (this.cropLooks.version !== c.version) {
+      this.cropLooks = { version: c.version, byDesign: new Map() };
+    }
+    let look = this.cropLooks.byDesign.get(designId);
+    if (look) return look;
+    const stored = c.get(designId);
+    const e = (stored && c.current(stored)) || stored;
+    const color = (name: string | undefined) => {
+      const m = name ? c.byName(name)?.content as MaterialContent | undefined : undefined;
+      return m?.color ? parseInt(m.color.slice(1), 16) : 0x619441;
+    };
+    const stalk = color((e?.content as DesignContent | undefined)?.parts[0]?.material);
+    const drop = e ? this.drops(e)[0]?.[0] : undefined;
+    look = [stalk, drop ? color(drop) : stalk];
+    this.cropLooks.byDesign.set(designId, look);
+    return look;
   }
 
   /** A new villager's things: seeds and a sapling of each tree, as the Catalog now names them. */

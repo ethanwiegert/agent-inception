@@ -55,19 +55,21 @@ interface Piece {
   at: Vec3;
 }
 
-/** Body templates per species, from the Catalog, built on first use. */
+/** Body templates per species, from the Catalog. Rebuilt when that species' Design changes. */
 export class FaunaModels {
-  private rigs = new Map<number, Piece[]>();
+  private rigs = new Map<number, { designId: number; pieces: Piece[] }>();
   private catalog: Catalog | null = null;
 
   constructor(private lib: MeshLibrary) {}
 
   pieces(catalog: Catalog, species: number): Piece[] {
     if (catalog !== this.catalog) this.catalog = catalog, this.rigs.clear();
-    const hit = this.rigs.get(species);
-    if (hit) return hit;
     const named = SPECIES[species] && catalog.byName(SPECIES[species].name);
     const design = named && catalog.current(named);
+    // 0 until the Catalog has this species (the page mirror fills in after the first frames).
+    const designId = design?.kind === "design" ? design.id : 0;
+    const hit = this.rigs.get(species);
+    if (hit?.designId === designId) return hit.pieces;
     const pieces: Piece[] = [];
     if (design?.kind === "design") {
       const d = design.content as DesignContent;
@@ -81,8 +83,7 @@ export class FaunaModels {
         pieces.push({ role, id, at: [at[0] - ANCHOR[0], at[1] - ANCHOR[1], at[2] - ANCHOR[2]] });
       }
     }
-    // Retired species without a replacement simply aren't drawn; check again next version.
-    if (pieces.length) this.rigs.set(species, pieces);
+    this.rigs.set(species, { designId, pieces });
     return pieces;
   }
 }

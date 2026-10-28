@@ -14,7 +14,6 @@ import {
   SCHOOL_STRIDE,
   type ToWorker,
 } from "./sim/protocol.ts";
-import type { DesignContent, MaterialContent } from "./sim/catalog.ts";
 import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
 import { callTool } from "./sim/tools.ts";
 
@@ -159,7 +158,7 @@ function send(now: number) {
     let i = 0;
     for (const [key, crop] of s.crops) {
       const x = key % s.world.sizeX, z = Math.floor(key / s.world.sizeX);
-      const [stalk, ripe] = cropLook(s, crop.design);
+      const [stalk, ripe] = s.cropColors(crop.design);
       crops.set([x, s.world.heightAt(x, z) + 1, z, s.cropGrowth(crop), stalk, ripe], i);
       i += CROP_STRIDE;
     }
@@ -211,33 +210,6 @@ function send(now: number) {
     edits.buffer,
     ...(crops ? [crops.buffer] : []),
   ]);
-}
-
-/**
- * A crop's colors from the Catalog: its stalks are its first part's Material, and ripe ears take
- * the color of what it drops (following replacements). Cached until the Catalog changes.
- */
-const looks = {
-  version: -1,
-  sim: null as Sim | null,
-  byDesign: new Map<number, [number, number]>(),
-};
-function cropLook(s: Sim, design: number): [number, number] {
-  if (looks.version !== s.catalog.version || looks.sim !== s) {
-    looks.version = s.catalog.version, looks.sim = s, looks.byDesign.clear();
-  }
-  let look = looks.byDesign.get(design);
-  if (look) return look;
-  const c = s.catalog, e = c.get(design);
-  const color = (name: string | undefined) => {
-    const m = name ? c.byName(name)?.content as MaterialContent | undefined : undefined;
-    return m?.color ? parseInt(m.color.slice(1), 16) : 0x619441;
-  };
-  const stalk = color((e?.content as DesignContent | undefined)?.parts[0]?.material);
-  const drop = e ? s.drops(e)[0]?.[0] : undefined;
-  look = [stalk, drop ? color(drop) : stalk];
-  looks.byDesign.set(design, look);
-  return look;
 }
 
 // ---------------------------------------------------------------- persistence
