@@ -6,10 +6,11 @@ import {
   inventoryText,
   num,
   reach,
+  route,
   solidProp,
   work,
 } from "./jobs.ts";
-import { type Agent, Anim, type Sim } from "./sim.ts";
+import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
 import { solid } from "./world.ts";
 
@@ -27,6 +28,8 @@ const MAX_LAYERS = 4;
 export const MAX_CELLS = 48;
 /** Ticks to lay or set a block; stacking more on a column you're at goes quicker. */
 const PLACE_TICKS = 20, STACK_TICKS = 12, BUILD_TICKS = 12;
+/** A build call stops starting new blocks after this long, to answer within about a minute. */
+const BUILD_BUDGET = 50 * TICK_HZ;
 
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -83,7 +86,8 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
       "(x, z): bottom layer first, using block Materials from your inventory. It stands on the " +
       "highest ground under it unless you give `y`. Cells already right are kept; cells taken by " +
       `something else are skipped. Lays at most ${MAX_CELLS} blocks per call: call it again with ` +
-      "the same design, x and z to carry on. Find Designs with catalog_find kind design; make " +
+      "the same design, x and z to carry on (it also stops after about 50 seconds of work). " +
+      "Find Designs with catalog_find kind design; make " +
       "your own with catalog_add.",
     inputSchema: {
       type: "object",
@@ -115,7 +119,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
             break;
           }
           const y = y0 === undefined ? sim.world.heightAt(x, z) + 1 : y0 + k;
-          const why = placeRefusal(sim, x, y, z, y0 !== undefined);
+          const why = placeRefusal(sim, agent, x, y, z, y0 !== undefined);
           if (why) {
             skipped.push(`(${x},${y},${z}) ${why}`);
             if (y0 === undefined) break; // the column's top won't change
@@ -128,7 +132,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
             continue;
           }
           yield* work(agent, Anim.Build, k ? STACK_TICKS : PLACE_TICKS);
-          const late = placeRefusal(sim, x, y, z, y0 !== undefined);
+          const late = placeRefusal(sim, agent, x, y, z, y0 !== undefined);
           if (late) {
             skipped.push(`(${x},${y},${z}) ${late}`);
             continue;
@@ -214,11 +218,21 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const todo = left();
     const name = `"${design.name}"`;
     const place = `at x=${x0} y=${base} z=${z0}`;
-    // Stand outside the footprint where possible, so the builder ends beside their work, not
-    // stranded on its roof.
     const sizeX = sim.world.sizeX;
     const footprint = new Set(cells.map((c) => (z0 + c.dz) * sizeX + x0 + c.dx));
-    const inside = (x: number, z: number) => footprint.has(z * sizeX + x);
+    const inFootprint = (x: number, z: number) => footprint.has(z * sizeX + x);
+    // Keep off anything of theirs two above the base: a villager steps down only two blocks.
+    const high = (x: number, z: number) =>
+      inFootprint(x, z) && sim.world.heightAt(x, z) >= base + 2;
+    const shutIn = () => !route(sim, agent, (cx, cz) => !inFootprint(cx, cz), () => 0);
+    /** Whether a block at (x, y, z) would leave the builder no way out: try it, look, undo. */
+    const wouldShutIn = (x: number, y: number, z: number, id: number) => {
+      const w = sim.world, was = w.get(x, y, z);
+      w.set(x, y, z, id);
+      const stuck = shutIn();
+      w.set(x, y, z, was);
+      return stuck;
+    };
     if (!todo.length) return `${name} is already complete ${place}.`;
     const needs = tally(todo);
     if (![...needs.keys()].some((m) => agent.inventory[m] > 0)) {
@@ -227,40 +241,55 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     return (function* () {
       let built = 0, layer = -1, short = false;
       const skipped: string[] = [];
-      for (const c of todo) {
-        if (built >= MAX_CELLS) break;
-        // Bottom up: a layer left unfinished for want of material holds back the ones above.
-        if (c.dy !== layer) {
-          if (short) break;
-          layer = c.dy;
-        }
+      const deferred: Cell[] = [];
+      const started = sim.tick;
+      const spent = () => built >= MAX_CELLS || sim.tick - started > BUILD_BUDGET;
+      /** Lay one cell standing somewhere `avoid` allows; false if it would shut the builder in. */
+      function* lay(c: Cell, avoid: (x: number, z: number) => boolean): Generator<void, boolean> {
         const [x, y, z] = at(c);
-        if (sim.world.get(x, y, z) === c.id) continue;
-        if (!agent.inventory[c.material]) {
-          short = true; // counted in what's still needed
-          continue;
-        }
-        const why = placeRefusal(sim, x, y, z, false);
+        const why = placeRefusal(sim, agent, x, y, z, false);
         if (why) {
           skipped.push(`(${x},${y},${z}) ${why}`);
-          continue;
+          return true;
         }
         try {
-          yield* reach(sim, agent, x, z, y, inside);
+          yield* reach(sim, agent, x, z, y, avoid);
         } catch {
           skipped.push(`(${x},${y},${z}) out of reach`);
-          continue;
+          return true;
         }
+        if (wouldShutIn(x, y, z, c.id)) return false;
         yield* work(agent, Anim.Build, BUILD_TICKS);
-        const late = placeRefusal(sim, x, y, z, false);
+        const late = placeRefusal(sim, agent, x, y, z, false);
         if (late) {
           skipped.push(`(${x},${y},${z}) ${late}`);
-          continue;
+          return true;
         }
         agent.inventory[c.material]--;
         sim.setBlock(x, y, z, c.id);
         sim.fire("placed", agent, x, y, z, c.material);
         built++;
+        return true;
+      }
+      for (const c of todo) {
+        if (spent()) break;
+        // Bottom up: a layer left unfinished for want of material holds back the ones above.
+        if (c.dy !== layer) {
+          if (short) break;
+          layer = c.dy;
+        }
+        if (sim.world.get(...at(c)) === c.id) continue;
+        if (!agent.inventory[c.material]) {
+          short = true; // counted in what's still needed
+          continue;
+        }
+        if (!(yield* lay(c, high))) deferred.push(c);
+      }
+      // Blocks that would have closed the builder in go in last, laid from outside.
+      for (const c of deferred) {
+        if (spent()) break;
+        if (sim.world.get(...at(c)) === c.id || !agent.inventory[c.material]) continue;
+        if (!(yield* lay(c, inFootprint))) skipped.push(`(${at(c).join(",")}) would shut you in`);
       }
       const rest = left();
       const done = cells.length - rest.length;
@@ -275,6 +304,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           : " The rest is blocked.";
         if (missing.size) text += ` Still needed: ${needText(missing, agent)}.`;
       }
+      if (shutIn()) text += " You're shut in by your own work: break_block a wall to get out.";
       return text + skippedText(skipped) + ` ${inventoryText(agent)}`;
     })();
   },
@@ -355,16 +385,26 @@ function skippedText(skipped: string[]): string {
   return ` Skipped: ${shown}${skipped.length > 8 ? `; and ${skipped.length - 8} more` : ""}.`;
 }
 
-/** The villager whose body fills cell (x, y, z), if any. */
-function villagerAt(sim: Sim, x: number, y: number, z: number): Agent | undefined {
+/** A villager other than `self` whose body fills cell (x, y, z), if any. */
+function villagerAt(sim: Sim, x: number, y: number, z: number, self: Agent): Agent | undefined {
   return sim.agents.find((a) =>
-    Math.floor(a.x) === x && Math.floor(a.z) === z &&
+    a !== self && Math.floor(a.x) === x && Math.floor(a.z) === z &&
     (y === Math.floor(a.y) || y === Math.floor(a.y) + 1)
   );
 }
 
-/** Why a block can't go in cell (x, y, z), or nothing. `free` placements need a neighbour. */
-function placeRefusal(sim: Sim, x: number, y: number, z: number, free: boolean): string | void {
+/**
+ * Why `builder` can't put a block in cell (x, y, z), or nothing. Their own body doesn't count:
+ * they step aside to work. `free` placements need a neighbour.
+ */
+function placeRefusal(
+  sim: Sim,
+  builder: Agent,
+  x: number,
+  y: number,
+  z: number,
+  free: boolean,
+): string | void {
   const w = sim.world;
   const top = w.heightAt(x, z);
   if (top < 0) return "outside the world";
@@ -376,7 +416,7 @@ function placeRefusal(sim: Sim, x: number, y: number, z: number, free: boolean):
     const prop = solidProp(sim, x, z);
     if (prop) return prop;
   }
-  const v = villagerAt(sim, x, y, z);
+  const v = villagerAt(sim, x, y, z, builder);
   if (v) return `${v.name} is standing there`;
   if (free) {
     const attached = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]

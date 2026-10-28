@@ -74,10 +74,26 @@ Deno.test("place_block refuses what isn't a held block, cells villagers stand in
     run(sim, "a", "place_block", { x, z, width: 4, depth: 4, layers: 4, block: "stone" }),
     `at most ${MAX_CELLS} per call`,
   );
+  // Your own spot: you step aside and lay it. Someone else's: refused.
   const fx = Math.floor(fern.x), fz = Math.floor(fern.z);
-  const onMe = ok(run(sim, "a", "place_block", { x: fx, z: fz, block: "stone" }));
-  assert(onMe.includes("Fern is standing there"), onMe);
+  assert(ok(run(sim, "a", "place_block", { x: fx, z: fz, block: "stone" })).startsWith("Placed 1"));
+  assert(Math.floor(fern.x) !== fx || Math.floor(fern.z) !== fz, "Fern stepped aside");
+  ok(run(sim, "b", "join", { name: "Wren" }));
+  const wren = sim.agents[1];
+  const wx = Math.floor(wren.x), wz = Math.floor(wren.z);
+  const onWren = ok(run(sim, "a", "place_block", { x: wx, z: wz, block: "stone" }));
+  assert(onWren.includes("Wren is standing there"), onWren);
 });
+
+/** Call build until it's done or stops making progress, as an agent would. */
+function buildAll(sim: Sim, args: Record<string, unknown>): string {
+  let text = "";
+  for (let i = 0; i < 4; i++) {
+    text = ok(run(sim, "a", "build", args));
+    if (!text.includes("To carry on")) break;
+  }
+  return text;
+}
 
 Deno.test("place_block at a height needs something to attach to: bridges grow from a wall", () => {
   const { sim, fern, x, z, h } = site();
@@ -138,6 +154,7 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
     },
   }));
   err(run(sim, "a", "build", { design: "little hut", x, z }), "You have none of what");
+  ok(run(sim, "a", "walk_to", { x: x - 1, z: z - 1 })); // a build call has about 45 s of work
   fern.inventory.stone = 50;
   fern.inventory.planks = 10;
   const first = ok(run(sim, "a", "build", { design: "little hut", x, z }));
@@ -148,8 +165,8 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
   assert(sim.world.get(x + 2, h + 4, z + 2) === Block.Air, "no roof before the walls");
   fern.inventory.planks = 40;
   // Called again without y, it finds its own floor rather than the new, higher ground.
-  const second = ok(run(sim, "a", "build", { design: "little hut", x, z }));
-  assert(second.startsWith(`Built 45 blocks of "little hut" at x=${x} y=${h + 1}`), second);
+  const second = buildAll(sim, { design: "little hut", x, z });
+  assert(second.includes(`at x=${x} y=${h + 1} z=${z}`), second);
   assert(second.includes("80 of 80 done"), second);
   assert(sim.world.get(x + 2, h + 2, z + 4) === Block.Air, "the doorway is open");
   assert(sim.world.get(x + 2, h + 4, z + 2) === Block.Stone, "the roof is on");
@@ -161,7 +178,7 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
   err(run(sim, "a", "build", { design: "stone", x, z }), "not a Design");
 });
 
-Deno.test("build closes a roof from outside, so the builder isn't stranded on top", () => {
+Deno.test("build never shuts the builder inside their own hut or strands them on its roof", () => {
   const { sim, fern, x, z } = site(6, 6);
   ok(run(sim, "a", "catalog_add", {
     kind: "design",
@@ -180,7 +197,8 @@ Deno.test("build closes a roof from outside, so the builder isn't stranded on to
     },
   }));
   fern.inventory.dirt = 39;
-  const built = ok(run(sim, "a", "build", { design: "sod hut", x, z }));
+  ok(run(sim, "a", "walk_to", { x: x - 1, z: z - 1 }));
+  const built = buildAll(sim, { design: "sod hut", x, z });
   assert(built.includes("39 of 39 done"), built);
   ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
 });

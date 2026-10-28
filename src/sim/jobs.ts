@@ -45,7 +45,7 @@ export function* walk(
  * A path for `agent` to a column `goal` accepts: by ordinary steps, or, when those can't get
  * there, hopping down drops of up to four blocks (off a roof, out of a tree house).
  */
-function route(
+export function route(
   sim: Sim,
   agent: Agent,
   goal: (x: number, z: number) => boolean,
