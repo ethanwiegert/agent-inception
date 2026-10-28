@@ -1,4 +1,4 @@
-import { findPath, levelAt, octile } from "./path.ts";
+import { findPath, levelAt, MAX_HOP_DOWN, octile } from "./path.ts";
 import { type Agent, Anim, type Job, type Sim, TICK_HZ } from "./sim.ts";
 
 /** Building blocks for tool handlers: walking, reaching, working and the inventory. */
@@ -21,9 +21,7 @@ export function* walk(
   heuristic: (x: number, z: number) => number,
   label: string,
 ): Generator<void, void> {
-  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
-  const floor = levelAt(sim.world, ax, az, agent.y);
-  const path = findPath(sim.world, ax, az, floor, goal, heuristic);
+  const path = route(sim, agent, goal, heuristic);
   if (!path) throw new Error(`You can't find a way to ${label}.`);
   agent.anim = Anim.Walk;
   for (let i = 0; i < path.length; i += 2) {
@@ -43,28 +41,73 @@ export function* walk(
   agent.anim = Anim.Idle;
 }
 
+/**
+ * A path for `agent` to a column `goal` accepts: by ordinary steps, or, when those can't get
+ * there, hopping down drops of up to four blocks (off a roof, out of a tree house).
+ */
+function route(
+  sim: Sim,
+  agent: Agent,
+  goal: (x: number, z: number) => boolean,
+  heuristic: (x: number, z: number) => number,
+): number[] | null {
+  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
+  const floor = levelAt(sim.world, ax, az, agent.y);
+  return findPath(sim.world, ax, az, floor, goal, heuristic) ??
+    findPath(sim.world, ax, az, floor, goal, heuristic, 8000, MAX_HOP_DOWN);
+}
+
 /** How far above or below their feet a farmer can place or dig a block. */
 export const MAX_REACH = 3;
 
-/** Stand next to (x, z), facing it. */
+/**
+ * Stand next to (x, z), facing it, or failing that within arm's length (two tiles). `avoid` marks
+ * columns not to stand on if any other will do (the bottom of a pit being dug, the top of a
+ * building going up).
+ */
 export function* reach(
   sim: Sim,
   agent: Agent,
   x: number,
   z: number,
   y?: number,
+  avoid?: (x: number, z: number) => boolean,
 ): Generator<void, void> {
   if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
   const h = sim.world.heightAt(x, z);
-  // Next to the column: within 2 of its top, or (for a given block height) within arm's reach.
-  const near = (cx: number, cz: number) =>
-    Math.max(Math.abs(cx - x), Math.abs(cz - z)) === 1 &&
-    (y === undefined
+  // Within 2 of the column's top, or (for a given block height) within arm's reach of it.
+  const fits = (cx: number, cz: number) =>
+    y === undefined
       ? Math.abs(sim.world.heightAt(cx, cz) - h) <= 2
-      : Math.abs(sim.world.heightAt(cx, cz) + 1 - y) <= MAX_REACH);
-  if (!near(Math.floor(agent.x), Math.floor(agent.z))) {
-    yield* walk(sim, agent, near, octile(x, z), `(${x}, ${z})`);
+      : Math.abs(sim.world.heightAt(cx, cz) + 1 - y) <= MAX_REACH;
+  const within = (d: number, keepClear: boolean) => (cx: number, cz: number) =>
+    Math.max(Math.abs(cx - x), Math.abs(cz - z)) === d && fits(cx, cz) &&
+    !(keepClear && avoid?.(cx, cz));
+  const options = avoid
+    ? [within(1, true), within(2, true), within(1, false), within(2, false)]
+    : [within(1, false), within(2, false)];
+  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
+  for (const goal of options) {
+    if (goal(ax, az) || (yield* tryWalk(sim, agent, goal, octile(x, z)))) {
+      return yield* face(agent, x, z);
+    }
   }
+  throw new Error(`You can't find a way to (${x}, ${z}).`);
+}
+
+/** Walk to a column `goal` accepts if there's a way; false (without moving) if there isn't. */
+function* tryWalk(
+  sim: Sim,
+  agent: Agent,
+  goal: (x: number, z: number) => boolean,
+  heuristic: (x: number, z: number) => number,
+): Generator<void, boolean> {
+  if (!route(sim, agent, goal, heuristic)) return false;
+  yield* walk(sim, agent, goal, heuristic, "there");
+  return true;
+}
+
+function* face(agent: Agent, x: number, z: number): Generator<void, void> {
   const target = Math.atan2(x + 0.5 - agent.x, z + 0.5 - agent.z);
   while (Math.abs(angleDiff(agent.yaw, target)) > 0.05) {
     agent.yaw = turn(agent.yaw, target, 0.3);

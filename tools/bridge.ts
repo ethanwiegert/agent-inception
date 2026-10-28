@@ -157,7 +157,8 @@ export function createBridge() {
   function handleGameSocket(req: Request): Response {
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.onopen = () => {
-      // Latest tab wins; an older one would otherwise hold stale state.
+      // Latest tab wins; an older one would otherwise hold stale state. Code 4000 tells the old
+      // tab not to reconnect until someone looks at it again (src/agentlink.ts).
       if (game && game !== socket) game.close(4000, "replaced by a newer tab");
       game = socket;
       console.log("bridge: game tab connected");

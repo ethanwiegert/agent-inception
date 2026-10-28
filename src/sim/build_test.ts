@@ -106,6 +106,21 @@ Deno.test("break_block digs areas and layers, and cuts doorways with y", () => {
   err(run(sim, "a", "break_block", { x, z, width: 16, layers: 4 }), "at most");
 });
 
+Deno.test("digging a deep pit leaves the digger on the rim, not trapped at the bottom", () => {
+  const { sim, fern, x, z, h } = site(6, 6);
+  // Two deep: a drop a villager will step down, but a climb they can't make back up.
+  const text = ok(run(sim, "a", "break_block", { x, z, width: 4, depth: 4, layers: 2 }));
+  assert(text.startsWith("Dug 16 grass, 16 dirt"), text);
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) assert(sim.world.heightAt(x + i, z + j) === h - 2);
+  }
+  const fx = Math.floor(fern.x), fz = Math.floor(fern.z);
+  const inside = fx >= x && fx < x + 4 && fz >= z && fz < z + 4;
+  assert(!inside, `Fern ended in the pit at (${fx}, ${fz})`);
+  // And can still walk off somewhere else.
+  ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
+});
+
 Deno.test("build lays a Design's blocks over calls, picks up where it stopped, and says what's missing", () => {
   const { sim, fern, x, z, h } = site(6, 6);
   // A 5×5 hut: a stone floor, two rings of plank walls with a doorway, a stone roof.
@@ -138,9 +153,36 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
   assert(second.includes("80 of 80 done"), second);
   assert(sim.world.get(x + 2, h + 2, z + 4) === Block.Air, "the doorway is open");
   assert(sim.world.get(x + 2, h + 4, z + 2) === Block.Stone, "the roof is on");
+  // The builder closed the roof from outside and can walk away, not stranded up top.
+  ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
   assert(ok(run(sim, "a", "build", { design: "little hut", x, z })).includes("already complete"));
+  err(run(sim, "a", "build", { design: "little hut", x: 500, z: 500 }), "outside the world");
   err(run(sim, "a", "build", { design: "farmer", x, z }), "has no blocks to build");
   err(run(sim, "a", "build", { design: "stone", x, z }), "not a Design");
+});
+
+Deno.test("build closes a roof from outside, so the builder isn't stranded on top", () => {
+  const { sim, fern, x, z } = site(6, 6);
+  ok(run(sim, "a", "catalog_add", {
+    kind: "design",
+    name: "sod hut",
+    description: "Dirt walls two high with a doorway, a dirt roof.",
+    content: {
+      blocks: {
+        palette: { d: "dirt" },
+        layers: [
+          ["dddd", "d..d", "d..d", "d.dd"],
+          ["dddd", "d..d", "d..d", "dddd"],
+          ["dddd", "dddd", "dddd", "dddd"],
+        ],
+      },
+      parts: [],
+    },
+  }));
+  fern.inventory.dirt = 39;
+  const built = ok(run(sim, "a", "build", { design: "sod hut", x, z }));
+  assert(built.includes("39 of 39 done"), built);
+  ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
 });
 
 Deno.test("look names built blocks with marks nothing else uses", () => {

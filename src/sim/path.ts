@@ -7,20 +7,28 @@ import type { World } from "./world.ts";
  */
 export const MAX_STEP_UP = 1;
 export const MAX_STEP_DOWN = 2;
+/** A drop bodies take only when there's no other way down (off a roof they just finished). */
+export const MAX_HOP_DOWN = 4;
 export const MAX_WADE = 1;
 export const MAX_SWIM = 3;
 /** How far a swimmer's feet hang below the water surface. */
 const SWIM_DEPTH = 1.25;
 
 /** The level a body standing on level `from` reaches by stepping into (tx, tz), or -1. */
-export function step(world: World, from: number, tx: number, tz: number): number {
+export function step(
+  world: World,
+  from: number,
+  tx: number,
+  tz: number,
+  maxDrop = MAX_STEP_DOWN,
+): number {
   const to = world.floorBelow(tx, tz, from + MAX_STEP_UP);
   if (to < 0) return -1;
   if (world.propSolid[tz * world.sizeX + tx]) return -1; // trees and rocks are in the way
   const depth = world.waterDepth(tx, tz, to);
   if (depth > MAX_SWIM) return -1;
   const level = depth > MAX_WADE ? world.waterTop[tz * world.sizeX + tx] : to;
-  return from - level > MAX_STEP_DOWN ? -1 : level;
+  return from - level > maxDrop ? -1 : level;
 }
 
 /** The level of a body whose feet are at `feetY` in column (x, z): its floor, or the surface. */
@@ -64,6 +72,7 @@ export function findPath(
   goal: (x: number, z: number) => boolean,
   heuristic: (x: number, z: number) => number,
   maxNodes = 8000,
+  maxDrop = MAX_STEP_DOWN,
 ): number[] | null {
   const w = world.sizeX, n = world.sizeX * world.sizeZ;
   if (stamp.length !== n) {
@@ -102,9 +111,12 @@ export function findPath(
       const nx = cx + dx, nz = cz + dz;
       if (nx < 0 || nz < 0 || nx >= w || nz >= world.sizeZ) continue;
       const from = floorOf[cur];
-      const to = step(world, from, nx, nz);
+      const to = step(world, from, nx, nz, maxDrop);
       if (to < 0) continue;
-      if (dx && dz && (step(world, from, nx, cz) < 0 || step(world, from, cx, nz) < 0)) continue;
+      if (
+        dx && dz &&
+        (step(world, from, nx, cz, maxDrop) < 0 || step(world, from, cx, nz, maxDrop) < 0)
+      ) continue;
       const next = nz * w + nx;
       if (closed[next] === generation) continue;
       // Wading and swimming are slow, so paths prefer dry land and bridges.

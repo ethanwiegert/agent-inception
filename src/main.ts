@@ -21,9 +21,9 @@ function fatal(message: string): never {
 if (!navigator.gpu) fatal("agent-inception needs WebGPU. Try a recent Chrome or Edge.");
 const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
 if (!adapter) fatal("No WebGPU adapter available.");
-const features: GPUFeatureName[] = adapter.features.has("timestamp-query")
-  ? ["timestamp-query"]
-  : [];
+// Timestamps for the GPU timer; indirect draws from an instance offset for GPU culling.
+const features = (["timestamp-query", "indirect-first-instance"] as GPUFeatureName[])
+  .filter((f) => adapter.features.has(f));
 const device = await adapter.requestDevice({ requiredFeatures: features });
 device.lost.then((info) => fatal(`GPU device lost: ${info.message}`));
 const gpuErrors: string[] = [];
@@ -61,8 +61,11 @@ const overlay = new Overlay(toggleFollow);
 let renderer: Renderer | null = null;
 let camera: Camera | null = null;
 
+/** Milliseconds from navigation until the world was ready to draw (the first-frame budget). */
+let readyMs = 0;
 client.onReady = (world, caughtUp) => {
   renderer = new Renderer(device, world);
+  readyMs ||= performance.now();
   renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
   if (!camera) {
     camera = new Camera([world.sizeX, world.sizeZ], (x, z) => client.world!.heightAt(x, z));
@@ -214,6 +217,8 @@ async function captureView(
   width: number,
   height: number,
   type: "image/jpeg" | "image/png" = "image/jpeg",
+  /** Render time in ms (wind, waves, drifting clouds); now by default. Fix it to compare shots. */
+  at = performance.now(),
 ): Promise<string> {
   if (!camera || !renderer) throw new Error("Still loading.");
   const cam = camera;
@@ -223,7 +228,7 @@ async function captureView(
     const saved = cam.pose();
     if (pose) cam.snap(pose);
     // Agent views are reused frame to frame; keep this frame's positions for the name tags.
-    agents = draw(performance.now(), target, true).map(({ name, x, y, z }) => ({ name, x, y, z }));
+    agents = draw(at, target, true).map(({ name, x, y, z }) => ({ name, x, y, z }));
     viewProj.set(cam.viewProj);
     cam.snap(saved);
   });
@@ -290,7 +295,7 @@ resize();
 
 const stats = createFrameStats();
 Object.assign(globalThis, {
-  __perf: { summary: () => ({ ...stats.summary(), ...renderer?.stats }), gpuErrors },
+  __perf: { summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs }), gpuErrors },
   // Lets tests and the harness drive agents without the bridge.
   __game: {
     client,
@@ -298,9 +303,13 @@ Object.assign(globalThis, {
     camera: () => camera,
     /** Switch the look preset, as the spectator panel does. */
     setLook: (id: string) => (look = id),
-    /** A PNG data URL of the current view (or `pose`), rendered offscreen. */
-    capture: async (width = canvas.width, height = canvas.height, pose: Pose | null = null) =>
-      "data:image/png;base64," + await captureView(pose, width, height, "image/png"),
+    /** A PNG data URL of the current view (or `pose`, at render time `at`), rendered offscreen. */
+    capture: async (
+      width = canvas.width,
+      height = canvas.height,
+      pose: Pose | null = null,
+      at?: number,
+    ) => "data:image/png;base64," + await captureView(pose, width, height, "image/png", at),
   },
 });
 

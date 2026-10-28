@@ -149,6 +149,9 @@ export function applyLook(
   const illuminated = (1 - Math.cos(phase)) / 2;
 
   const day01 = smoothstep(-0.1, 0.25, elev);
+  // Moonlit grading (washed-out colors, a blue cast) waits until the sun has actually set, so
+  // sunsets keep their color.
+  const night = 1 - smoothstep(-0.14, 0.0, elev);
   const twilight = Math.max(0, 1 - Math.abs(elev) / 0.3);
   const overcast = weather.clouds;
 
@@ -192,12 +195,12 @@ export function applyLook(
   out[F.wind] = 0.8;
   out[F.wind + 1] = 0.6;
   out[F.wind + 2] = look.wind * mix(1, 1.6, overcast);
-  out[F.grade] = look.saturation * mix(0.45, 1, day01); // colors fade in moonlight
+  out[F.grade] = look.saturation * mix(1, 0.45, night); // colors fade in moonlight
   out[F.grade + 1] = look.contrast;
   out[F.grade + 2] = look.warmth;
   out[F.grade + 3] = look.vignette;
   out[F.extra] = (1 - smoothstep(-0.2, 0.0, elev)) * (1 - overcast);
-  out[F.extra + 1] = day01;
+  out[F.extra + 1] = 1 - night;
   out.set(sun, F.sunPos);
   out[F.sunPos + 3] = smoothstep(-0.08, 0.05, elev) * mix(1, 0.3, overcast);
   out.set(moon, F.moonDir);

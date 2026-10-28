@@ -1,4 +1,4 @@
-import { CHUNK, slopes, solid, World } from "../sim/world.ts";
+import { CHUNK, slopeDrop, slopes, solid, World } from "../sim/world.ts";
 
 /**
  * Culled-face voxel mesher with per-vertex ambient occlusion and smooth ground normals.
@@ -30,6 +30,11 @@ const PAD = CHUNK + 2;
 let scratch = new Uint32Array(1 << 17);
 /** Surface height at column centers for the chunk plus a one-column border. */
 const centers = new Float32Array(PAD * PAD);
+/** Per padded column: how many cells from the bottom up are solid without a gap. */
+const solidRun = new Int16Array(PAD * PAD);
+/** Per padded column: top solid height and slope mask. */
+const tops = new Int16Array(PAD * PAD);
+const masks = new Uint8Array(PAD * PAD);
 
 const snorm8 = (v: number) => Math.round(Math.max(-1, Math.min(1, v)) * 127) & 255;
 const packNormal = (x: number, y: number, z: number) =>
@@ -40,17 +45,32 @@ const AXIS_NORMALS = FACES.map(([n]) => packNormal(n[0], n[1], n[2]));
 export function meshChunk(world: World, cx: number, cz: number): Uint32Array {
   let n = 0;
   const x0 = cx * CHUNK, z0 = cz * CHUNK;
-  const isSolid = (x: number, y: number, z: number) => solid(world.get(x, y, z)) ? 1 : 0;
-  // A sloping column top doesn't shade the ground it ramps down onto.
+  const { blocks, sizeX, sizeY, sizeZ } = world;
+  const blockAt = (x: number, y: number, z: number) =>
+    x < 0 || y < 0 || z < 0 || x >= sizeX || y >= sizeY || z >= sizeZ
+      ? 0
+      : blocks[(y * sizeZ + z) * sizeX + x];
+  const isSolid = (x: number, y: number, z: number) => solid(blockAt(x, y, z)) ? 1 : 0;
+  // A sloping column top doesn't shade the ground it ramps down onto. Only top faces ask, and
+  // they never look further than the padded border.
   const occludes = (x: number, y: number, z: number) => {
-    const b = world.get(x, y, z);
+    const b = blockAt(x, y, z);
     if (!solid(b)) return 0;
-    return y === world.heightAt(x, z) && slopes(b) && world.slopeMask(x, z) ? 0 : 1;
+    const k = (z - z0 + 1) * PAD + x - x0 + 1;
+    return y === tops[k] && slopes(b) && masks[k] ? 0 : 1;
   };
   for (let j = 0; j < PAD; j++) {
     for (let i = 0; i < PAD; i++) {
       const x = x0 + i - 1, z = z0 + j - 1;
-      centers[j * PAD + i] = world.heightAt(x, z) < 0 ? NaN : world.surfaceY(x + 0.5, z + 0.5);
+      const top = world.heightAt(x, z);
+      tops[j * PAD + i] = top;
+      const mask = top >= 0 ? world.slopeMask(x, z) : 0;
+      masks[j * PAD + i] = mask;
+      // The column's walkable surface at its center (World.surfaceY, from the mask in hand).
+      centers[j * PAD + i] = top < 0 ? NaN : top + 1 - (mask ? slopeDrop(mask, 0.5, 0.5) : 0);
+      let run = 0;
+      while (run <= top && solid(blockAt(x, run, z))) run++;
+      solidRun[j * PAD + i] = run;
     }
   }
   /** Smooth normal at world corner (X, Z) of height y, from the four column centers around it. */
@@ -73,10 +93,19 @@ export function meshChunk(world: World, cx: number, cz: number): Uint32Array {
   for (let lz = 0; lz < CHUNK; lz++) {
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0 + lx, z = z0 + lz;
-      const top = world.heightAt(x, z);
-      const mask = world.slopeMask(x, z);
-      for (let y = 0; y <= top; y++) {
-        const block = world.get(x, y, z);
+      const c = (lz + 1) * PAD + lx + 1;
+      const top = tops[c];
+      const mask = masks[c];
+      // Below this every block has solid on all six sides (or the world floor): no faces.
+      const buried = Math.min(
+        solidRun[c] - 1,
+        solidRun[c - 1],
+        solidRun[c + 1],
+        solidRun[c - PAD],
+        solidRun[c + PAD],
+      );
+      for (let y = Math.max(0, buried); y <= top; y++) {
+        const block = blockAt(x, y, z);
         if (!solid(block)) continue;
         const isTop = y === top;
         const sloped = mask !== 0 && isTop;

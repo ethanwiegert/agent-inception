@@ -145,10 +145,13 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
   },
 
   break_block(sim, agent, args) {
-    const cols = columns(args);
+    const cols = digOrder(columns(args));
     const stack = count(args.layers, "layers");
     const y0 = args.y === undefined ? undefined : num(args.y, "y");
     checkCells(cols.length * stack);
+    // Don't stand in what's been dug: a villager climbs one block, so a pit could trap them.
+    const dugAt = new Set<number>();
+    const inPit = (x: number, z: number) => dugAt.has(z * sim.world.sizeX + x);
     return (function* () {
       let dug = 0;
       const got = new Map<string, number>();
@@ -164,7 +167,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
             continue;
           }
           try {
-            yield* reach(sim, agent, x, z, y);
+            yield* reach(sim, agent, x, z, y, inPit);
           } catch {
             skipped.push(`(${x},${y},${z}) out of reach`);
             continue;
@@ -180,6 +183,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           }
           const name = sim.blocks.name(sim.world.get(x, y, z));
           sim.setBlock(x, y, z, 0);
+          dugAt.add(z * sim.world.sizeX + x);
           for (const [item, n] of entry ? sim.drops(entry) : []) {
             give(agent, item, n);
             got.set(item, (got.get(item) ?? 0) + n);
@@ -201,12 +205,20 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const blocks = (design.content as DesignContent).blocks!;
     const x0 = num(args.x, "x"), z0 = num(args.z, "z");
     const cells = designCells(sim, blocks);
+    if (cells.every((c) => sim.world.heightAt(x0 + c.dx, z0 + c.dz) < 0)) {
+      throw new Error(`(${x0}, ${z0}) is outside the world.`);
+    }
     const base = args.y === undefined ? findBase(sim, cells, x0, z0) : num(args.y, "y");
     const at = (c: Cell) => [x0 + c.dx, base + c.dy, z0 + c.dz] as const;
     const left = () => cells.filter((c) => sim.world.get(...at(c)) !== c.id);
     const todo = left();
     const name = `"${design.name}"`;
     const place = `at x=${x0} y=${base} z=${z0}`;
+    // Stand outside the footprint where possible, so the builder ends beside their work, not
+    // stranded on its roof.
+    const sizeX = sim.world.sizeX;
+    const footprint = new Set(cells.map((c) => (z0 + c.dz) * sizeX + x0 + c.dx));
+    const inside = (x: number, z: number) => footprint.has(z * sizeX + x);
     if (!todo.length) return `${name} is already complete ${place}.`;
     const needs = tally(todo);
     if (![...needs.keys()].some((m) => agent.inventory[m] > 0)) {
@@ -234,7 +246,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           continue;
         }
         try {
-          yield* reach(sim, agent, x, z, y);
+          yield* reach(sim, agent, x, z, y, inside);
         } catch {
           skipped.push(`(${x},${y},${z}) out of reach`);
           continue;
@@ -304,6 +316,17 @@ function columns(args: Args): [number, number][] {
     for (let i = 0; i < width; i++) out.push([x0 + (j % 2 ? width - 1 - i : i), z0 + j]);
   }
   return out;
+}
+
+/**
+ * Columns inside an area first, its edge last: the inside is dug from the edge, the edge from
+ * outside, so the digger finishes on solid ground instead of at the bottom of their own pit.
+ */
+function digOrder(cols: [number, number][]): [number, number][] {
+  const xs = cols.map((c) => c[0]), zs = cols.map((c) => c[1]);
+  const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+  const edge = ([x, z]: [number, number]) => x === x0 || x === x1 || z === z0 || z === z1;
+  return [...cols.filter((c) => !edge(c)), ...cols.filter(edge)];
 }
 
 function count(value: unknown, name: string): number {
@@ -400,10 +423,14 @@ function buildable(sim: Sim, value: unknown): Entry {
   return live;
 }
 
-/** Filled cells bottom layer first, each row swept back and forth so the builder walks less. */
+/**
+ * Filled cells bottom layer first, each row swept back and forth so the builder walks less. In a
+ * layer the inside comes before its edge, so a roof is closed from outside, last.
+ */
 function designCells(sim: Sim, blocks: NonNullable<DesignContent["blocks"]>): Cell[] {
   const cells: Cell[] = [];
   blocks.layers.forEach((layer, dy) => {
+    const start = cells.length;
     layer.forEach((row, dz) => {
       const chars = [...row];
       const xs = chars.map((_, i) => i);
@@ -416,6 +443,12 @@ function designCells(sim: Sim, blocks: NonNullable<DesignContent["blocks"]>): Ce
         if (id) cells.push({ dx, dy, dz, material, id });
       }
     });
+    const mine = cells.splice(start);
+    const dxs = mine.map((c) => c.dx), dzs = mine.map((c) => c.dz);
+    const [x0, x1] = [Math.min(...dxs), Math.max(...dxs)];
+    const [z0, z1] = [Math.min(...dzs), Math.max(...dzs)];
+    const edge = (c: Cell) => c.dx === x0 || c.dx === x1 || c.dz === z0 || c.dz === z1;
+    cells.push(...mine.filter((c) => !edge(c)), ...mine.filter(edge));
   });
   return cells;
 }

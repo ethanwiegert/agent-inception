@@ -69,8 +69,14 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
   let top = face == 2u || face == 3u;
   switch pattern {
     case ${P.grass}u: {
-      let green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
-      if (face == 2u) { return green; }
+      var green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
+      if (face == 2u) {
+        // Past the blades' reach the ground stands in for them: fade from shaded roots to the
+        // canopy's color so the edge of the grass doesn't show as a darker band on far hills.
+        let far = smoothstep(frame.grass.w * 0.55, frame.grass.w, distance(world.xz, frame.grassCenter.xy));
+        let canopy = mix(green, meadowColor(frame.grassTip.rgb, world.xz) * 0.8, 0.55);
+        return mix(green, canopy, far);
+      }
       // One-block banks between slopes are turf; taller cliffs show dirt under a grass fringe.
       // Side fragments sit on the column boundary; step back inside to find the owning column.
       let outward = vec2i(faceNormalXZ(face));
@@ -134,8 +140,10 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
 }
 
 /**
- * Natural ground tops blend across material edges along the same organic boundary the
- * grass blades use, so meadow and beach meet in curves rather than block steps.
+ * Natural ground tops blend across material edges along organic boundaries rather than block
+ * steps: grass by the same edge the grass blades use, so meadow and beach meet in curves; other
+ * ground (sand, gravel, clay, dirt) by reading the column under a noise-wobbled position, so
+ * riverbed patches are blobs, not squares. Only neighbours within a block of height blend.
  */
 fn groundMaterial(block: u32, world: vec3f) -> u32 {
   let c = vec2i(floor(world.xz));
@@ -143,12 +151,22 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
   if (s.g != block || !natural(block)) { return block; }
   let grassy = isGrassy(s, world.xz);
   if (grassy) { return 1u; }
-  if (block != 1u) { return block; }
+  let last = vec2i(textureDimensions(surface)) - 1;
+  if (block != 1u) {
+    let wobble = vec2f(valueNoise(world.xz * 1.3), valueNoise(world.xz * 1.3 + 31.7)) - 0.5 +
+      (vec2f(valueNoise(world.xz * 4.1 + 7.3), valueNoise(world.xz * 4.1 + 3.9)) - 0.5) * 0.35;
+    let q = vec2i(floor(world.xz + wobble * 0.9));
+    if (all(q == c)) { return block; }
+    let n = textureLoad(surface, clamp(q, vec2i(0), last), 0);
+    let near = abs(i32(n.r) - i32(s.r)) <= 1;
+    if (near && n.g != 1u && natural(n.g)) { return n.g; }
+    return block;
+  }
   // A grass column on the losing side of the edge: borrow the neighbouring material.
   let d = vec2i(select(-1, 1, fract(world.x) >= 0.5), select(-1, 1, fract(world.z) >= 0.5));
   let offsets = array<vec2i, 3>(vec2i(d.x, 0), vec2i(0, d.y), d);
   for (var i = 0; i < 3; i++) {
-    let nb = textureLoad(surface, clamp(c + offsets[i], vec2i(0), vec2i(textureDimensions(surface)) - 1), 0).g;
+    let nb = textureLoad(surface, clamp(c + offsets[i], vec2i(0), last), 0).g;
     if (nb != 1u && natural(nb)) { return nb; }
   }
   return block;
@@ -342,13 +360,14 @@ export class TerrainRenderer {
     this.drawChunks(pass, planes);
   }
 
-  drawShadow(pass: GPURenderPassEncoder) {
+  /** Draw into the shadow map the chunks inside the light's frustum `planes`. */
+  drawShadow(pass: GPURenderPassEncoder, planes: Float32Array) {
     pass.setPipeline(this.shadowPipeline);
     pass.setBindGroup(1, this.bindGroup);
-    this.drawChunks(pass, null);
+    this.drawChunks(pass, planes);
   }
 
-  private drawChunks(pass: GPURenderPassEncoder, planes: Float32Array | null) {
+  private drawChunks(pass: GPURenderPassEncoder, planes: Float32Array) {
     if (!this.indexBuffer) return;
     pass.setIndexBuffer(this.indexBuffer, "uint32");
     const { chunksX } = this.world, h = this.world.sizeY;
@@ -356,7 +375,7 @@ export class TerrainRenderer {
       const chunk = this.chunks[i];
       if (!chunk.buffer) continue;
       const x = (i % chunksX) * CHUNK, z = Math.floor(i / chunksX) * CHUNK;
-      if (planes && !aabbVisible(planes, x, 0, z, x + CHUNK, h, z + CHUNK)) continue;
+      if (!aabbVisible(planes, x, 0, z, x + CHUNK, h, z + CHUNK)) continue;
       pass.setVertexBuffer(0, chunk.buffer);
       pass.drawIndexed(chunk.quads * 6, 1, 0, 0, i);
     }

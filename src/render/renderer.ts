@@ -88,6 +88,7 @@ export class Renderer {
   private surface: SurfaceTexture;
   private water: WaterRenderer;
   private planes = new Float32Array(24);
+  private lightPlanes = new Float32Array(24);
   private sky: SkyRenderer;
   private post: PostRenderer;
   /** Mesh templates for everything drawn as instanced models. */
@@ -98,8 +99,9 @@ export class Renderer {
   private floraModels: FloraModels;
   private faunaModels: FaunaModels;
   private fishModels: number[];
-  private flora = new ModelBatch(new InstanceBatch());
-  private groundCover = new ModelBatch(new InstanceBatch(), 70);
+  /** Culled on the GPU twice: for the view (0) and for the shadow map (1). */
+  private flora = new ModelBatch(new InstanceBatch(), 0, 2);
+  private groundCover = new ModelBatch(new InstanceBatch(), 70, 1);
   private floraVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
@@ -220,6 +222,7 @@ export class Renderer {
     fd[F.weather + 2] = scene.tick - scene.cropsTick;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
+    frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
 
     const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85)));
     fd[F.grass + 3] = radius;
@@ -232,6 +235,13 @@ export class Renderer {
     this.stats.grassBlades = blades;
 
     const encoder = device.createCommandEncoder();
+    if (!this.debug.has("props")) {
+      const cull = encoder.beginComputePass({ label: "models-cull" });
+      this.models.cull(cull, this.flora, 0, this.planes, camera.eye);
+      this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye);
+      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye);
+      cull.end();
+    }
 
     const shadowPass = encoder.beginRenderPass({
       colorAttachments: [],
@@ -245,9 +255,9 @@ export class Renderer {
     });
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
     if (!this.debug.has("shadow")) {
-      this.terrain.drawShadow(shadowPass);
+      this.terrain.drawShadow(shadowPass, this.lightPlanes);
       this.models.drawShadow(shadowPass, this.bodies);
-      if (!this.debug.has("props")) this.models.drawShadow(shadowPass, this.flora);
+      if (!this.debug.has("props")) this.models.drawShadow(shadowPass, this.flora, 1);
     }
     shadowPass.end();
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);

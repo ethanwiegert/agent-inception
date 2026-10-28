@@ -373,6 +373,8 @@ export class InstanceBatch {
   /** Per template: first instance and count in `sorted`. */
   first = new Uint32Array(16);
   counts = new Uint32Array(16);
+  /** Template id of each instance in `sorted`. */
+  sortedIds = new Uint32Array(64);
   private data = new Float32Array(INSTANCE_FLOATS * 64);
   private ids = new Uint32Array(64);
 
@@ -399,7 +401,8 @@ export class InstanceBatch {
       this.first = new Uint32Array(templates * 2);
     }
     if (this.sorted.length < this.data.length) this.sorted = new Float32Array(this.data.length);
-    const { counts, first, ids, data, sorted } = this;
+    if (this.sortedIds.length < this.ids.length) this.sortedIds = new Uint32Array(this.ids.length);
+    const { counts, first, ids, data, sorted, sortedIds } = this;
     counts.fill(0);
     for (let i = 0; i < this.count; i++) counts[ids[i]]++;
     let sum = 0;
@@ -407,8 +410,10 @@ export class InstanceBatch {
     // Reuse `counts` as the running cursor, then restore it.
     for (let i = 0; i < this.count; i++) {
       const t = ids[i];
-      const src = i * INSTANCE_FLOATS, dst = (first[t] + --counts[t]) * INSTANCE_FLOATS;
+      const slot = first[t] + --counts[t];
+      const src = i * INSTANCE_FLOATS, dst = slot * INSTANCE_FLOATS;
       for (let k = 0; k < INSTANCE_FLOATS; k++) sorted[dst + k] = data[src + k];
+      sortedIds[slot] = t;
     }
     for (let i = 0; i < this.count; i++) counts[ids[i]]++;
   }
