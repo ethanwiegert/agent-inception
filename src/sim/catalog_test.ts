@@ -697,6 +697,29 @@ Deno.test("engine relations connect things; free labels connect anything", () =>
   }));
 });
 
+Deno.test("a relation is found by the name the tools show", () => {
+  const { sim } = world();
+  const added = ok(run(sim, "a", "catalog_add", {
+    kind: "relation",
+    description: "A note to retire by name.",
+    content: { type: "likes_rain", from: "wheat", to: "farmer" },
+  }));
+  assert(added.includes('relation "wheat likes_rain farmer"'), added);
+  const got = ok(run(sim, "a", "catalog_get", { entry: "wheat likes_rain farmer" }));
+  assert(got.includes("likes_rain"), got);
+  assert(
+    ok(run(sim, "a", "catalog_get", { entry: "wheat seeds grows_into wheat crop" })).includes(
+      "grows_into",
+    ),
+  );
+  const proposal = ok(run(sim, "a", "propose", {
+    entry: "wheat likes_rain farmer",
+    action: "retire",
+    reason: "That note was a mistake.",
+  }));
+  assert(proposal.includes("passed"), proposal);
+});
+
 Deno.test("catalog_find refuses malformed property values", () => {
   const { sim } = world();
   err(run(sim, "a", "catalog_find", { property: "burns=true=true" }), "property looks like");

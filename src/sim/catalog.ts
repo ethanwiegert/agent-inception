@@ -332,10 +332,10 @@ export class Catalog {
       name = `${this.get(r.from)!.name} ${r.type} ${this.get(r.to)!.name}`;
     } else {
       name = cleanName(draft.name);
-      const taken = this.byName(name);
-      if (taken) {
-        throw new Error(`"${taken.name}" is taken (#${taken.id}). Pick another name or fork it.`);
-      }
+    }
+    const taken = this.byName(name);
+    if (taken) {
+      throw new Error(`"${taken.name}" is taken (#${taken.id}). Pick another name or fork it.`);
     }
     const entry: Entry = {
       id: this.entries.length + 1,
@@ -515,6 +515,9 @@ export class Catalog {
 
   private insert(e: Entry) {
     this.entries[e.id - 1] = e;
+    // Relations are named ("wheat seeds grows_into wheat crop") and tools hand that name back.
+    // It has to resolve, the same as any other entry.
+    if (e.name) this.names.set(e.name.toLowerCase(), e);
     if (e.kind === "relation") {
       const r = e.content as RelationContent;
       for (const id of r.from === r.to ? [r.from] : [r.from, r.to]) {
@@ -522,8 +525,6 @@ export class Catalog {
         list.push(e);
         this.relationIndex.set(id, list);
       }
-    } else {
-      this.names.set(e.name.toLowerCase(), e);
     }
   }
 

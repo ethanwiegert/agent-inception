@@ -22,8 +22,9 @@ are in `adr/`.
    in code. Our content is the first entries and worked examples, not the limits (ADR 0002).
 
 Ethan authors the soundtrack and voices. Closed source until a stable V1, maybe open later. Agent
-players are any MCP client; the polished path is Haiku subagents spawned from Claude Code (no API
-key in the game). How long an agent plays (one session or a looping resident) is the user's choice.
+players are any MCP client; the polished path is cost-effective agents spawned from Claude Code (no
+API key in the game). How long an agent plays (one session or a looping resident) is the user's
+choice.
 
 ## Decisions
 
@@ -175,7 +176,7 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 
 - 60 fps on an integrated-GPU laptop at 1080p (unmeasured so far; measured before V1); 144 fps on
   the dev box.
-- < 2 MB transferred to first frame, < 1 s to first frame. Today: ~55 KB + ~20 KB minified JS.
+- < 2 MB transferred to first frame, < 1 s to first frame. Today: ~185 KB + ~104 KB minified JS.
 - Sim tick < 2 ms today; < 4 ms with 500 awake rigid bodies once physics lands. No per-frame
   allocations in hot paths.
 - Measured on the RTX 2070 Super: ~2.5 ms GPU per frame with ~600k grass blades, water, clouds and

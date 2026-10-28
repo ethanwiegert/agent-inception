@@ -15,8 +15,8 @@ and spectators. **V2** is scaling and breadth: shared worlds, a global Catalog, 
    included.
 3. **Gate it.** A milestone is done only when all of these hold:
    - `deno task check` and `deno task test` pass.
-   - 2-3 Haiku agents with milestone briefs play ~40 calls each; one brief is an adversary that
-     tries to break the new tools (bad arguments, odd sequences, the safety limits).
+   - 2-3 cost-effective agents with milestone briefs play ~40 calls each; one brief is an adversary
+     that tries to break the new tools (bad arguments, odd sequences, the safety limits).
    - A report lands in `docs/playtests/NNNN-<milestone>.md`: what they tried, friction, bugs.
    - Every bug is fixed; friction is fixed or added to this roadmap.
    - Perf is re-measured against the budgets in `DESIGN.md`, and screenshots are checked.
@@ -29,8 +29,8 @@ Saves may break freely until M14; save versioning and migrations come last befor
 - **M0 — foundation.** Deno toolchain, dev server, WebGPU bootstrap, Chromium/CDP harness.
 - **M1 — the look.** Voxel meadow, GPU grass with wind, shadows, day/night, look presets.
 - **M2 — sim core.** Worker, fixed tick, determinism tests, save/load, offline catch-up.
-- **M3 — the agent.** Bodies and animation, MCP bridge, tools, a Haiku farmer playing end to end;
-  then sloped hills, sprites, click-to-follow.
+- **M3 — the agent.** Bodies and animation, MCP bridge, tools, a farmer played by a cost-effective
+  agent end to end; then sloped hills, sprites, click-to-follow.
 - **World v2.** Island with rivers and sea, block registry and patterns, smooth shading, GPU water,
   sun/moon/stars/clouds, cloud shadows, weather drift, compute-culled grass, `?debug=`, `camshot`.
 - **M4 — life.** Damped orbit camera with HUD and touch; model system (mesh templates, instanced
@@ -39,6 +39,8 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
+- **M6 — built-ins become entries.** Nature's blocks, items, plants, the farmer and the animals are
+  Catalog data the sim and the renderer read; playtest [0002](playtests/0002-m6-built-ins.md).
 
 ## V1
 
@@ -94,7 +96,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries (in progress)
+### M6 — built-ins become entries
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -182,12 +184,7 @@ Visual pass (seed 7, daytime), closed without editing `nature.ts`:
   same ink boxes as the old head, and arm swing is the same pose code. A close face frame cropped at
   the shoulders and a stride frame missed the walker, so those two were not judged from a picture.
 
-Left to do:
-
-- The gate: Haiku playtest (builder, steward, adversary aimed at the new schema fields, habitats,
-  planting odd things, replacing the farmer/wheat/animal Designs), report
-  `docs/playtests/0002-m6-built-ins.md`, perf against `DESIGN.md`, screenshots. M6 stays open until
-  that holds.
+Gate: playtest [0002](playtests/0002-m6-built-ins.md).
 
 ### M7 — building, crafting, physics phase 1
 
@@ -259,6 +256,10 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
 - Per-villager Rule cooldowns ("once per villager per game hour") on top of the per-Rule cap.
 - Withdraw your own open proposal; let an author retire their own entry within a short grace window.
 - Rules that read Relations ("if this farmland is fertilized by compost, wheat grows faster").
+- `catalog_find` text searches names and descriptions, not inside Rule or Design content, so a
+  spread rule has to be named or described as one.
+- A plant Design can be replaced by a Design with no habitat. New planting of that seed then fails;
+  the proposal itself is allowed.
 
 ## Known gaps (polish backlog)
 
