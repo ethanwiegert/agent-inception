@@ -1,20 +1,15 @@
 import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import type { BlockRegistry } from "../sim/blocks.ts";
+import type { Catalog } from "../sim/catalog.ts";
 import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
 import type { Camera } from "../camera.ts";
 import type { AgentView, AnimalView } from "../simclient.ts";
-import { type BodyModels, buildBodies, defineBodyModels } from "./body.ts";
+import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
-import {
-  buildAnimals,
-  buildFish,
-  defineFaunaModels,
-  defineFishModels,
-  type FaunaModels,
-} from "./fauna.ts";
-import { anyGrowing, buildProps, defineFloraModels, type FloraModels } from "./flora.ts";
+import { buildAnimals, buildFish, defineFishModels, FaunaModels } from "./fauna.ts";
+import { anyGrowing, buildProps, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
@@ -46,6 +41,8 @@ export interface SceneState {
   crops: Float32Array;
   cropsVersion: number;
   blocks: BlockRegistry;
+  /** What everything looks like: Materials and Designs. */
+  catalog: Catalog;
   props: Props | null;
   tick: number;
   day: number;
@@ -161,9 +158,9 @@ export class Renderer {
     this.water = new WaterRenderer(device, this.surface, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts, format);
-    this.bodyModels = defineBodyModels(this.library);
-    this.floraModels = defineFloraModels(this.library);
-    this.faunaModels = defineFaunaModels(this.library);
+    this.bodyModels = new BodyModels(this.library);
+    this.floraModels = new FloraModels(this.library);
+    this.faunaModels = new FaunaModels(this.library);
     this.fishModels = defineFishModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
@@ -181,8 +178,15 @@ export class Renderer {
     this.surface.update();
     this.crops.update(scene.crops, scene.cropsVersion);
     this.bodies.instances.clear();
-    buildBodies(scene.agents, time, this.bodies.instances, camera.yaw, this.bodyModels);
-    buildAnimals(scene.animals, time, this.bodies.instances, this.faunaModels);
+    buildBodies(
+      scene.agents,
+      time,
+      this.bodies.instances,
+      camera.yaw,
+      this.bodyModels,
+      scene.catalog,
+    );
+    buildAnimals(scene.animals, time, this.bodies.instances, this.faunaModels, scene.catalog);
     buildFish(scene.schools, this.world, time, this.bodies.instances, this.fishModels);
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);

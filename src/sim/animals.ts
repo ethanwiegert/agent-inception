@@ -14,8 +14,11 @@ export interface SpeciesDef {
   roam: number;
   /** Shied away from by farmers closer than this (0 = tame). */
   shy: number;
-  /** Item a farmer can collect (`interact`), and ticks until it's ready again. */
-  product: { item: string; every: number } | null;
+  /**
+   * Ticks until its product is ready again after collecting (`interact`); what it gives comes
+   * from the `drops` Relations of its Design in the Catalog. 0: nothing to collect.
+   */
+  productEvery: number;
   /** Herds per world and animals per herd. */
   herds: number;
   herdSize: number;
@@ -31,7 +34,7 @@ export const SPECIES: SpeciesDef[] = [
     speed: 1.1,
     roam: 6,
     shy: 2.5,
-    product: { item: "wool", every: DAY },
+    productEvery: DAY,
     herds: 3,
     herdSize: 4,
   },
@@ -42,7 +45,7 @@ export const SPECIES: SpeciesDef[] = [
     speed: 0.9,
     roam: 7,
     shy: 1.8,
-    product: { item: "milk", every: DAY / 2 },
+    productEvery: DAY / 2,
     herds: 2,
     herdSize: 3,
   },
@@ -53,7 +56,7 @@ export const SPECIES: SpeciesDef[] = [
     speed: 1.3,
     roam: 4,
     shy: 2.2,
-    product: { item: "egg", every: DAY / 2 },
+    productEvery: DAY / 2,
     herds: 2,
     herdSize: 5,
   },
@@ -64,14 +67,16 @@ export const SPECIES: SpeciesDef[] = [
     speed: 0.8,
     roam: 5,
     shy: 3,
-    product: null,
+    productEvery: 0,
     herds: 3,
     herdSize: 3,
   },
 ];
 
 export const AnimalAnim = { Idle: 0, Walk: 1, Graze: 2, Sleep: 3 } as const;
-const Mode = { Idle: 0, Walk: 1, Graze: 2, Sleep: 3, Flee: 4, Follow: 5 } as const;
+/** What an animal is up to (sim side; the page sees `AnimalAnim`). */
+export const AnimalMode = { Idle: 0, Walk: 1, Graze: 2, Sleep: 3, Flee: 4, Follow: 5 } as const;
+const Mode = AnimalMode;
 
 export interface Animal {
   id: number;
@@ -92,12 +97,15 @@ export interface Animal {
   readyAt: number;
 }
 
-/** What animals react to: farmers' positions, whether they're moving, and if they carry wheat. */
+/**
+ * What animals react to: villagers' positions, whether they're moving, and which species they
+ * carry food for (bit per species, from `is_food_for` Relations).
+ */
 export interface Farmer {
   x: number;
   z: number;
   moving: boolean;
-  wheat: boolean;
+  food: number;
 }
 
 /** Water surfaces sit a little below the top of their block. */
@@ -190,7 +198,7 @@ const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos
 
 /**
  * One tick of animal life: wander near the herd, graze, sleep at night, shy away from farmers
- * walking close, and trail anyone carrying wheat.
+ * walking close, and trail anyone carrying their food.
  */
 export function stepAnimals(
   animals: Animal[],
@@ -213,7 +221,7 @@ export function stepAnimals(
     for (const f of farmers) {
       const d = Math.hypot(f.x - a.x, f.z - a.z);
       if (d < nearD) near = f, nearD = d;
-      if (f.wheat && d < lureD) lure = f, lureD = d;
+      if ((f.food >> a.species) & 1 && d < lureD) lure = f, lureD = d;
     }
 
     if (near && near.moving && nearD < def.shy && a.mode !== Mode.Follow) {

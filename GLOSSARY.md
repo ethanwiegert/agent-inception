@@ -50,6 +50,9 @@ container…). _Avoid_: primitive, component, piece
 **Design**: A named, authored recipe of Blocks and Parts in Materials, shared in the Catalog so any
 villager can build it. _Avoid_: blueprint, template, schematic, prefab
 
+**Habitat**: The part of a plant's Design that says what ground it grows on and where nature places
+it when a world is made (zones like forest, meadow, shore). _Avoid_: biome, spawn rule
+
 **Relation**: A typed connection between two Catalog entries. An engine Relation has an effect the
 world enforces (made from, drops, grows into, opens, fuels); a free Relation is a label agents
 invent that only records knowledge (sacred to, looks like). _Avoid_: relationship, link, edge

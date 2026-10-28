@@ -1,6 +1,4 @@
-import { BUILTIN_BLOCKS } from "./blocks.ts";
-import type { Catalog, Entry, Vec3 } from "./catalog.ts";
-import { FISH } from "./fish.ts";
+import type { Catalog, Entry, MaterialContent, Vec3 } from "./catalog.ts";
 import type { Agent, Sim } from "./sim.ts";
 import { Block } from "./world.ts";
 
@@ -77,19 +75,6 @@ const CONDITIONS = [
 ];
 const EFFECTS = ["give", "take", "set_block", "say", "weather"];
 
-/** Items a Rule may hand out or take: crops, saplings, fish and every placeable built-in block. */
-export const RULE_ITEMS: ReadonlySet<string> = new Set([
-  "wheat",
-  "wheat_seeds",
-  "oak_sapling",
-  "birch_sapling",
-  "pine_sapling",
-  ...FISH.map((f) => f.name),
-  ...BUILTIN_BLOCKS.filter((b) => b.placeable).map((b) => b.name),
-]);
-/** Blocks `set_block` may set: air or any placeable built-in block. */
-const SETTABLE = new Set(["air", ...BUILTIN_BLOCKS.filter((b) => b.placeable).map((b) => b.name)]);
-
 // ---------------------------------------------------------------- validation
 
 /** Agent text as one plain line: no control or bidi-override characters, runs of space collapsed. */
@@ -145,13 +130,24 @@ function offset(v: unknown, where: string): Vec3 {
 }
 
 function item(v: unknown, c: Check, where: string): string {
-  const name = String(v ?? "").trim().toLowerCase();
-  if (!RULE_ITEMS.has(name)) {
-    throw new Error(`${where}: "${v}" isn't an item. Items: ${[...RULE_ITEMS].join(", ")}.`);
+  return heldMaterial(c.catalog, v, where).name;
+}
+
+/**
+ * A Material a villager can hold: any live block or item Material (not a liquid), by name.
+ * Underscores read as spaces, so "wheat_seeds" finds "wheat seeds".
+ */
+export function heldMaterial(catalog: Catalog, v: unknown, where: string): Entry {
+  const raw = String(v ?? "").trim().toLowerCase();
+  const e = catalog.byName(raw) ?? catalog.byName(raw.replace(/_/g, " "));
+  if (!e || e.kind !== "material" || (e.content as MaterialContent).form === "liquid") {
+    throw new Error(
+      `${where}: "${v}" isn't something you can hold. Items are Materials, like "wheat", ` +
+        '"wheat seeds", "stone" or "trout"; find more with catalog_find kind "material".',
+    );
   }
-  const entry = c.catalog.byName(name);
-  if (entry?.retired) throw new Error(`${where}: "${name}" is retired.`);
-  return name;
+  if (e.retired) throw new Error(`${where}: "${e.name}" is retired.`);
+  return e;
 }
 
 function needsPlace(c: Check, where: string) {
@@ -258,11 +254,13 @@ function effect(v: unknown, c: Check, where: string): Effect {
       needsPlace(c, at);
       const o = fields(val, ["at", "to"], at);
       const to = String(o.to ?? "").trim().toLowerCase();
-      if (!SETTABLE.has(to)) {
-        throw new Error(`${at}.to must be one of ${[...SETTABLE].join(", ")}.`);
+      if (to === "air") return { set_block: { at: offset(o.at, `${at}.at`), to } };
+      const m = c.catalog.byName(to);
+      if (m?.kind !== "material" || (m.content as MaterialContent).form !== "block") {
+        throw new Error(`${at}.to must be "air" or a block material, like "cobble".`);
       }
-      if (c.catalog.byName(to)?.retired) throw new Error(`${at}.to: "${to}" is retired.`);
-      return { set_block: { at: offset(o.at, `${at}.at`), to } };
+      if (m.retired) throw new Error(`${at}.to: "${m.name}" is retired.`);
+      return { set_block: { at: offset(o.at, `${at}.at`), to: m.name } };
     }
     case "say": {
       if (typeof val !== "string" || !val.trim() || val.length > 140) {
@@ -319,7 +317,10 @@ export interface RuleStat {
 
 const NO_PLACE: RuleCtx = { agent: null, x: 0, y: 0, z: 0, what: "" };
 
-/** Whether `text` contains `words` as whole words: "rain" matches "Oh rain!" but not "brain". */
+/**
+ * Whether `text` contains `words` as whole words: "rain" matches "Oh rain!" but not "brain", and
+ * "wheat" matches "wheat crop".
+ */
 export function saysWords(text: string, words: string): boolean {
   const norm = (s: string) => ` ${s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
   return norm(text).includes(norm(words));
@@ -347,7 +348,7 @@ export class Rules {
     for (const e of this.byEvent.get(event) ?? []) {
       if (e.retired) continue;
       const w = (e.content as RuleContent).when as { what?: string };
-      if (w.what && (event === "said" ? !saysWords(what, w.what) : what !== w.what)) continue;
+      if (w.what && !saysWords(what, w.what)) continue;
       this.run(e, ctx);
     }
   }

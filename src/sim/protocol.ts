@@ -1,4 +1,3 @@
-import type { BlockDef } from "./blocks.ts";
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
@@ -11,8 +10,11 @@ export const ANIMAL_STRIDE = 9;
 export const ANIMAL_READY = 1;
 /** Floats per fish school in `TickMessage.schools`: id, species, x, z, count. */
 export const SCHOOL_STRIDE = 5;
-/** Floats per crop in `TickMessage.crops`: x, y, z, growth. */
-export const CROP_STRIDE = 4;
+/**
+ * Floats per crop in `TickMessage.crops`: x, y, z, growth, then the stalk color and the ripe color
+ * (sRGB 0xRRGGBB, exact in a float) and two spare.
+ */
+export const CROP_STRIDE = 8;
 
 export interface AgentProfile {
   name: string;
@@ -43,8 +45,6 @@ export interface ReadyMessage {
   edits: Int32Array<ArrayBuffer>;
   /** Ticks fast-forwarded to cover time spent away. */
   caughtUp: number;
-  /** Agent-defined blocks. */
-  blocks: BlockDef[];
   /** Props that differ from generation (the page regenerates the rest from the seed). */
   props: PropDiff;
   catalog: CatalogSave;
@@ -60,8 +60,6 @@ export interface TickMessage {
   agents: Float32Array<ArrayBuffer>;
   animals: Float32Array<ArrayBuffer>;
   schools: Float32Array<ArrayBuffer>;
-  /** Agent-defined blocks, sent when the registry changes. */
-  blocks?: BlockDef[];
   /** Per agent, in `agents` order. Sent when agents join or change how they look. */
   profiles?: AgentProfile[];
   edits: Int32Array<ArrayBuffer>;

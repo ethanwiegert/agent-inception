@@ -94,7 +94,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries (next)
+### M6 — built-ins become entries (in progress)
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -105,6 +105,75 @@ Grill outcome (2026-10-27):
 - From playtest 0001: items and crops (wheat, seeds, fish, wool, milk, eggs) become entries, so
   Relations like "wheat is_food_for cow" can be written; tools' drops follow `replaced_by` like Rule
   `give` already does.
+
+Grill outcome (2026-10-27):
+
+- **Items are Materials.** Everything a villager holds is a Material (`form`: `block`, `item`, or
+  `liquid` for nature only); inventories count Materials by Catalog name ("wheat seeds", "oak
+  sapling"; underscores read as spaces).
+- **Plant looks are Designs of Parts in Materials.** New `cone` Part, `tilt` beside `turn`. The
+  Material decides the look: color, surface (`leaves` and `fleece` patterns are lumpy, `stone` is
+  lumpy and faceted) and wind bend (softer = bends more, more toward the top). One Design per look;
+  size, height and rotation vary per tile.
+- **Placement and growth are data.** Worldgen still reads the terrain in code (forest noise,
+  altitude, slopes, water) to find a tile's zone; a Design's `habitat` says what ground it grows on
+  and which zones nature fills with it, weighted by `share` (picked in patches: groves for trees,
+  patches for flowers). Growth time is `hours` on `grows_into` Relations (seed Material → plant
+  Design), fixed per plant when planted. Spreading becomes a Rule effect.
+- **Wheat and the farmer keep their renderers but read data.** Crops (plants on farmland) keep the
+  GPU blade shader; stalks take the crop's first part Material, ripe ears the color of what it
+  drops. The farmer is a Design with part `role`s and `joints`; per-villager shirt/skin tints
+  (overriding `linen` and `skin`) stay until M8.
+
+Decided in the build:
+
+- Animal bodies are Designs too (matched to code species by name), so Relations have endpoints:
+  "sheep drops wool", "wheat is_food_for sheep". Animals follow whoever holds any of their foods.
+  Gaits and behaviour stay code. Fish species stay code; caught fish are Materials.
+- What the engine reads off a Design (`PlantInfo`): **solid** if any part's Material has hardness ≥
+  3 (bark, stone), **ground cover** (no shadow, near only) if every part is thinner than 0.1,
+  **floats** if it's low (≤ 0.25) and all its Materials are lighter than water. Optional `mark` is
+  its look-map character.
+- Designs stand on their first cell: (0.5, 0, 0.5) is the tile center on the ground.
+- Block ids: built-ins keep fixed ids; every other block Material gets the next id from 64 in
+  Catalog order, so the page derives the same registry from its mirror (no block list in saves or
+  messages). Digging takes 16 + 4 × hardness ticks and gives the block's `drops`, else itself (sand
+  no longer gives dirt). A replaced farmer, animal or wheat Design changes what the world draws.
+- `look` lists the plants in view by name ("Plants: T birch/oak * daisies…"); Rule `what` matches
+  whole words for every event, so "wheat" matches "wheat crop".
+- Save format is version 2; older saves start the same island afresh.
+
+Done so far (commit "M6 part 1"):
+
+- Sim: `sim/nature.ts` holds all of nature's entries; Materials with `form`; Designs with cones,
+  tilt, roles, joints, mark, habitat; `grows_into` hours; block registry from the Catalog; generic
+  `plant` (by seed, sapling or plant name), `harvest` and `break_block` drops from Relations, `fish`
+  and the starter kit follow `replaced_by`; animal food from `is_food_for`; worldgen by zone. 60
+  tests pass (12 new in `sim/nature_test.ts`).
+- Render: `render/designs.ts` meshes any Design; flora, villager and animal templates come from the
+  Catalog; crop colors stream from the worker (`CROP_STRIDE` 8).
+- Checked in the browser: forests, bushes, rocks (new `fieldstone` Material, darker like the old
+  boulders), cows, the farmer (hat, tinted shirt, denim), planted saplings and growing wheat. GPU
+  ~2.9 ms at the wide harness view (was ~2.7 ms; re-measure in the gate).
+
+Left to do:
+
+1. Look closely at the remaining Designs against the old meshes (before/after shots were at
+   `deno task camshot … "seed=7&time=0.42&speed=0" '{"distance":45,"pitch":0.55,"yaw":2.1,
+   "dx":-20,"dz":10}'`
+   and a close one at distance 14): flowers, reeds and cattails, lily pads and water lily
+   (floating), ripe wheat colors, sheep (wool shrinks when sheared), chicken, duck, the farmer's
+   face, eyes and arm swing. Tune Design data in `nature.ts`, not renderer code.
+2. Spreading: a Rule effect (e.g. `{"spread": {"what": "poppies", "count": 2}}` on timer triggers,
+   copying a random existing prop of that Design onto a free neighbouring tile its habitat allows,
+   with a crowding cap) and a nature Rule "wildflowers spread".
+3. Agent-facing text: `catalog_add`'s description should cover `form`, cone/tilt/role/joints,
+   `mark`, `habitat` and `hours`; `join` should point at the items-are-Materials idea; update the
+   Tools table in `DESIGN.md` (plant/harvest/break wording) and `.claude/agents/farmer.md` if it
+   names items.
+4. The gate: Haiku playtest (builder, steward, adversary aimed at the new schema fields, habitats,
+   planting odd things, replacing the farmer/wheat/animal Designs), report
+   `docs/playtests/0002-m6-built-ins.md`, perf against `DESIGN.md`, screenshots.
 
 ### M7 — building, crafting, physics phase 1
 

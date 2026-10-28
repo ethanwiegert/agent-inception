@@ -1,4 +1,5 @@
-import { BUILTIN_BLOCKS, Pattern, type PatternName } from "./blocks.ts";
+import { Pattern, type PatternName } from "./blocks.ts";
+import { seedNature } from "./nature.ts";
 import { plainText, type RuleContent, validateRule } from "./rules.ts";
 
 /**
@@ -13,7 +14,12 @@ export type Kind = (typeof KINDS)[number];
 /** Kinds agents may author. Parts are the engine's to add. */
 export const AUTHORED_KINDS: Kind[] = ["material", "design", "rule", "relation"];
 
+/** How a Material exists: laid as a block, only held and used in Parts, or a liquid (nature's). */
+export const FORMS = ["block", "item", "liquid"] as const;
+export type Form = (typeof FORMS)[number];
+
 export interface MaterialContent {
+  form: Form;
   /** sRGB "#rrggbb". */
   color: string;
   pattern: PatternName;
@@ -26,7 +32,7 @@ export interface MaterialContent {
   glows: number;
 }
 
-export const PART_SHAPES = ["box", "sphere", "cylinder"] as const;
+export const PART_SHAPES = ["box", "sphere", "cylinder", "cone"] as const;
 export interface PartContent {
   shape: (typeof PART_SHAPES)[number];
 }
@@ -41,12 +47,63 @@ export interface DesignPart {
   size: Vec3;
   /** Yaw in degrees. */
   turn: number;
+  /** Lean from upright in degrees, toward the way it's turned. */
+  tilt: number;
+  /** For bodies: which moving piece it belongs to. */
+  role?: Role;
+}
+
+/** Moving pieces of a body. Legs and arms swing from the top, heads turn on the neck. */
+export const ROLES = [
+  "body",
+  "head",
+  "eyes",
+  "tail",
+  "product",
+  "left arm",
+  "right arm",
+  "left leg",
+  "right leg",
+  "front left leg",
+  "front right leg",
+  "back left leg",
+  "back right leg",
+] as const;
+export type Role = (typeof ROLES)[number];
+
+/** Where nature grows a plant when it makes a world: terrain the world generator recognises. */
+export const ZONES = [
+  "forest",
+  "highland",
+  "forest edge",
+  "meadow",
+  "shore",
+  "shallows",
+  "slope",
+  "scattered",
+  "riverbed",
+] as const;
+export type Zone = (typeof ZONES)[number];
+
+export interface Habitat {
+  /** Ground Materials it grows on (the block under it, or the bed under shallow water). */
+  on: string[];
+  /** Where nature places it in a new world; none means only villagers plant it. */
+  zones: Zone[];
+  /** Its weight among the other plants of the same zone. */
+  share: number;
 }
 
 export interface DesignContent {
   /** Voxel grid: `layers[y][z]` is a row of palette characters along x; "." is empty. */
   blocks: { palette: Record<string, string>; layers: string[][] } | null;
   parts: DesignPart[];
+  /** Pivot of each moving role; by default legs and arms turn at their top, heads at their base. */
+  joints?: Partial<Record<Role, Vec3>>;
+  /** One character for it on the look map. */
+  mark?: string;
+  /** For plants: what it grows on and where nature puts it. */
+  habitat?: Habitat;
 }
 
 /** Relations the world will enforce; any other type is a free label that records knowledge. */
@@ -66,6 +123,8 @@ export interface RelationContent {
   to: number;
   /** How many: e.g. 4 planks made_from 1 log. */
   count: number;
+  /** grows_into only: game hours from planting to grown. */
+  hours?: number;
 }
 
 export type Content =
@@ -123,6 +182,8 @@ export const LIMITS = {
   designSize: 16,
   designParts: 32,
   relationCount: 64,
+  /** grows_into: at most 30 game days. */
+  growHours: 720,
 } as const;
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 '_-]*$/;
@@ -149,6 +210,12 @@ export function cleanName(v: unknown): string {
     );
   }
   return s;
+}
+
+let pristine: Catalog | null = null;
+/** Nature's entries as a new world starts with them; shared, never changed. */
+export function natureCatalog(): Catalog {
+  return pristine ??= Catalog.create();
 }
 
 export class Catalog {
@@ -195,6 +262,21 @@ export class Catalog {
     return this.relationIndex.get(id) ?? [];
   }
 
+  /**
+   * Live Relations of `type` leaving entry `id` (or arriving at it, with `into`): the entry at the
+   * other end and the count. Retired Relations don't count; the other end is returned as is, so
+   * callers follow `current` when they produce it.
+   */
+  links(id: number, type: string, into = false): { entry: Entry; rel: RelationContent }[] {
+    const out: { entry: Entry; rel: RelationContent }[] = [];
+    for (const r of this.relationsOf(id)) {
+      const rc = r.content as RelationContent;
+      if (r.retired || rc.type !== type || (into ? rc.to : rc.from) !== id) continue;
+      out.push({ entry: this.get(into ? rc.from : rc.to)!, rel: rc });
+    }
+    return out;
+  }
+
   forksOf(id: number): Entry[] {
     return this.entries.filter((e) => e.forkedFrom === id);
   }
@@ -237,7 +319,7 @@ export class Catalog {
     if (JSON.stringify(raw).length > LIMITS.content) {
       throw new Error(`content is too big (at most ${LIMITS.content} characters of JSON).`);
     }
-    const content = this.validate(kind, raw);
+    const content = this.validate(kind, raw, author);
     let name: string;
     if (kind === "relation") {
       const r = content as RelationContent;
@@ -463,10 +545,10 @@ export class Catalog {
     return e;
   }
 
-  private validate(kind: Kind, raw: Record<string, unknown>): Content {
+  private validate(kind: Kind, raw: Record<string, unknown>, author: string): Content {
     switch (kind) {
       case "material":
-        return validateMaterial(raw);
+        return validateMaterial(raw, author);
       case "part":
         return validatePart(raw);
       case "design":
@@ -499,8 +581,8 @@ export function numberIn(v: unknown, min: number, max: number, where: string): n
   return v;
 }
 
-function validateMaterial(o: Record<string, unknown>): MaterialContent {
-  onlyKeys(o, ["color", "pattern", "density", "hardness", "burns", "glows"], "material");
+function validateMaterial(o: Record<string, unknown>, author: string): MaterialContent {
+  onlyKeys(o, ["form", "color", "pattern", "density", "hardness", "burns", "glows"], "material");
   const color = String(o.color ?? "").trim().toLowerCase();
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new Error('color must look like "#a0522d".');
   const pattern = String(o.pattern ?? "plain") as PatternName;
@@ -510,7 +592,13 @@ function validateMaterial(o: Record<string, unknown>): MaterialContent {
   if (o.burns !== undefined && typeof o.burns !== "boolean") {
     throw new Error("burns must be true or false.");
   }
+  const form = String(o.form ?? "block") as Form;
+  if (!FORMS.includes(form)) throw new Error(`form must be one of ${FORMS.join(", ")}.`);
+  if (form === "liquid" && author !== NATURE) {
+    throw new Error('Only nature makes liquids for now. Use "block" or "item".');
+  }
   return {
+    form,
     color,
     pattern,
     density: numberIn(o.density ?? 1, 0.01, 25, "density"),
@@ -532,7 +620,7 @@ function vec(v: unknown, min: number, max: number, where: string): Vec3 {
 }
 
 function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
-  onlyKeys(o, ["blocks", "parts"], "design");
+  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat"], "design");
   const S = LIMITS.designSize;
   let blocks: DesignContent["blocks"] = null;
   if (o.blocks !== undefined && o.blocks !== null) {
@@ -547,7 +635,11 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
       if ([...ch].length !== 1 || ch === "." || ch === " ") {
         throw new Error(`Palette keys are single characters other than "." and " ", not "${ch}".`);
       }
-      pal[ch] = c.live(mat, "material", `palette "${ch}"`).name;
+      const m = c.live(mat, "material", `palette "${ch}"`);
+      if ((m.content as MaterialContent).form !== "block") {
+        throw new Error(`palette "${ch}": "${m.name}" isn't a block material. Use it in parts.`);
+      }
+      pal[ch] = m.name;
     }
     if (!Array.isArray(layers) || !layers.length || layers.length > S) {
       throw new Error(`blocks.layers is 1-${S} layers (bottom first), each a list of rows.`);
@@ -580,22 +672,83 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
     o.parts.forEach((p, i) => {
       const where = `parts[${i}]`;
       if (!isObject(p)) throw new Error(`${where} must be an object.`);
-      onlyKeys(p, ["part", "material", "at", "size", "turn"], where);
-      parts.push({
+      onlyKeys(p, ["part", "material", "at", "size", "turn", "tilt", "role"], where);
+      const part: DesignPart = {
         part: c.live(p.part, "part", where).name,
         material: c.live(p.material, "material", where).name,
         at: vec(p.at, -1, S + 1, `${where}.at`),
-        size: vec(p.size, 0.05, S, `${where}.size`),
+        size: vec(p.size, 0.01, S, `${where}.size`),
         turn: numberIn(p.turn ?? 0, -360, 360, `${where}.turn`),
-      });
+        tilt: numberIn(p.tilt ?? 0, -180, 180, `${where}.tilt`),
+      };
+      if (p.role !== undefined) part.role = role(p.role, `${where}.role`);
+      parts.push(part);
     });
   }
   if (!blocks && !parts.length) throw new Error("A design needs blocks, parts or both.");
-  return { blocks, parts };
+  const out: DesignContent = { blocks, parts };
+  if (o.joints !== undefined) {
+    if (!isObject(o.joints)) {
+      throw new Error('joints maps roles to points: {"head": [0.5, 1, 0.8]}.');
+    }
+    const joints: Partial<Record<Role, Vec3>> = {};
+    for (const [k, v] of Object.entries(o.joints)) {
+      const r = role(k, "joints");
+      if (!parts.some((p) => p.role === r)) throw new Error(`joints: no part has role "${r}".`);
+      joints[r] = vec(v, -1, S + 1, `joints.${r}`);
+    }
+    out.joints = joints;
+  }
+  if (o.mark !== undefined) {
+    const mark = String(o.mark);
+    if ([...mark].length !== 1 || /[\s\d@]/.test(mark) || mark.charCodeAt(0) < 33) {
+      throw new Error("mark is one character for the look map (not a digit, @ or a space).");
+    }
+    out.mark = mark;
+  }
+  if (o.habitat !== undefined) out.habitat = habitat(o.habitat, c);
+  return out;
+}
+
+function role(v: unknown, where: string): Role {
+  const r = String(v ?? "").trim().toLowerCase().replace(/_/g, " ") as Role;
+  if (!ROLES.includes(r)) throw new Error(`${where} must be one of ${ROLES.join(", ")}.`);
+  return r;
+}
+
+function habitat(v: unknown, c: Catalog): Habitat {
+  if (!isObject(v)) {
+    throw new Error('habitat is {"on": ["grass"], "zones": ["meadow"], "share": 1}.');
+  }
+  onlyKeys(v, ["on", "zones", "share"], "habitat");
+  if (!Array.isArray(v.on) || !v.on.length || v.on.length > 8) {
+    throw new Error("habitat.on lists 1-8 ground materials it grows on.");
+  }
+  const on = v.on.map((m, i) => {
+    const e = c.live(m, "material", `habitat.on[${i}]`);
+    if ((e.content as MaterialContent).form !== "block") {
+      throw new Error(`habitat.on[${i}]: "${e.name}" isn't ground (a block material).`);
+    }
+    return e.name;
+  });
+  const zones = v.zones ?? [];
+  if (!Array.isArray(zones) || zones.length > ZONES.length) {
+    throw new Error(`habitat.zones lists where nature grows it: ${ZONES.join(", ")}.`);
+  }
+  for (const z of zones) {
+    if (!ZONES.includes(z as Zone)) {
+      throw new Error(`habitat.zones: "${z}" isn't a zone. Zones: ${ZONES.join(", ")}.`);
+    }
+  }
+  return {
+    on,
+    zones: [...new Set(zones as Zone[])],
+    share: numberIn(v.share ?? 1, 0.01, 1, "habitat.share"),
+  };
 }
 
 function validateRelation(o: Record<string, unknown>, c: Catalog): RelationContent {
-  onlyKeys(o, ["type", "from", "to", "count"], "relation");
+  onlyKeys(o, ["type", "from", "to", "count", "hours"], "relation");
   const type = String(o.type ?? "").trim().toLowerCase();
   if (!(ENGINE_RELATIONS as readonly string[]).includes(type) && !FREE_RELATION_RE.test(type)) {
     throw new Error(
@@ -615,73 +768,23 @@ function validateRelation(o: Record<string, unknown>, c: Catalog): RelationConte
     }
     if (e.retired) throw new Error(`"${e.name}" is retired.`);
   }
-  return {
+  const out: RelationContent = {
     type,
     from: from.id,
     to: to.id,
     count: Math.round(numberIn(o.count ?? 1, 1, LIMITS.relationCount, "count")),
   };
-}
-
-// ---------------------------------------------------------------- nature's entries
-
-const DENSITY: Record<string, [number, number, boolean]> = {
-  // name: [density g/cm³, hardness, burns]
-  grass: [1.3, 1, false],
-  dirt: [1.3, 1, false],
-  stone: [2.6, 6, false],
-  farmland: [1.2, 1, false],
-  water: [1, 0, false],
-  sand: [1.6, 1, false],
-  gravel: [1.8, 2, false],
-  clay: [1.8, 2, false],
-  log: [0.7, 3, true],
-  planks: [0.6, 2, true],
-  cobble: [2.4, 5, false],
-  brick: [1.9, 5, false],
-  thatch: [0.2, 1, true],
-  tiles: [2, 4, false],
-};
-
-/** Built-in blocks as Materials, the engine's Parts, and a few worked examples. */
-function seedNature(c: Catalog) {
-  const add = (kind: Kind, name: string, description: string, content: unknown) =>
-    c.add({ kind, name, description, content }, NATURE, 0);
-  for (const b of BUILTIN_BLOCKS) {
-    if (b.id === 0) continue;
-    const [density, hardness, burns] = DENSITY[b.name] ?? [1, 1, false];
-    add("material", b.name, b.description, {
-      color: "#" + b.color.toString(16).padStart(6, "0"),
-      pattern: b.pattern,
-      density,
-      hardness,
-      burns,
-      glows: 0,
-    });
+  if (type === "grows_into") {
+    if (
+      from.kind !== "material" || to.kind !== "design" || !(to.content as DesignContent).habitat
+    ) {
+      throw new Error(
+        "grows_into goes from a Material you plant (like a seed) to a Design with a habitat.",
+      );
+    }
+    out.hours = numberIn(o.hours ?? 24, 0.1, LIMITS.growHours, "hours");
+  } else if (o.hours !== undefined) {
+    throw new Error("hours is only for grows_into.");
   }
-  add("part", "box", "A rectangular block of any size.", { shape: "box" });
-  add("part", "sphere", "A ball, stretched by its size.", { shape: "sphere" });
-  add("part", "cylinder", "A round post, stretched by its size.", { shape: "cylinder" });
-  const rel = (from: string, type: string, to: string, count = 1) =>
-    add("relation", "", "", { type, from, to, count });
-  rel("planks", "made_from", "log", 4);
-  rel("cobble", "made_from", "stone");
-  rel("brick", "made_from", "clay");
-  rel("tiles", "made_from", "clay");
-  rel("grass", "drops", "dirt");
-  rel("farmland", "drops", "dirt");
-  add("design", "stone bench", "A low seat of stone with a plank top.", {
-    blocks: { palette: { s: "stone" }, layers: [["s.s"]] },
-    parts: [{ part: "box", material: "planks", at: [1.5, 1.1, 0.5], size: [3, 0.2, 1] }],
-  });
-  add("rule", "lucky harvest", "Now and then a wheat harvest gives back an extra seed.", {
-    when: { event: "harvested", what: "wheat" },
-    if: { chance: 0.1 },
-    do: [{ give: { item: "wheat_seeds", count: 1 } }],
-  });
-  add("rule", "dawn chorus", "Birds greet the morning when the sky is clear.", {
-    when: { daily: 6 },
-    if: { clouds_below: 0.5 },
-    do: [{ say: "Birdsong drifts over the meadow." }],
-  });
+  return out;
 }

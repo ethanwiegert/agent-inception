@@ -16,7 +16,8 @@ import {
 } from "./jobs.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
-import { PROP_DEFS, PropKind } from "./props.ts";
+import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
+import { plantInfo } from "./props.ts";
 import {
   type Agent,
   Anim,
@@ -25,7 +26,6 @@ import {
   type Sprite,
   TICK_HZ,
   TICKS_PER_DAY,
-  WHEAT_GROW_TICKS,
 } from "./sim.ts";
 import { Block } from "./world.ts";
 
@@ -98,21 +98,18 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "plant",
-    description: `Plant wheat seeds on empty farmland, one seed per tile. ` +
-      `Wheat ripens in about ${
-        Math.round((WHEAT_GROW_TICKS / TICKS_PER_DAY) * 24)
-      } game hours. Or plant a tree sapling (oak, birch or pine) on grass or dirt; trees take ` +
-      `about ${
-        Math.round(PROP_DEFS[PropKind.Oak].growTicks / TICKS_PER_DAY)
-      } game days to grow and block the tile. ${areaNote}`,
+    description: "Plant something from your inventory that grows, one per tile: wheat seeds on " +
+      "farmland (ripe in about 18 game hours), or a sapling (oak, birch, pine) on grass or dirt " +
+      "(a tree in about 2 game days; trees block the tile). What grows from what, on which " +
+      `ground and how fast is in the Catalog (grows_into Relations, a Design's habitat). ${areaNote}`,
     inputSchema: {
       type: "object",
       properties: {
         ...area,
         seed: {
           type: "string",
-          enum: ["wheat", "oak", "birch", "pine"],
-          description: "What to plant, default wheat. Trees use saplings from your inventory.",
+          description: 'What to plant: "wheat seeds" (the default), "oak sapling", or the ' +
+            'plant\'s name ("wheat", "oak", "birch", "pine").',
         },
       },
       required: ["x", "z"],
@@ -120,8 +117,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "harvest",
-    description:
-      `Harvest ripe wheat: 1 wheat and 2 seeds per tile. Unripe crops are left alone. ${areaNote}`,
+    description: "Harvest ripe crops on farmland: wheat gives 1 wheat and 2 wheat seeds per " +
+      `tile (a crop's drops Relations say what). Unripe crops are left alone. ${areaNote}`,
     inputSchema: { type: "object", properties: area, required: ["x", "z"] },
   },
   {
@@ -140,8 +137,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "break_block",
-    description:
-      "Dig the top block off a tile's column into your inventory (grass and farmland give dirt).",
+    description: "Dig the top block off a tile's column into your inventory. A block gives what " +
+      "its drops Relations say (grass and farmland give dirt), or itself. Harder blocks take longer.",
     inputSchema: {
       type: "object",
       properties: { x: int("Column x."), z: int("Column z.") },
@@ -324,19 +321,33 @@ const HANDLERS: Record<string, Handler> = {
     }),
 
   plant(sim, agent, args) {
-    const seed = String(args.seed ?? "wheat");
-    if (seed !== "wheat") return plantTrees(sim, agent, args, seed);
-    return eachTile(sim, agent, args, "Planted", Anim.Plant, 16, {
+    const { seed, design, grow } = plantable(sim, agent, args.seed);
+    const info = plantInfo(sim.catalog, design.id)!;
+    const ground = new Set(info.habitat!.on);
+    const wet = info.floats || info.habitat!.zones.some((z) => z === "shallows" || z === "shore");
+    const sizeX = sim.world.sizeX;
+    return eachTile(sim, agent, args, `Planted ${design.name} on`, Anim.Plant, 16, {
       check(x, y, z) {
-        if (sim.world.get(x, y, z) !== Block.Farmland) return "not farmland";
-        if (sim.crops.has(z * sim.world.sizeX + x)) return "already planted";
-        if (!agent.inventory.wheat_seeds) return "out of seeds";
+        const key = z * sizeX + x;
+        const b = sim.blocks.name(sim.world.get(x, y, z));
+        if (!ground.has(b)) return `${design.name} grows on ${[...ground].join(" or ")}, not ${b}`;
+        if (sim.crops.has(key)) return "already planted";
+        const prop = sim.props.at(x, z);
+        if (prop) return `${sim.props.info(prop)?.entry.name ?? "something"} already there`;
+        if (!wet && sim.world.waterTop[key] >= 0) return "under water";
+        if (info.solid && Math.floor(agent.x) === x && Math.floor(agent.z) === z) {
+          return "you're standing there";
+        }
+        if (!agent.inventory[seed]) return `out of ${seed}`;
       },
       apply(x, y, z) {
-        agent.inventory.wheat_seeds--;
-        sim.crops.set(z * sim.world.sizeX + x, { kind: "wheat", planted: sim.tick });
-        sim.cropsVersion++;
-        sim.fire("planted", agent, x, y, z, "wheat");
+        agent.inventory[seed]--;
+        const plant = { design: design.id, planted: sim.tick, grow };
+        if (sim.world.get(x, y, z) === Block.Farmland) {
+          sim.crops.set(z * sizeX + x, plant);
+          sim.cropsVersion++;
+        } else sim.props.set(x, z, plant);
+        sim.fire("planted", agent, x, y, z, design.name);
       },
     });
   },
@@ -349,11 +360,13 @@ const HANDLERS: Record<string, Handler> = {
         if (sim.cropGrowth(crop) < 1) return "not ripe yet";
       },
       apply(x, y, z) {
-        sim.crops.delete(z * sim.world.sizeX + x);
+        const key = z * sim.world.sizeX + x;
+        const crop = sim.crops.get(key)!;
+        sim.crops.delete(key);
         sim.cropsVersion++;
-        give(agent, "wheat", 1);
-        give(agent, "wheat_seeds", 2);
-        sim.fire("harvested", agent, x, y, z, "wheat");
+        const design = sim.catalog.get(crop.design);
+        for (const [item, n] of design ? sim.drops(design) : []) give(agent, item, n);
+        sim.fire("harvested", agent, x, y, z, design?.name ?? "crop");
       },
     }),
 
@@ -417,7 +430,8 @@ const HANDLERS: Record<string, Handler> = {
           if (school.count === FISH[school.species].size) school.regrowAt = sim.tick + FISH_REGROW;
           school.count--;
         }
-        const name = FISH[species].name;
+        const name = sim.produce(FISH[species].name);
+        if (!name) continue; // retired with nothing in its place: nothing bites
         give(agent, name, 1);
         caught.push(name);
         sim.events.push({ type: "catch", agent: agent.id, fish: name });
@@ -443,12 +457,15 @@ const HANDLERS: Record<string, Handler> = {
       const y = sim.world.heightAt(x, z);
       if (y <= 1) throw new Error("Bedrock. You can't dig any deeper here.");
       const b = sim.world.get(x, y, z);
-      yield* work(agent, Anim.Build, b === Block.Stone ? 40 : 24);
+      const entry = sim.catalog.get(sim.blocks.get(b)?.entry ?? 0);
+      const hardness = (entry?.content as { hardness?: number } | undefined)?.hardness ?? 1;
+      yield* work(agent, Anim.Build, Math.round(16 + hardness * 4));
       sim.setBlock(x, y, z, Block.Air);
-      const got = b === Block.Stone ? "stone" : "dirt";
-      give(agent, got, 1);
+      const got = entry ? sim.drops(entry) : [];
+      for (const [item, n] of got) give(agent, item, n);
       sim.fire("broken", agent, x, y, z, sim.blocks.name(b));
-      return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got 1 ${got}. ${
+      const gave = got.length ? got.map(([item, n]) => `${n} ${item}`).join(", ") : "nothing";
+      return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got ${gave}. ${
         inventoryText(agent)
       }`;
     })();
@@ -557,35 +574,42 @@ function eachTile(
 
 // ---------------------------------------------------------------- helpers
 
-const TREES: Record<string, number> = {
-  oak: PropKind.Oak,
-  birch: PropKind.Birch,
-  pine: PropKind.Pine,
-};
-
-function plantTrees(sim: Sim, agent: Agent, args: Args, seed: string): Job {
-  const kind = TREES[seed];
-  if (kind === undefined) throw new Error('seed must be "wheat", "oak", "birch" or "pine".');
-  const item = `${seed}_sapling`;
-  if (!agent.inventory[item]) throw new Error(`You have no ${item}.`);
-  return eachTile(sim, agent, args, `Planted ${seed} on`, Anim.Plant, 30, {
-    check(x, y, z) {
-      const b = sim.world.get(x, y, z);
-      if (sim.props.at(x, z)) return `${PROP_DEFS[sim.props.at(x, z)!.kind].name} already there`;
-      if (b !== Block.Grass && b !== Block.Dirt) {
-        return `can't plant a tree in ${sim.blocks.name(b)}`;
-      }
-      if (sim.world.waterTop[z * sim.world.sizeX + x] >= 0) return "under water";
-      if (Math.floor(agent.x) === x && Math.floor(agent.z) === z) return "you're standing there";
-      if (!agent.inventory[item]) return `out of ${item}`;
-    },
-    apply(x, y, z) {
-      agent.inventory[item]--;
-      const variant = (x * 7 + z * 13) % PROP_DEFS[kind].variants;
-      sim.props.set(x, z, { kind, variant, planted: sim.tick });
-      sim.fire("planted", agent, x, y, z, seed);
-    },
-  });
+/**
+ * Which held Material to plant and what it grows into: by its name ("oak sapling"), the start of
+ * it ("wheat" for "wheat seeds"), or the plant's name ("oak"). Its grows_into Relation says the
+ * Design and how long it takes; a replaced Design grows its replacement.
+ */
+function plantable(
+  sim: Sim,
+  agent: Agent,
+  wanted: unknown,
+): { seed: string; design: Entry; grow: number } {
+  const c = sim.catalog;
+  const want = String(wanted ?? "wheat seeds").trim().toLowerCase().replace(/_/g, " ");
+  const options: { seed: string; design: Entry; rel: RelationContent }[] = [];
+  for (const [item, n] of Object.entries(agent.inventory)) {
+    const e = n > 0 ? c.byName(item) : undefined;
+    if (!e) continue;
+    for (const { entry, rel } of c.links(e.id, "grows_into")) {
+      options.push({ seed: e.name, design: entry, rel });
+    }
+  }
+  const hit = options.find((o) => o.seed.toLowerCase() === want) ??
+    options.find((o) => o.design.name.toLowerCase() === want) ??
+    options.find((o) => o.seed.toLowerCase().startsWith(want + " ")) ??
+    options.find((o) => o.design.name.toLowerCase().startsWith(want + " "));
+  if (!hit) {
+    const have = [...new Set(options.map((o) => o.seed))];
+    throw new Error(
+      `You have nothing to plant called "${want}". ` +
+        (have.length ? `You can plant: ${have.join(", ")}.` : "You have no seeds or saplings."),
+    );
+  }
+  const design = c.current(hit.design);
+  if (!design || !(design.content as DesignContent).habitat) {
+    throw new Error(`"${hit.design.name}" is retired, so nothing grows from ${hit.seed} now.`);
+  }
+  return { seed: hit.seed, design, grow: Math.round(((hit.rel.hours ?? 24) / 24) * TICKS_PER_DAY) };
 }
 
 function parseColor(value: unknown, key: string): number {
@@ -659,6 +683,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     );
   const tiles: string[] = [], heights: string[] = [];
   let ripe = 0, growing = 0, soonest = Infinity;
+  /** Map marks of the plants in view, and what they are. */
+  const marks = new Map<string, Set<string>>();
 
   for (let z = az - r; z <= az + r; z++) {
     let row = "", hrow = "";
@@ -679,13 +705,19 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       } as Record<number, string>)[w.get(x, h, z)] ?? "?";
       if (w.waterTop[z * w.sizeX + x] >= 0) c = w.waterTop[z * w.sizeX + x] - h > 1 ? "≈" : "~";
       const prop = sim.props.at(x, z);
-      if (prop) c = sim.props.growth(prop, sim.tick) < 1 ? "t" : PROP_DEFS[prop.kind].mark;
+      const info = prop && sim.props.info(prop);
+      if (prop && info) {
+        const young = sim.props.growth(prop, sim.tick) < 1;
+        c = young ? "t" : info.mark;
+        const names = marks.get(c) ?? new Set();
+        marks.set(c, names.add(young ? `young ${info.entry.name}` : info.entry.name));
+      }
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
         const g = sim.cropGrowth(crop);
         c = g >= 1 ? "W" : g >= 0.4 ? "w" : "s";
         if (g >= 1) ripe++;
-        else growing++, soonest = Math.min(soonest, (1 - g) * WHEAT_GROW_TICKS);
+        else growing++, soonest = Math.min(soonest, (1 - g) * crop.grow);
       }
       if (sim.schools.some((f) => f.count > 0 && Math.floor(f.x) === x && Math.floor(f.z) === z)) {
         c = "f";
@@ -708,12 +740,17 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     `Map: x ${ax - r}..${
       ax + r
     } left→right (east), z top→bottom (south). Height vs. you on the right.`,
-    `Legend: @ you  . grass  , farmland  s seedling  w growing wheat  W ripe wheat  d dirt  # stone  ` +
-    `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  T tree  A pine  t sapling  o rock  b bush  ` +
-    `* flowers  | reeds  % lily pads  f fish school  ${
+    `Legend: @ you  . grass  , farmland  s seedling  w growing crop  W ripe crop  d dirt  # stone  ` +
+    `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  f fish school  ${
       SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
-    }  1-9 other villagers (trees, pines and rocks block walking) | ` +
-    `height = same, 1-9 higher, a-i lower`,
+    }  1-9 other villagers | height = same, 1-9 higher, a-i lower`,
+    ...(marks.size
+      ? [
+        `Plants: ${
+          [...marks].sort().map(([m, names]) => `${m} ${[...names].sort().join("/")}`).join("  ")
+        } (trees and rocks block walking)`,
+      ]
+      : []),
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
   if (ripe || growing) {
@@ -729,8 +766,10 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       const mine = seen.filter(({ a }) => a.species === species).sort((p, q) => p.d - q.d);
       if (!mine.length) return;
       const n = mine[0].a;
-      const ready = def.product
-        ? `, ${mine.filter(({ a }) => sim.tick >= a.readyAt).length} with ${def.product.item} ready`
+      const body = sim.catalog.byName(def.name);
+      const product = def.productEvery && body ? sim.drops(body)[0]?.[0] : undefined;
+      const ready = product
+        ? `, ${mine.filter(({ a }) => sim.tick >= a.readyAt).length} with ${product} ready`
         : "";
       lines.push(
         `  ${mine.length} ${def.name}${
@@ -741,7 +780,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       );
     });
     lines.push(
-      "  (Animals shy away from farmers walking right at them, and follow anyone carrying wheat.)",
+      "  (Animals shy away from villagers walking right at them, and follow anyone carrying " +
+        "their food: is_food_for in the Catalog.)",
     );
   }
   const schools = sim.schools

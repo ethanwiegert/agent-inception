@@ -55,8 +55,7 @@ export class SimClient {
   timeOfDay = 0;
   speed = 1;
   clouds = 0.35;
-  /** Mirror of the sim's block registry (built-ins plus agent-defined blocks). */
-  blocks = new BlockRegistry();
+  private registry = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
   /** Mirror of the sim's Catalog. */
@@ -65,6 +64,11 @@ export class SimClient {
   cropsVersion = 0;
   profiles: AgentProfile[] = [];
   onReady: (world: World, caughtUp: number) => void = () => {};
+
+  /** Block ids for the mirrored Catalog's Materials, the same ids the sim uses. */
+  get blocks(): BlockRegistry {
+    return this.registry.sync(this.catalog);
+  }
   onEvent: (event: SimEvent) => void = () => {};
 
   private worker: Worker;
@@ -152,12 +156,11 @@ export class SimClient {
   private receive(msg: FromWorker) {
     if (msg.type === "ready") {
       this.seed = msg.seed;
-      this.blocks = new BlockRegistry();
-      this.blocks.load(msg.blocks);
-      const world = generateWorld({ seed: msg.seed });
-      this.props = new Props(world, msg.seed); // from the pristine terrain, like the sim
-      this.props.applyDiff(msg.props);
       this.catalog = Catalog.load(msg.catalog);
+      const world = generateWorld({ seed: msg.seed });
+      // From the pristine terrain, like the sim.
+      this.props = new Props(world, msg.seed, this.catalog);
+      this.props.applyDiff(msg.props);
       applyEdits(world, msg.edits);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
@@ -184,7 +187,6 @@ export class SimClient {
     this.timeOfDay = msg.timeOfDay;
     this.speed = msg.speed;
     this.clouds = msg.clouds;
-    if (msg.blocks) this.blocks.load(msg.blocks);
     if (msg.profiles) this.profiles = msg.profiles;
     if (msg.catalog) {
       const d = msg.catalog;

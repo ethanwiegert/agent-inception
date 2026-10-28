@@ -264,7 +264,10 @@ Deno.test("rules validate their tree against the vocabulary and caps", () => {
   bad({ when: { event: "danced" }, do: give }, "when.event must be");
   bad({ when: { event: "said" }, do: [] }, "do is a list");
   bad({ when: { event: "said" }, do: [{ explode: true }] }, 'unknown "explode"');
-  bad({ when: { event: "said" }, do: [{ give: { item: "diamond" } }] }, "isn't an item");
+  bad(
+    { when: { event: "said" }, do: [{ give: { item: "diamond" } }] },
+    "isn't something you can hold",
+  );
   bad({ when: { event: "said" }, do: [{ give: { item: "wheat", count: 99 } }] }, "count must be");
   bad({ when: { every: 1 }, do: [{ say: "hi" }] }, "when.every");
   bad({ when: { every: 60 }, do: give }, "only works with an event trigger");
@@ -338,7 +341,7 @@ Deno.test("conditions see the villager, the place, the time and the weather", ()
     do: [{ take: { item: "wheat_seeds", count: 10 } }, { give: { item: "cobble", count: 1 } }],
   });
   run(sim, "a", "say", { text: "toll" });
-  assertEquals(fern.inventory.wheat_seeds, 6);
+  assertEquals(fern.inventory["wheat seeds"], 6);
   assertEquals(fern.inventory.cobble, 1);
   run(sim, "a", "say", { text: "toll" }); // too few seeds now
   assertEquals(fern.inventory.cobble, 1);
@@ -350,10 +353,10 @@ Deno.test("conditions see the villager, the place, the time and the weather", ()
   });
   sim.setTimeOfDay(0.5);
   run(sim, "a", "say", { text: "moon" });
-  assertEquals(fern.inventory.pine_sapling, 1);
+  assertEquals(fern.inventory["pine sapling"], 1);
   sim.setTimeOfDay(23 / 24);
   run(sim, "a", "say", { text: "moon" });
-  assertEquals(fern.inventory.pine_sapling, 2);
+  assertEquals(fern.inventory["pine sapling"], 2);
 });
 
 Deno.test("set_block acts near the event and refuses unsafe cells", () => {

@@ -1,64 +1,81 @@
+import {
+  type Catalog,
+  type DesignContent,
+  type Entry,
+  type Habitat,
+  type MaterialContent,
+  natureCatalog,
+  type Zone,
+} from "./catalog.ts";
+import { BUILTIN_BLOCKS } from "./blocks.ts";
 import { fbm2 } from "./noise.ts";
 import { hash2 } from "./rng.ts";
 import { Block, World } from "./world.ts";
 import { SEA_LEVEL } from "./worldgen.ts";
 
 /**
- * Props are things that stand on a tile without being blocks: trees, bushes, flowers, reeds,
- * rocks, lily pads. At most one per tile. The generated set is rebuilt from the seed; saves keep
- * only the difference.
+ * Props are plants and boulders standing on a tile: Objects grown from nature's Designs (trees,
+ * bushes, flowers, reeds, rocks, lily pads) or planted by villagers. At most one per tile. The
+ * generated set is rebuilt from the seed and nature's Catalog; saves keep only the difference.
  */
-export interface PropDef {
-  name: string;
-  /** Blocks walking and building on its tile. */
-  solid: boolean;
-  variants: number;
-  /** Ticks from sapling to full size; 0 for things that don't grow. */
-  growTicks: number;
-  /** What `look` shows for it. */
-  mark: string;
-}
-
-export const PropKind = {
-  Oak: 0,
-  Birch: 1,
-  Pine: 2,
-  Bush: 3,
-  Flowers: 4,
-  Reeds: 5,
-  Rock: 6,
-  LilyPad: 7,
-} as const;
-
-/** A sapling planted now takes two game days to grow into a tree (20 real minutes at 1×). */
-const TREE_GROW = 20 * 600 * 2;
-
-export const PROP_DEFS: PropDef[] = [
-  { name: "oak", solid: true, variants: 3, growTicks: TREE_GROW, mark: "T" },
-  { name: "birch", solid: true, variants: 3, growTicks: TREE_GROW, mark: "T" },
-  { name: "pine", solid: true, variants: 3, growTicks: TREE_GROW, mark: "A" },
-  { name: "bush", solid: false, variants: 2, growTicks: 0, mark: "b" },
-  { name: "flowers", solid: false, variants: 4, growTicks: 0, mark: "*" },
-  { name: "reeds", solid: false, variants: 2, growTicks: 0, mark: "|" },
-  { name: "rock", solid: true, variants: 3, growTicks: 0, mark: "o" },
-  { name: "lily pad", solid: false, variants: 2, growTicks: 0, mark: "%" },
-];
 
 /** `planted` for things that were always there (fully grown). */
 export const GROWN = -(2 ** 31);
 
 export interface Prop {
-  kind: number;
-  variant: number;
+  /** The Design entry it was grown from. */
+  design: number;
   /** Tick it was planted, or GROWN. */
   planted: number;
+  /** Ticks from planting to full size, fixed when planted; 0 for things that don't grow. */
+  grow: number;
 }
 
 /** Saved/streamed changes: tile keys removed from the generated set, and props added or changed. */
 export interface PropDiff {
   removed: number[];
-  /** [tile key, kind, variant, planted] */
+  /** [tile key, design, planted, grow] */
   added: [number, number, number, number][];
+}
+
+/** What the engine reads off a plant's Design. */
+export interface PlantInfo {
+  entry: Entry;
+  mark: string;
+  /** Hard parts (hardness 3 and up, like bark and stone) block walking and building. */
+  solid: boolean;
+  /** Thin things (every part thinner than 0.1) are ground cover: no shadow, drawn near only. */
+  small: boolean;
+  /** Low, light things float on water instead of standing on the bed. */
+  floats: boolean;
+  habitat: Habitat | null;
+}
+
+const infoCache = new WeakMap<Catalog, Map<number, PlantInfo>>();
+
+/** The engine's reading of Design `id`, cached (entries never change). */
+export function plantInfo(catalog: Catalog, id: number): PlantInfo | null {
+  let cache = infoCache.get(catalog);
+  if (!cache) infoCache.set(catalog, cache = new Map());
+  const hit = cache.get(id);
+  if (hit) return hit;
+  const entry = catalog.get(id);
+  if (!entry || entry.kind !== "design") return null;
+  const d = entry.content as DesignContent;
+  const mat = (name: string) => catalog.byName(name)?.content as MaterialContent | undefined;
+  let top = 0;
+  for (const p of d.parts) top = Math.max(top, p.at[1] + p.size[1] / 2);
+  const info: PlantInfo = {
+    entry,
+    mark: d.mark ?? entry.name[0],
+    solid: d.parts.some((p) => (mat(p.material)?.hardness ?? 0) >= 3),
+    small: d.parts.every((p) => Math.min(...p.size) < 0.1),
+    floats: top <= 0.25 && d.parts.every((p) => (mat(p.material)?.density ?? 1) < 1),
+    habitat: d.habitat ?? null,
+  };
+  info.small &&= !info.solid;
+  cache.set(id, info);
+  return info;
 }
 
 export class Props {
@@ -66,11 +83,15 @@ export class Props {
   version = 0;
   private generated: Map<number, Prop>;
 
-  /** Generate from a pristine world (before any edits). */
-  constructor(readonly world: World, seed: number) {
+  /** Generate from a pristine world (before any edits). `catalog` says what each Design is. */
+  constructor(readonly world: World, seed: number, public catalog: Catalog) {
     this.generated = generateProps(world, seed);
     this.map = new Map(this.generated);
-    for (const [key, p] of this.map) if (PROP_DEFS[p.kind].solid) world.propSolid[key] = 1;
+    for (const [key, p] of this.map) world.propSolid[key] = this.solid(p) ? 1 : 0;
+  }
+
+  info(p: Prop): PlantInfo | null {
+    return plantInfo(this.catalog, p.design);
   }
 
   at(x: number, z: number): Prop | undefined {
@@ -83,15 +104,14 @@ export class Props {
     const key = z * this.world.sizeX + x;
     if (prop) this.map.set(key, prop);
     else this.map.delete(key);
-    this.world.propSolid[key] = prop && PROP_DEFS[prop.kind].solid ? 1 : 0;
+    this.world.propSolid[key] = prop && this.solid(prop) ? 1 : 0;
     this.version++;
   }
 
   /** 0-1: how grown a prop is at `tick`. */
   growth(p: Prop, tick: number): number {
-    const grow = PROP_DEFS[p.kind]?.growTicks ?? 0;
-    if (!grow || p.planted === GROWN) return 1;
-    return Math.min(1, Math.max(0, (tick - p.planted) / grow));
+    if (!p.grow || p.planted === GROWN) return 1;
+    return Math.min(1, Math.max(0, (tick - p.planted) / p.grow));
   }
 
   diff(): PropDiff {
@@ -100,8 +120,8 @@ export class Props {
     for (const key of this.generated.keys()) if (!this.map.has(key)) removed.push(key);
     for (const [key, p] of this.map) {
       const g = this.generated.get(key);
-      if (!g || g.kind !== p.kind || g.variant !== p.variant || g.planted !== p.planted) {
-        added.push([key, p.kind, p.variant, p.planted]);
+      if (!g || g.design !== p.design || g.planted !== p.planted || g.grow !== p.grow) {
+        added.push([key, p.design, p.planted, p.grow]);
       }
     }
     return { removed, added };
@@ -113,7 +133,7 @@ export class Props {
     this.map.clear();
     for (const [key, p] of this.generated) {
       this.map.set(key, p);
-      if (PROP_DEFS[p.kind].solid) this.world.propSolid[key] = 1;
+      if (this.solid(p)) this.world.propSolid[key] = 1;
     }
     this.applyDiff(d);
     this.version++;
@@ -122,10 +142,14 @@ export class Props {
   applyDiff(d: PropDiff) {
     const w = this.world.sizeX;
     for (const key of d.removed) this.set(key % w, Math.floor(key / w), null);
-    for (const [key, kind, variant, planted] of d.added) {
-      if (!PROP_DEFS[kind]) continue;
-      this.set(key % w, Math.floor(key / w), { kind, variant, planted });
+    for (const [key, design, planted, grow] of d.added) {
+      if (!plantInfo(this.catalog, design)) continue;
+      this.set(key % w, Math.floor(key / w), { design, planted, grow });
     }
+  }
+
+  private solid(p: Prop): boolean {
+    return this.info(p)?.solid ?? false;
   }
 }
 
@@ -134,10 +158,53 @@ const smoothstep = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-/** Trees on a jittered grid (one candidate per 3×3 cell), then smaller things by habitat. */
+/** Nature's wild plants by zone, in Catalog order: [design id, ground it grows on, share]. */
+function wildPlants(): Map<Zone, { id: number; on: Set<string>; share: number }[]> {
+  const zones = new Map<Zone, { id: number; on: Set<string>; share: number }[]>();
+  for (const e of natureCatalog().entries) {
+    const h = e.kind === "design" ? (e.content as DesignContent).habitat : undefined;
+    if (!h) continue;
+    for (const z of h.zones) {
+      const list = zones.get(z) ?? [];
+      list.push({ id: e.id, on: new Set(h.on), share: h.share });
+      zones.set(z, list);
+    }
+  }
+  return zones;
+}
+
+/**
+ * Plants on a jittered grid for trees (one candidate per 3×3 cell), then smaller things by
+ * habitat. The world generator reads the terrain (forest noise, altitude, slopes, water) to find
+ * each tile's zone; which Designs grow in a zone, on what ground and how often, is Catalog data.
+ */
 export function generateProps(world: World, seed: number): Map<number, Prop> {
   const { sizeX, sizeZ } = world;
   const props = new Map<number, Prop>();
+  const plants = wildPlants();
+  const ground = (x: number, z: number) => {
+    const h = world.heightAt(x, z);
+    return BUILTIN_BLOCKS[world.get(x, h, z)] ?? "";
+  };
+  /** A Design for this zone that grows on this ground, picked in patches so kinds form groves. */
+  const pick = (zone: Zone, x: number, z: number): number => {
+    const all = plants.get(zone);
+    if (!all) return -1;
+    const g = ground(x, z);
+    const fit = all.filter((p) => p.on.has(g));
+    if (fit.length <= 1) return fit[0]?.id ?? -1;
+    // Trees form groves; small plants form patches.
+    const cell = zone === "forest" || zone === "highland" ? 20 : 9;
+    const wx = x + fbm2(x * 0.05, z * 0.05, seed + 830, 2) * cell * 0.7;
+    const wz = z + fbm2(x * 0.05, z * 0.05, seed + 840, 2) * cell * 0.7;
+    let u = hash2(Math.floor(wx / cell), Math.floor(wz / cell), seed + 803 + zone.length);
+    const total = fit.reduce((s, p) => s + p.share, 0);
+    for (const p of fit) {
+      u -= p.share / total;
+      if (u < 0) return p.id;
+    }
+    return fit[fit.length - 1].id;
+  };
   const water = (x: number, z: number) =>
     x >= 0 && z >= 0 && x < sizeX && z < sizeZ && world.waterTop[z * sizeX + x] >= 0;
   const nearWater = (x: number, z: number) =>
@@ -157,6 +224,9 @@ export function generateProps(world: World, seed: number): Map<number, Prop> {
   const clearing = (x: number, z: number) =>
     smoothstep(12, 26, Math.hypot(x - sizeX / 2, z - sizeZ / 2));
   const forest = (x: number, z: number) => fbm2(x * 0.018, z * 0.018, seed + 600, 3);
+  const put = (x: number, z: number, design: number) => {
+    if (design >= 0) props.set(z * sizeX + x, { design, planted: GROWN, grow: 0 });
+  };
 
   const CELL = 3;
   for (let cz = 0; cz < sizeZ; cz += CELL) {
@@ -170,16 +240,7 @@ export function generateProps(world: World, seed: number): Map<number, Prop> {
       const density = (smoothstep(0.0, 0.4, forest(x, z)) * 0.85 + 0.035) * clearing(x, z);
       if (hash2(x, z, seed + 103) >= density) continue;
       const altitude = h - SEA_LEVEL + fbm2(x * 0.05, z * 0.05, seed + 650, 2) * 3;
-      const kind = altitude > 7
-        ? PropKind.Pine
-        : fbm2(x * 0.04, z * 0.04, seed + 700, 2) > 0.2
-        ? PropKind.Birch
-        : PropKind.Oak;
-      props.set(z * sizeX + x, {
-        kind,
-        variant: Math.floor(hash2(x, z, seed + 104) * PROP_DEFS[kind].variants),
-        planted: GROWN,
-      });
+      put(x, z, pick(altitude > 7 ? "highland" : "forest", x, z));
     }
   }
 
@@ -191,36 +252,30 @@ export function generateProps(world: World, seed: number): Map<number, Prop> {
       if (h < 0) continue;
       const block = world.get(x, h, z);
       const roll = hash2(x, z, seed + 201);
-      const variantRoll = hash2(x, z, seed + 202);
-      let kind = -1;
+      let design = -1;
       if (water(x, z)) {
         const depth = world.waterTop[key] - h;
         const calm = fbm2(x * 0.06, z * 0.06, seed + 820, 2);
-        if (depth === 1 && nearLand(x, z) && roll < 0.3) kind = PropKind.Reeds;
-        else if (depth <= 2 && calm > 0.15 && roll < 0.3) kind = PropKind.LilyPad;
+        if (depth === 1 && nearLand(x, z) && roll < 0.3) design = pick("shore", x, z);
+        else if (depth <= 2 && calm > 0.15 && roll < 0.3) design = pick("shallows", x, z);
       } else if (block === Block.Grass || block === Block.Sand) {
         const sand = block === Block.Sand;
         const f = forest(x, z);
         const flowers = fbm2(x * 0.07, z * 0.07, seed + 800, 2);
-        if (nearWater(x, z) && roll < (sand ? 0.18 : 0.3)) kind = PropKind.Reeds;
-        else if (slope(x, z) >= 2 && roll < 0.08 * clearing(x, z)) kind = PropKind.Rock;
-        else if (roll < 0.006 * clearing(x, z)) kind = PropKind.Rock;
+        if (nearWater(x, z) && roll < (sand ? 0.18 : 0.3)) design = pick("shore", x, z);
+        else if (slope(x, z) >= 2 && roll < 0.08 * clearing(x, z)) design = pick("slope", x, z);
+        else if (roll < 0.006 * clearing(x, z)) design = pick("scattered", x, z);
         else if (
           !sand && roll < 0.006 + 0.05 * smoothstep(-0.2, 0.2, f) * smoothstep(0.5, 0.2, f)
         ) {
-          kind = PropKind.Bush; // forest edges
+          design = pick("forest edge", x, z);
         } else if (!sand && flowers > 0.3 && roll < 0.3 * clearing(x, z) + 0.05) {
-          kind = PropKind.Flowers;
+          design = pick("meadow", x, z);
         }
       } else if (block === Block.Gravel && roll < 0.05) {
-        kind = PropKind.Rock;
+        design = pick("riverbed", x, z);
       }
-      if (kind < 0) continue;
-      // Flower patches share a color; everything else picks a variant per tile.
-      const variant = kind === PropKind.Flowers
-        ? Math.floor(hash2(Math.floor(x / 9), Math.floor(z / 9), seed + 803) * 4)
-        : Math.floor(variantRoll * PROP_DEFS[kind].variants);
-      props.set(key, { kind, variant, planted: GROWN });
+      put(x, z, design);
     }
   }
   return props;

@@ -1,8 +1,8 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
-import { type CallResult, Sim, WHEAT_GROW_TICKS } from "./sim.ts";
+import { type CallResult, gameHours, Sim } from "./sim.ts";
 import { AnimalAnim, SPECIES } from "./animals.ts";
 import { FISH, waterHabitat } from "./fish.ts";
-import { GROWN, PROP_DEFS, PropKind } from "./props.ts";
+import { GROWN } from "./props.ts";
 import { callTool } from "./tools.ts";
 import { Block } from "./world.ts";
 
@@ -31,7 +31,7 @@ function farmDay(seed: number) {
   const x = Math.floor(fern.x) + 2, z = Math.floor(fern.z) - 1;
   const till = run(sim, "s1", "till", { x, z, width: 3, depth: 2 });
   const plant = run(sim, "s1", "plant", { x, z, width: 3, depth: 2 });
-  for (let i = 0; i < WHEAT_GROW_TICKS; i++) sim.step();
+  for (let i = 0; i < gameHours(18); i++) sim.step();
   const harvest = run(sim, "s1", "harvest", { x, z, width: 3, depth: 2 });
   return { sim, fern, till, plant, harvest, x, z };
 }
@@ -44,7 +44,7 @@ Deno.test("an agent can till, plant and harvest a plot", () => {
   assert(tilled >= 4, till.text);
   assert(harvest.text.startsWith(`Harvested ${tilled} `), harvest.text);
   assertEquals(fern.inventory.wheat, tilled);
-  assertEquals(fern.inventory.wheat_seeds, 16 + tilled);
+  assertEquals(fern.inventory["wheat seeds"], 16 + tilled);
   assertEquals(sim.world.get(x, sim.world.heightAt(x, z), z), Block.Farmland);
 });
 
@@ -103,11 +103,15 @@ Deno.test("agents can set, validate, keep and reset a sprite", () => {
 Deno.test("props generate per seed: groves, ground cover, a clearing at spawn", () => {
   const a = new Sim(7), b = new Sim(7);
   assertEquals([...a.props.map], [...b.props.map]);
-  const counts = new Map<number, number>();
-  for (const p of a.props.map.values()) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1);
-  for (const kind of [PropKind.Oak, PropKind.Flowers, PropKind.Reeds, PropKind.Rock]) {
-    assert((counts.get(kind) ?? 0) > 20, `${PROP_DEFS[kind].name}: ${counts.get(kind)}`);
+  const counts = new Map<string, number>();
+  for (const p of a.props.map.values()) {
+    const name = a.catalog.get(p.design)!.name;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
   }
+  for (const name of ["oak", "birch", "pine", "bush", "poppies", "daisies", "reeds", "rock"]) {
+    assert((counts.get(name) ?? 0) > 20, `${name}: ${counts.get(name)}`);
+  }
+  assert((counts.get("lily pads") ?? 0) + (counts.get("water lily") ?? 0) > 20);
   const c = a.world.sizeX / 2;
   for (let z = c - 8; z <= c + 8; z++) {
     for (let x = c - 8; x <= c + 8; x++) assert(!a.world.propSolid[z * a.world.sizeX + x]);
@@ -122,7 +126,7 @@ Deno.test("trees block walking and building; saplings grow and survive a save", 
   sim.setBlock(x, sim.world.heightAt(x, z), z, Block.Grass);
   const planted = run(sim, "s", "plant", { x, z, seed: "oak" });
   assert(planted.text.startsWith("Planted oak on 1 tile"), planted.text);
-  assertEquals(me.inventory.oak_sapling, 0);
+  assertEquals(me.inventory["oak sapling"], 0);
   assert(run(sim, "s", "plant", { x, z, seed: "oak" }).isError, "no saplings left");
 
   assert(run(sim, "s", "look").text.includes("t"), "a sapling shows on the map");
@@ -131,14 +135,15 @@ Deno.test("trees block walking and building; saplings grow and survive a save", 
   assert(run(sim, "s", "walk_to", { x, z }).isError, "can't stand in a tree");
 
   const prop = sim.props.at(x, z)!;
-  assertEquals(sim.props.growth(prop, sim.tick + PROP_DEFS[PropKind.Oak].growTicks), 1);
+  assert(sim.props.growth(prop, prop.planted + gameHours(48) - 1) < 1);
+  assertEquals(sim.props.growth(prop, prop.planted + gameHours(48)), 1);
   const loaded = Sim.load(sim.save(0));
   assertEquals(loaded.props.at(x, z), prop);
   assertEquals(loaded.world.propSolid, sim.world.propSolid);
 
   // Clearing a generated prop is remembered too.
   const [key, flower] = [...sim.props.map].find(([, p]) =>
-    p.planted === GROWN && !PROP_DEFS[p.kind].solid
+    p.planted === GROWN && !sim.props.info(p)!.solid
   )!;
   const fx = key % sim.world.sizeX, fz = Math.floor(key / sim.world.sizeX);
   assert(flower);

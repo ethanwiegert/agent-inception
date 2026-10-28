@@ -1,6 +1,6 @@
-import { type Animal, type Farmer, spawnAnimals, stepAnimals } from "./animals.ts";
-import { type BlockDef, BlockRegistry } from "./blocks.ts";
-import { Catalog, type CatalogSave } from "./catalog.ts";
+import { type Animal, type Farmer, spawnAnimals, SPECIES, stepAnimals } from "./animals.ts";
+import { BlockRegistry } from "./blocks.ts";
+import { Catalog, type CatalogSave, type Entry, type MaterialContent } from "./catalog.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
 import { standY } from "./path.ts";
@@ -13,7 +13,8 @@ import { generateWorld } from "./worldgen.ts";
 export const TICK_HZ = 20;
 /** One game day per ten real minutes at 1× speed. */
 export const TICKS_PER_DAY = TICK_HZ * 600;
-export const WHEAT_GROW_TICKS = Math.round(TICKS_PER_DAY * 0.75);
+/** Ticks in `hours` game hours. */
+export const gameHours = (hours: number) => Math.round((hours / 24) * TICKS_PER_DAY);
 
 export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5, Fish: 6 } as const;
 
@@ -51,9 +52,13 @@ export interface Agent {
   queue: { callId: number; job: Job }[];
 }
 
+/** A plant on farmland: drawn as a field of stalks, harvested when ripe. */
 export interface Crop {
-  kind: "wheat";
+  /** The Design entry it grows into. */
+  design: number;
   planted: number;
+  /** Ticks to ripen, fixed when planted. */
+  grow: number;
 }
 
 export type SimEvent =
@@ -73,15 +78,15 @@ export interface CallResult {
 
 /** Everything needed to restore a world. Generated terrain is rebuilt from the seed. */
 export interface SaveData {
-  version: 1;
+  version: 2;
   seed: number;
   tick: number;
   dayOffset: number;
   savedAt: number;
   edits: number[];
-  crops: [number, number][];
+  /** [tile key, design, planted, grow] */
+  crops: [number, number, number, number][];
   agents: Omit<Agent, "queue" | "anim" | "stride" | "notes">[];
-  blocks?: BlockDef[];
   /** Trees, rocks, flowers etc. that differ from generation. */
   props?: PropDiff;
   /** Missing in old saves: those worlds get freshly spawned herds. */
@@ -108,9 +113,9 @@ export class Sim {
   animals: Animal[];
   /** Fish schools in rivers and the sea. */
   schools: School[];
-  readonly blocks = new BlockRegistry();
   /** Kinds of things that can exist (ADR 0003); the World holds the things that do. */
   catalog = Catalog.create();
+  private registry = new BlockRegistry();
   readonly rules: Rules = new Rules(this);
   readonly ticksPerDay = TICKS_PER_DAY;
   readonly agents: Agent[] = [];
@@ -130,10 +135,15 @@ export class Sim {
 
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
-    this.props = new Props(this.world, seed);
+    this.props = new Props(this.world, seed, this.catalog);
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
+  }
+
+  /** Block ids for the Catalog's Materials, kept in step with the Catalog. */
+  get blocks(): BlockRegistry {
+    return this.registry.sync(this.catalog);
   }
 
   timeOfDay(): number {
@@ -176,7 +186,7 @@ export class Sim {
   }
 
   cropGrowth(crop: Crop): number {
-    return Math.min(1, (this.tick - crop.planted) / WHEAT_GROW_TICKS);
+    return crop.grow ? Math.min(1, (this.tick - crop.planted) / crop.grow) : 1;
   }
 
   addAgent(name: string): Agent {
@@ -191,7 +201,7 @@ export class Sim {
       yaw: 0,
       anim: Anim.Idle,
       stride: 0,
-      inventory: { wheat_seeds: 16, oak_sapling: 1, birch_sapling: 1, pine_sapling: 1 },
+      inventory: this.starterKit(),
       journal: [],
       sprite: null,
       lastActive: this.tick,
@@ -219,6 +229,66 @@ export class Sim {
     const entry = this.catalog.byName(item);
     if (!entry) return item;
     return this.catalog.current(entry)?.name ?? null;
+  }
+
+  /**
+   * What breaking, harvesting or collecting `entry` gives, from its `drops` Relations, each
+   * following `replaced_by`. A block Material without drops gives itself.
+   */
+  drops(entry: Entry): [string, number][] {
+    const c = this.catalog, links = c.links(entry.id, "drops");
+    if (!links.length && entry.kind === "material") {
+      const self = c.current(entry)?.name;
+      return self ? [[self, 1]] : [];
+    }
+    const out: [string, number][] = [];
+    for (const { entry: e, rel } of links) {
+      const name = c.current(e)?.name;
+      if (name) out.push([name, rel.count]);
+    }
+    return out;
+  }
+
+  /** A new villager's things: seeds and a sapling of each tree, as the Catalog now names them. */
+  private starterKit(): Record<string, number> {
+    const kit: Record<string, number> = {};
+    const kitList: [string, number][] = [
+      ["wheat seeds", 16],
+      ["oak sapling", 1],
+      ["birch sapling", 1],
+      ["pine sapling", 1],
+    ];
+    for (const [item, n] of kitList) {
+      const name = this.produce(item);
+      if (name) kit[name] = (kit[name] ?? 0) + n;
+    }
+    return kit;
+  }
+
+  /** Materials that are food for each species (`is_food_for` its Design), per Catalog version. */
+  private foods: { version: number; bySpecies: string[][] } = { version: -1, bySpecies: [] };
+  foodFor(species: number): string[] {
+    const c = this.catalog;
+    if (this.foods.version !== c.version) {
+      this.foods = {
+        version: c.version,
+        bySpecies: SPECIES.map((def) => {
+          const body = c.byName(def.name);
+          if (!body) return [];
+          return c.links(body.id, "is_food_for", true)
+            .map(({ entry }) => c.current(entry))
+            .filter((e): e is Entry => e?.kind === "material")
+            .map((e) => e.name);
+        }),
+      };
+    }
+    return this.foods.bySpecies[species] ?? [];
+  }
+
+  /** Whether `name` is a Material villagers can hold (not a liquid). */
+  holdable(name: string): boolean {
+    const e = this.catalog.byName(name);
+    return e?.kind === "material" && (e.content as MaterialContent).form !== "liquid";
   }
 
   /** A villager did something Rules can listen for, at block (x, y, z). */
@@ -279,8 +349,12 @@ export class Sim {
     const f = this.farmers;
     f.length = this.agents.length;
     this.agents.forEach((a, i) => {
-      const o = f[i] ??= { x: 0, z: 0, moving: false, wheat: false };
-      o.x = a.x, o.z = a.z, o.moving = a.anim === Anim.Walk, o.wheat = (a.inventory.wheat ?? 0) > 0;
+      const o = f[i] ??= { x: 0, z: 0, moving: false, food: 0 };
+      o.x = a.x, o.z = a.z, o.moving = a.anim === Anim.Walk;
+      o.food = 0;
+      SPECIES.forEach((_, s) => {
+        if (this.foodFor(s).some((item) => (a.inventory[item] ?? 0) > 0)) o.food |= 1 << s;
+      });
     });
     const t = this.timeOfDay();
     stepAnimals(this.animals, this.world, this.rng, f, t < 0.2 || t > 0.86, TICK_HZ);
@@ -307,14 +381,13 @@ export class Sim {
 
   save(savedAt: number): SaveData {
     return {
-      version: 1,
+      version: 2,
       seed: this.seed,
       tick: this.tick,
       dayOffset: this.dayOffset,
       savedAt,
       edits: [...this.edits].flat(),
-      crops: [...this.crops].map(([key, crop]) => [key, crop.planted]),
-      blocks: this.blocks.customs(),
+      crops: [...this.crops].map(([key, c]) => [key, c.design, c.planted, c.grow]),
       props: this.props.diff(),
       animals: structuredClone(this.animals),
       schools: structuredClone(this.schools),
@@ -331,9 +404,9 @@ export class Sim {
   static load(data: SaveData): Sim {
     const sim = new Sim(data.seed);
     sim.tick = data.tick;
-    sim.blocks.load(data.blocks ?? []);
     sim.weatherOverride = data.weatherOverride ?? null;
     if (data.catalog) sim.catalog = Catalog.load(data.catalog);
+    sim.props.catalog = sim.catalog;
     for (const [id, stat] of data.ruleStats ?? []) sim.rules.stats.set(id, structuredClone(stat));
     sim.dayOffset = data.dayOffset;
     const w = sim.world;
@@ -350,7 +423,9 @@ export class Sim {
     if (data.schools?.every((f) => schoolFits(sim.world, f))) {
       sim.schools = structuredClone(data.schools);
     }
-    for (const [key, planted] of data.crops) sim.crops.set(key, { kind: "wheat", planted });
+    for (const [key, design, planted, grow] of data.crops) {
+      sim.crops.set(key, { design, planted, grow });
+    }
     for (const a of data.agents) {
       const agent = structuredClone(a);
       sim.agents.push({

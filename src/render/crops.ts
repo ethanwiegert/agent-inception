@@ -4,7 +4,11 @@ import type { Layouts } from "./renderer.ts";
 
 const STALKS = 10;
 
-/** Wheat drawn like grass: blades generated in the vertex shader, ten per tile in two rows. */
+/**
+ * Crops drawn like grass: blades generated in the vertex shader, ten per tile in two rows. Each
+ * crop brings its colors from the Catalog: young stalks in its stalk Material, ripe ears in the
+ * color of what it drops.
+ */
 const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 @group(1) @binding(0) var<storage, read> crops: array<vec4f>;
 const STALKS = ${STALKS}u;
@@ -18,6 +22,12 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   *seed = pcg(*seed);
   return f32(*seed) / 4294967296.0;
 }
+/** sRGB 0xRRGGBB carried in a float, to linear. */
+fn unpackColor(packed: f32) -> vec3f {
+  let c = u32(packed);
+  let srgb = vec3f(f32((c >> 16u) & 255u), f32((c >> 8u) & 255u), f32(c & 255u)) / 255.0;
+  return pow(srgb, vec3f(2.2));
+}
 
 struct Out {
   @builtin(position) pos: vec4f,
@@ -27,7 +37,8 @@ struct Out {
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
-  let crop = crops[ii / STALKS];
+  let crop = crops[(ii / STALKS) * 2u];
+  let look = crops[(ii / STALKS) * 2u + 1u];
   let k = ii % STALKS;
   let g = crop.w;
   var seed = pcg((u32(crop.x) * 73856093u) ^ (u32(crop.z) * 19349663u) ^ (k * 83492791u));
@@ -55,10 +66,11 @@ struct Out {
   let bend = (vec3f(frame.wind.x, 0.0, frame.wind.y) * sway + facing * 0.05) * h;
   let p = base + right * sideSign * w + vec3f(0.0, h * t, 0.0) + bend * t * t;
 
-  let young = vec3f(0.07, 0.28, 0.03);
-  let mature = vec3f(0.5, 0.4, 0.1);
+  let young = unpackColor(look.x) * vec3f(0.6, 0.93, 0.6);
+  let ear = unpackColor(look.y);
+  let mature = ear * 0.63;
   var color = mix(young, mature, smoothstep(0.55, 1.0, g)) * mix(0.55, 1.0, t);
-  if (level >= 2u) { color = mix(color, vec3f(0.8, 0.58, 0.16), ripe); }
+  if (level >= 2u) { color = mix(color, ear, ripe); }
 
   var out: Out;
   out.pos = frame.viewProj * vec4f(p, 1.0);

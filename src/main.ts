@@ -245,6 +245,7 @@ function draw(now: number) {
     crops: client.crops,
     cropsVersion: client.cropsVersion,
     blocks: client.blocks,
+    catalog: client.catalog,
     props: client.props,
     tick: client.tick,
     day: client.day,

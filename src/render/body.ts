@@ -1,8 +1,11 @@
 import { identity, mat4, rotateX, rotateY, rotateZ, scale, translate } from "../math.ts";
+import type { Catalog, DesignContent, Role, Vec3 } from "../sim/catalog.ts";
 import { Anim, type Sprite } from "../sim/sim.ts";
 import type { AgentView } from "../simclient.ts";
+import { ANCHOR, jointOf, meshDesign } from "./designs.ts";
 import type { InstanceBatch, MeshLibrary, Rgb } from "./meshes.ts";
 
+/** Until M8 gives each villager a Design of their own, default villagers vary shirt and skin. */
 const SHIRTS: Rgb[] = [
   [0.55, 0.08, 0.05],
   [0.04, 0.3, 0.32],
@@ -12,59 +15,39 @@ const SHIRTS: Rgb[] = [
   [0.65, 0.2, 0.15],
 ];
 const SKINS: Rgb[] = [[0.75, 0.48, 0.33], [0.5, 0.3, 0.18], [0.85, 0.6, 0.45], [0.32, 0.18, 0.1]];
-const PANTS: Rgb = [0.05, 0.07, 0.13];
-const BOOTS: Rgb = [0.1, 0.05, 0.02];
-const STRAW: Rgb = [0.7, 0.52, 0.18];
-const BAND: Rgb = [0.35, 0.05, 0.03];
-const EYES: Rgb = [0.02, 0.02, 0.03];
 const WOOD: Rgb = [0.3, 0.16, 0.06];
 const IRON: Rgb = [0.35, 0.36, 0.38];
 const WHITE: Rgb = [1, 1, 1];
 
 const root = mat4(), part = mat4(), torso = mat4(), limb = mat4(), head = mat4(), place = mat4();
 
-/** Template ids for bodies, from `defineBodyModels`. */
-export type BodyModels = ReturnType<typeof defineBodyModels>;
+/** A villager look ready to pose: a template and a pivot (relative to the feet) per role. */
+interface Rig {
+  pieces: Partial<Record<Role, { id: number; at: Vec3 }>>;
+}
+
+const POSED: Role[] = ["left leg", "right leg", "body", "left arm", "right arm", "head", "eyes"];
 
 /**
- * Farmer parts as rounded mesh templates, each with its pivot at the origin (hip, shoulder, neck).
- * Shirt and skin parts are white and take the agent's colors as instance tints.
+ * Villager bodies: the Catalog's "farmer" Design (or whatever replaced it) cut into its moving
+ * roles, one template per role pivoted at its joint, plus the tools hands hold while working.
  */
-export function defineBodyModels(lib: MeshLibrary) {
-  const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
-  return {
-    cube: lib.define("cube", (b) => b.box(null, [1, 1, 1], { color: WHITE })),
-    leg: lib.define("farmer.leg", (b) => {
-      b.box(at(0, -0.33, 0), [0.2, 0.66, 0.22], { color: PANTS, ao: 0.3 }, 0.07);
-      b.box(at(0, -0.66, 0.02), [0.21, 0.13, 0.27], { color: BOOTS }, 0.05);
-    }),
-    torso: lib.define("farmer.torso", (b) => {
-      b.box(at(0, 0.3, 0), [0.5, 0.6, 0.3], { color: WHITE, ao: 0.2 }, 0.1);
-    }),
-    sleeve: lib.define("farmer.sleeve", (b) => {
-      b.box(at(0, -0.26, 0), [0.16, 0.54, 0.16], { color: WHITE }, 0.07);
-    }),
-    hand: lib.define("farmer.hand", (b) => {
-      b.sphere(at(0, -0.6, 0), [0.08, 0.08, 0.08], { color: WHITE }, { detail: 1 });
-    }),
-    head: lib.define("farmer.head", (b) => {
-      b.box(at(0, 0.22, 0), [0.42, 0.42, 0.42], { color: WHITE }, 0.09);
-      b.box(at(0, 0.18, 0.22), [0.07, 0.08, 0.06], { color: WHITE }, 0.025);
-    }),
-    eyes: lib.define("farmer.eyes", (b) => {
-      for (const x of [-0.1, 0.1]) b.box(at(x, 0, 0), [0.07, 0.09, 0.02], { color: EYES }, 0.01);
-    }),
-    hat: lib.define("farmer.hat", (b) => {
-      const straw = { color: STRAW, jitter: 0.08 };
-      b.cylinder(at(0, 0.42, 0), 0.4, 0.38, 0.04, straw, { segments: 18 });
-      b.cylinder(at(0, 0.45, 0), 0.24, 0.21, 0.22, straw, { segments: 14 });
-      b.cylinder(at(0, 0.47, 0), 0.245, 0.235, 0.06, { color: BAND }, { segments: 14 });
-    }),
-    hoe: lib.define("tool.hoe", (b) => {
+export class BodyModels {
+  readonly cube: number;
+  readonly hoe: number;
+  readonly rod: number;
+  readonly hammer: number;
+  private rigs = new Map<string, Rig | null>();
+  private catalog: Catalog | null = null;
+
+  constructor(private lib: MeshLibrary) {
+    const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
+    this.cube = lib.define("cube", (b) => b.box(null, [1, 1, 1], { color: WHITE }));
+    this.hoe = lib.define("tool.hoe", (b) => {
       b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
       b.box(at(0, -0.72, 0.68), [0.2, 0.22, 0.04], { color: IRON }, 0.01);
-    }),
-    rod: lib.define("tool.rod", (b) => {
+    });
+    this.rod = lib.define("tool.rod", (b) => {
       // Held in the right hand: the rod points forward and up, the line hangs straight down.
       b.cylinder(rotateX(at(0, -0.6, 0), 2.214), 0.022, 0.01, 1.6, { color: WOOD, sway: [0, 0.3] });
       b.cylinder(rotateX(at(0, -1.56, 1.28), -1.845), 0.004, 0.004, 1.3, {
@@ -73,12 +56,36 @@ export function defineBodyModels(lib: MeshLibrary) {
       b.sphere(translate(rotateX(at(0, -1.56, 1.28), -1.845), 0, 1.3, 0), [0.04, 0.04, 0.04], {
         color: [0.7, 0.05, 0.03],
       }, { detail: 0 });
-    }),
-    hammer: lib.define("tool.hammer", (b) => {
+    });
+    this.hammer = lib.define("tool.hammer", (b) => {
       b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
       b.box(at(0, -0.62, 0.66), [0.16, 0.16, 0.12], { color: IRON }, 0.02);
-    }),
-  };
+    });
+  }
+
+  /** The villager look for this shirt and skin, built on first use. */
+  villager(catalog: Catalog, shirt: number, skin: number): Rig | null {
+    if (catalog !== this.catalog) this.catalog = catalog, this.rigs.clear();
+    const farmer = catalog.byName("farmer");
+    const design = farmer && catalog.current(farmer);
+    if (!design || design.kind !== "design") return null;
+    const key = `${design.id}:${shirt}:${skin}`;
+    if (this.rigs.has(key)) return this.rigs.get(key)!;
+    const d = design.content as DesignContent;
+    const colors = new Map([["linen", SHIRTS[shirt]], ["skin", SKINS[skin]]]);
+    const rig: Rig = { pieces: {} };
+    for (const role of POSED) {
+      if (!d.parts.some((p) => p.role === role)) continue;
+      const at = jointOf(d, role);
+      const id = this.lib.define(
+        `villager:${key}:${role}`,
+        (b) => meshDesign(b, catalog, d, { role, origin: at, sway: false, colors }),
+      );
+      rig.pieces[role] = { id, at: [at[0] - ANCHOR[0], at[1] - ANCHOR[1], at[2] - ANCHOR[2]] };
+    }
+    this.rigs.set(key, rig);
+    return rig;
+  }
 }
 
 /** A horizontal run of same-colored sprite pixels, drawn as one box. Color is linear. */
@@ -129,6 +136,7 @@ export function buildBodies(
   out: InstanceBatch,
   cameraYaw: number,
   ids: BodyModels,
+  catalog: Catalog,
 ) {
   const add = (id: number, m: Float32Array, c: Rgb = WHITE) => out.add(id, m, c[0], c[1], c[2]);
 
@@ -173,8 +181,14 @@ export function buildBodies(
       doll(a, a.sprite);
       continue;
     }
-    const shirt = SHIRTS[a.color % SHIRTS.length];
-    const skin = SKINS[(a.id * 7) % SKINS.length];
+    const rig = ids.villager(catalog, a.color % SHIRTS.length, (a.id * 7) % SKINS.length);
+    if (!rig) continue;
+    const pieces = rig.pieces;
+    /** Move `m` from `from`'s pivot to `to`'s. */
+    const joint = (m: Float32Array, to: Role, from?: Role) => {
+      const t = pieces[to]!.at, f = from ? pieces[from]!.at : [0, 0, 0];
+      return translate(m, t[0] - f[0], t[1] - f[1], t[2] - f[2]);
+    };
     const t = time + a.id * 1.7;
     const phase = a.stride * 2.4;
     const walking = a.anim === Anim.Walk;
@@ -237,40 +251,44 @@ export function buildBodies(
     rotateY(root, a.yaw);
 
     // Legs pivot at the hips; crouching bends them forward a little.
-    for (const side of [-1, 1]) {
+    for (const [side, role] of [[-1, "left leg"], [1, "right leg"]] as const) {
+      if (!pieces[role]) continue;
       part.set(root);
-      translate(part, side * 0.12, 0.72 + crouch * 0.5, 0);
+      translate(joint(part, role), 0, crouch * 0.5, 0);
       rotateX(part, (walking ? side * legSwing : 0) - crouch * 1.2);
-      add(ids.leg, part);
+      add(pieces[role].id, part);
     }
+    if (!pieces.body) continue;
 
-    // Torso leans from the hips.
+    // The body leans from the hips.
     torso.set(root);
-    translate(torso, 0, 0.72, 0);
+    joint(torso, "body");
     rotateX(torso, lean);
-    add(ids.torso, torso, shirt);
+    add(pieces.body.id, torso);
 
     // Arms hang from the shoulders; the right hand carries a tool while working.
-    for (const side of [-1, 1]) {
+    for (const [side, role] of [[-1, "left arm"], [1, "right arm"]] as const) {
+      if (!pieces[role]) continue;
       limb.set(torso);
-      translate(limb, side * 0.33, 0.56, 0);
+      joint(limb, role, "body");
       rotateX(limb, side < 0 ? armL : armR);
-      add(ids.sleeve, limb, shirt);
-      add(ids.hand, limb, skin);
+      add(pieces[role].id, limb);
       if (side > 0 && a.anim === Anim.Till) add(ids.hoe, limb);
       if (side > 0 && a.anim === Anim.Build) add(ids.hammer, limb);
       if (side > 0 && a.anim === Anim.Fish) add(ids.rod, limb);
     }
 
-    // Head on the neck, with blinking eyes and a straw hat.
+    // Head on the neck, with blinking eyes.
+    if (!pieces.head) continue;
     head.set(torso);
-    translate(head, 0, 0.6, 0);
+    joint(head, "head", "body");
     rotateY(head, headYaw);
     rotateX(head, headPitch);
-    add(ids.head, head, skin);
-    add(ids.hat, head);
-    part.set(head);
-    const blink = (t % 4.3) < 0.12 ? 0.15 : 1;
-    add(ids.eyes, scale(translate(part, 0, 0.25, 0.212), 1, blink, 1));
+    add(pieces.head.id, head);
+    if (pieces.eyes) {
+      const blink = (t % 4.3) < 0.12 ? 0.15 : 1;
+      part.set(head);
+      add(pieces.eyes.id, scale(joint(part, "eyes", "head"), 1, blink, 1));
+    }
   }
 }

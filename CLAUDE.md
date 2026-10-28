@@ -48,12 +48,15 @@ src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech
 src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
-                    shared by handlers), blocks.ts (block registry, patterns),
-                    catalog.ts (append-only Catalog: entries, content schemas, Proposals, nature's
-                    seed entries), rules.ts (Rule schema + engine: triggers, budget, effects),
+                    shared by handlers), blocks.ts (block ids for the Catalog's Materials, patterns),
+                    catalog.ts (append-only Catalog: entries, content schemas, Proposals),
+                    nature.ts (nature's entries as Catalog data: every block, item, plant, the
+                    farmer, animal bodies, drops/growth/food Relations, example Rules),
+                    rules.ts (Rule schema + engine: triggers, budget, effects),
                     catalogtools.ts (catalog_* / propose / vote tools),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
-                    props.ts (trees/flowers/rocks…: generation, saplings, save diff),
+                    props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
+                    save diff, PlantInfo read off a Design),
                     animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),
                     fish.ts (fish species, schools, river/sea habitat),
                     path.ts (A* over floors, wading, swimming), protocol.ts, noise.ts, rng.ts
@@ -61,8 +64,10 @@ src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame
                     common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
                     surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
                     water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
-                    (instanced draws, wind) + body.ts (farmer parts, sprite dolls) + flora.ts
-                    (prop templates and instances) + fauna.ts (species rigs: parts with roles; fish schools),
+                    (instanced draws, wind) + designs.ts (any Design → mesh: parts in their
+                    Materials' looks, role groups around joints) + body.ts (villager rig from the
+                    "farmer" Design, tools, sprite dolls) + flora.ts (plant templates and
+                    instances) + fauna.ts (animal rigs from their Designs; fish schools),
                     sky.ts,
                     post.ts, look.ts (presets, sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
@@ -76,10 +81,10 @@ must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (next: M6 built-ins become entries). Each
-milestone opens with a short clarifying grill with Ethan and closes with the playtest gate described
-there (tests, Haiku playtests including an adversary, a report in `docs/playtests/`, fixes, perf,
-screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M6 built-ins become entries is in progress; its
+section lists what's done and what's left). Each milestone opens with a short clarifying grill with
+Ethan and closes with the playtest gate described there (tests, Haiku playtests including an
+adversary, a report in `docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 

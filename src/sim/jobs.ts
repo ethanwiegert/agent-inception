@@ -1,5 +1,4 @@
 import { findPath, levelAt, octile } from "./path.ts";
-import { PROP_DEFS } from "./props.ts";
 import { type Agent, Anim, type Job, type Sim, TICK_HZ } from "./sim.ts";
 
 /** Building blocks for tool handlers: walking, reaching, working and the inventory. */
@@ -82,10 +81,10 @@ export function* work(agent: Agent, anim: number, ticks: number): Generator<void
 /** Why a solid prop stops work on a tile, or nothing. */
 export function solidProp(sim: Sim, x: number, z: number): string | undefined {
   const p = sim.props.at(x, z);
-  if (!p || !PROP_DEFS[p.kind].solid) return undefined;
-  const def = PROP_DEFS[p.kind];
-  const what = sim.props.growth(p, sim.tick) < 1 ? `${def.name} sapling` : def.name;
-  return `a ${what} is in the way`;
+  const info = p && sim.props.info(p);
+  if (!p || !info?.solid) return undefined;
+  const young = sim.props.growth(p, sim.tick) < 1 ? "young " : "";
+  return `a ${young}${info.entry.name} is in the way`;
 }
 
 export const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
