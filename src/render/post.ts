@@ -13,7 +13,7 @@ const shader = frameWgsl + /* wgsl */ `
 /** Midtone gain ahead of the tonemap (brightness parity with a filmic curve). */
 const GAIN = 1.6;
 /** Contrast-adaptive sharpening strength, 0 (off) to 1. */
-const SHARPEN = 0.5;
+const SHARPEN = 0.35;
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;

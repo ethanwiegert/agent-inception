@@ -39,6 +39,12 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
+- **Overhaul (2026-10-28, between M6 and M7, asked for by Ethan).** Efficiency, agent fluidity and
+  looks across the board; report [0003](playtests/0003-overhaul.md). Worldgen ~3× faster and no
+  longer run twice, a ~2.5× faster mesher, GPU-culled props, compact water, crop growth on the GPU;
+  instant tool answers and no `_whoami` round trip; building pulled forward from M7 (below); PBR
+  Neutral tonemap, sharpening, warm sunsets, lit clouds, organic ground edges; offscreen
+  `screenshot` with name tags; a headless harness for VMs without a display.
 
 ## V1
 
@@ -194,17 +200,23 @@ test. Still open:
 
 Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in the M7 grill:
 
-- `place_block` for any placeable Material in the inventory, optional `y`; needs a solid neighbour,
-  refuses cells a villager stands in and solid-prop tiles. `break_block` with optional `y`, drops
-  from engine Relations.
-- `build` a Design (Blocks + Parts) at x, z, optional base y: checks the inventory up front, places
-  layer by layer (≤ 48 cells per call to stay under MCP timeouts), reports skipped cells.
+- Done in the overhaul (`sim/buildtools.ts`; revisit in the grill): `place_block` for any held block
+  Material over areas (≤ 16 columns, `layers` ≤ 4, ≤ 48 blocks) or at a `y` with a solid neighbour,
+  refusing cells another villager stands in (your own body steps aside) and solid-prop tiles;
+  `break_block` over areas and layers or upward from `y`; `build` of a Design's _blocks_ at x, z,
+  optional base y, bottom layer first, ≤ 48 blocks or ~50 s per call, idempotent (calling again
+  carries on; it finds its own earlier work as the base), says what's still needed. Diggers work
+  inside-out, builders defer the block that would shut them in, reach falls back to arm's length
+  (two tiles) and bodies hop down up to 4 blocks when there's no other way. `look` names built
+  blocks (planks `P`, brick `B`…) with marks nothing else uses.
+- Still to do: `build` of a Design's _Parts_ (Objects), and checking the whole inventory up front
+  (today it builds with what you have and lists what's missing).
 - `craft` through _made from_ Relations (log → planks, stone → cobble, clay → brick or tiles, wheat
   → thatch as the built-in examples).
 - `interact` at x, z: chop a grown tree (logs + sapling, axe swing), dig up a sapling, break a rock,
   pick flowers/reeds/lily pads, shear sheep, milk cows, collect eggs when ready.
 - Physics 1: collision shapes for Parts; static Objects that villagers walk around and on.
-- `look` legend for built Materials and Objects.
+- `look` legend for Objects (built Materials are in).
 
 ### M8 — character and land
 
@@ -269,12 +281,16 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
 
 Pick these up in the gate of whichever milestone touches them.
 
-- Close, low views: sloped side triangles read as dark facets in shade; sunset sky too pale (wants a
-  warmer horizon band); moon disc a bit large; far-hill grass radius edge visible at low angles.
-- Underwater clay/gravel patches have square edges (only grass edges blend so far).
-- `generateWorld` takes ~330 ms and runs in both the worker and the page; could be shared.
+- Close, low views: sloped side triangles read as dark facets in shade. (The pale sunset, the big
+  moon, square underwater patches and the darker far-grass band were fixed in the overhaul.)
 - A new seed rebuilds the `Renderer` without destroying the old GPU resources.
 - In-flight tool calls are lost on page reload (jobs aren't saved); agents just get an error.
-- Props draw every instance (~3.6k, ~0.45 ms GPU at the default view); per-chunk culling and tree
-  LODs would cut that as the world fills up.
-- Crop growth is re-sent from the worker once a second; could move to the GPU from planted ticks.
+- Tree LODs: props are GPU-culled now, but a wide view still draws every visible tree at full
+  detail.
+- A 48-block `break_block` or `place_block` with long walks can run past a minute (each block is 1-2
+  s of work by design). `build` stops at ~50 s and resumes; area digs and lays don't resume.
+- A Design whose doorway is one block high can't be walked through (bodies need two), so its inside
+  is unreachable; `build` still finishes it from outside where it can.
+- The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
+- Hardware GPU numbers for the overhaul: run `deno task shot "seed=7&time=0.62&speed=0"` on the dev
+  box and add them to playtest 0003 (only software numbers so far).

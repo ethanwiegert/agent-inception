@@ -24,8 +24,9 @@ export interface Look {
 export const LOOKS: Record<string, Look> = {
   natural: {
     name: "Natural",
-    grassBase: [0.062, 0.15, 0.03],
-    grassTip: [0.19, 0.36, 0.075],
+    // Tuned under the PBR Neutral tonemap, which keeps more chroma than the old filmic curve.
+    grassBase: [0.058, 0.15, 0.032],
+    grassTip: [0.18, 0.36, 0.08],
     bladeHeight: 0.62,
     bladeWidth: 0.05,
     bladesPerBlock: 64,

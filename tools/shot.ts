@@ -23,8 +23,9 @@ try {
     `navigator.gpu?.requestAdapter().then(a => a ? a.info.vendor + "/" + a.info.architecture : "none")`,
   );
   fatal = await browser.evaluate<string>(`document.getElementById("fatal").textContent`) ?? "";
-  const perf = await browser.evaluate(`globalThis.__perf?.summary()`);
+  // Headless pages draw only when captured, so read the timings after the shot.
   await Deno.writeFile(out, await browser.screenshot());
+  const perf = await browser.evaluate(`globalThis.__perf?.summary()`);
   const software = adapter.includes("swiftshader");
   console.log(JSON.stringify(
     {
