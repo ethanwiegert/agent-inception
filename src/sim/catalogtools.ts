@@ -77,7 +77,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "way. role and joints make a body move (body, head, eyes, left arm, left leg, front left " +
       "leg, product, …). mark is one look-map character. habitat says the ground it grows on " +
       `and where nature plants it (zones: ${ZONES.join(", ")}); (0.5, 0, 0.5) is the tile ` +
-      "center on the ground. Up to 16×16×16 blocks and 32 parts. Building comes later.\n" +
+      "center on the ground. Up to 16×16×16 blocks and 32 parts. build places one from your " +
+      "inventory.\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
       `when: {"event": "harvested", "what": "wheat"} (events: ${RULE_EVENTS.join(", ")}; ` +
       'optional "what" matches the block, crop, fish or villager, or words for said), ' +
@@ -96,8 +97,11 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "block; give, take, has, block and set_block need an event trigger. spread works on a " +
       "timer. A rule fires at most " +
       `${RULE_LIMITS.firingsPerHour} times per game hour and can't trigger other rules.\n` +
-      '- relation: {"type": "grows_into", "from": "wheat seeds", "to": "wheat crop", "count": 1, ' +
-      '"hours": 18}. hours is only for grows_into: game hours from planting to grown. Engine ' +
+      '- relation: {"type": "made_from", "from": "thatch", "to": "wheat", "count": 1, "takes": 4}. ' +
+      "count is how many of from (4 planks from 1 log). takes, made_from only, is how many of to " +
+      'one craft uses (4 wheat make 1 thatch); omit it for 1. grows_into: {"type": "grows_into", ' +
+      '"from": "wheat seeds", "to": "wheat crop", "count": 1, "hours": 18}. hours is game hours ' +
+      "from planting to grown. Engine " +
       `types the world will enforce: ${ENGINE_RELATIONS.join(", ")}; or your own ` +
       'lower_snake_case label like "sacred_to" that just records knowledge. No name needed.\n' +
       'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "wildflowers ' +
@@ -535,5 +539,6 @@ function relationText(sim: Sim, e: Entry): string {
   const from = sim.catalog.get(r.from)!, to = sim.catalog.get(r.to)!;
   const engine = (ENGINE_RELATIONS as readonly string[]).includes(r.type) ? "" : " (free label)";
   const count = r.count !== 1 ? `${r.count} × ` : "";
-  return `${count}"${from.name}" ${r.type} "${to.name}"${engine}`;
+  const takes = r.takes && r.takes !== 1 ? `, takes ${r.takes}` : "";
+  return `${count}"${from.name}" ${r.type} "${to.name}"${takes}${engine}`;
 }

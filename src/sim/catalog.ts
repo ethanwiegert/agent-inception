@@ -121,8 +121,10 @@ export interface RelationContent {
   type: string;
   from: number;
   to: number;
-  /** How many: e.g. 4 planks made_from 1 log. */
+  /** How many of `from`: e.g. 4 planks made_from 1 log. */
   count: number;
+  /** made_from only: how many of `to` one craft uses. Omitted means 1. */
+  takes?: number;
   /** grows_into only: game hours from planting to grown. */
   hours?: number;
 }
@@ -749,7 +751,7 @@ function habitat(v: unknown, c: Catalog): Habitat {
 }
 
 function validateRelation(o: Record<string, unknown>, c: Catalog): RelationContent {
-  onlyKeys(o, ["type", "from", "to", "count", "hours"], "relation");
+  onlyKeys(o, ["type", "from", "to", "count", "hours", "takes"], "relation");
   const type = String(o.type ?? "").trim().toLowerCase();
   if (!(ENGINE_RELATIONS as readonly string[]).includes(type) && !FREE_RELATION_RE.test(type)) {
     throw new Error(
@@ -775,6 +777,10 @@ function validateRelation(o: Record<string, unknown>, c: Catalog): RelationConte
     to: to.id,
     count: Math.round(numberIn(o.count ?? 1, 1, LIMITS.relationCount, "count")),
   };
+  if (o.takes !== undefined) {
+    if (type !== "made_from") throw new Error("takes is only for made_from.");
+    out.takes = Math.round(numberIn(o.takes, 1, LIMITS.relationCount, "takes"));
+  }
   if (type === "grows_into") {
     if (
       from.kind !== "material" || to.kind !== "design" || !(to.content as DesignContent).habitat

@@ -9,6 +9,7 @@ import {
 } from "./catalog.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
+import { Objects } from "./objects.ts";
 import { standY } from "./path.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
@@ -104,6 +105,8 @@ export interface SaveData {
   ruleStats?: [number, RuleStat][];
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
+  /** Built Designs: [design, x, y, z]. Missing in saves from before building. */
+  objects?: [number, number, number, number][];
 }
 
 /**
@@ -116,6 +119,7 @@ export class Sim {
   dayOffset = Math.round(TICKS_PER_DAY * 0.3);
   readonly world: World;
   readonly props: Props;
+  readonly objects: Objects;
   animals: Animal[];
   /** Fish schools in rivers and the sea. */
   schools: School[];
@@ -142,6 +146,7 @@ export class Sim {
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed, this.catalog);
+    this.objects = new Objects(this.world);
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
@@ -429,6 +434,7 @@ export class Sim {
       catalog: this.catalog.save(),
       ruleStats: structuredClone([...this.rules.stats]),
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
+      objects: this.objects.list.map((o) => [o.design, o.x, o.y, o.z]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, notes: _n, ...rest }) =>
         structuredClone(rest)
       ),
@@ -460,6 +466,7 @@ export class Sim {
     for (const [key, design, planted, grow] of data.crops) {
       sim.crops.set(key, { design, planted, grow });
     }
+    if (data.objects?.length) sim.objects.restore(sim.catalog, data.objects);
     for (const a of data.agents) {
       const agent = structuredClone(a);
       sim.agents.push({

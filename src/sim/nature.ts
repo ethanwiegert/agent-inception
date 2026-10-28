@@ -464,13 +464,28 @@ add("design", "duck", "A duck paddling on calm water.", {
 
 // ---------------------------------------------------------------- relations
 
-const rel = (from: string, type: string, to: string, count = 1, hours?: number) =>
-  add("relation", "", "", { type, from, to, count, ...(hours ? { hours } : {}) });
+const rel = (
+  from: string,
+  type: string,
+  to: string,
+  count = 1,
+  hours?: number,
+  takes?: number,
+) =>
+  add("relation", "", "", {
+    type,
+    from,
+    to,
+    count,
+    ...(hours ? { hours } : {}),
+    ...(takes ? { takes } : {}),
+  });
 
 rel("planks", "made_from", "log", 4);
 rel("cobble", "made_from", "stone");
 rel("brick", "made_from", "clay");
 rel("tiles", "made_from", "clay");
+rel("thatch", "made_from", "wheat", 1, undefined, 4);
 rel("grass", "drops", "dirt");
 rel("farmland", "drops", "dirt");
 rel("wheat seeds", "grows_into", "wheat crop", 1, 18);
@@ -482,6 +497,14 @@ for (const tree of ["oak", "birch", "pine"]) {
   rel(tree, "drops", `${tree} sapling`);
 }
 rel("rock", "drops", "stone", 2);
+rel("poppies", "drops", "red petals");
+rel("buttercups", "drops", "yellow petals");
+rel("daisies", "drops", "white petals");
+rel("violets", "drops", "purple petals");
+rel("reeds", "drops", "reed", 2);
+rel("lily pads", "drops", "lily leaf");
+rel("water lily", "drops", "lily leaf");
+rel("water lily", "drops", "pink petals");
 rel("sheep", "drops", "wool");
 rel("cow", "drops", "milk");
 rel("chicken", "drops", "egg");

@@ -471,12 +471,12 @@ Deno.test("spread copies a plant onto a free neighbour and stops when crowded", 
       sim.props.set(x + dx, z + dz, null);
     }
   }
-  for (let dz = -1; dz <= 1; dz++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      sim.setBlock(x + dx, sim.world.heightAt(x + dx, z + dz), z + dz, Block.Grass);
-      if (dx === 1 && dz === 0) continue;
-      sim.props.set(x + dx, z + dz, { design: id, planted: 0, grow: 0 });
-    }
+  // Only the cells that touch the gap stay grass, and each of them holds clover. Every source
+  // then sees that one free cell, which is already crowded, whatever the design id hashes to.
+  sim.setBlock(x + 1, sim.world.heightAt(x + 1, z), z, Block.Grass);
+  for (const [dx, dz] of [[0, 0], [0, 1], [0, -1], [1, 1], [1, -1]]) {
+    sim.setBlock(x + dx, sim.world.heightAt(x + dx, z + dz), z + dz, Block.Grass);
+    sim.props.set(x + dx, z + dz, { design: id, planted: 0, grow: 0 });
   }
   const packed = ofDesign(sim, "clover");
   do sim.step(); while (sim.tick % period !== 0);

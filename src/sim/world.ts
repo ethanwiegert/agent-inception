@@ -34,6 +34,12 @@ export class World {
   readonly waterTop: Int16Array;
   /** 1 where a solid prop (tree, rock) stands on the column; set by `Props`. */
   readonly propSolid: Uint8Array;
+  /**
+   * Cells filled by solid Object parts (a part whose Material has hardness ≥ 3), allocated the
+   * first time one is built. `objectHi` is the highest such cell in the column, or -1.
+   */
+  objectSolid: Uint8Array | null = null;
+  objectHi: Int16Array | null = null;
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
@@ -115,17 +121,43 @@ export class World {
     return h + 1 - (mask ? slopeDrop(mask, x - ix, z - iz) : 0);
   }
 
+  /** A voxel or a solid Object part fills this cell. */
+  occupies(x: number, y: number, z: number): boolean {
+    if (solid(this.get(x, y, z))) return true;
+    if (!this.objectSolid || !this.inBounds(x, y, z)) return false;
+    return this.objectSolid[this.index(x, y, z)] === 1;
+  }
+
+  clearObjectCells(): void {
+    this.objectSolid?.fill(0);
+    this.objectHi?.fill(-1);
+  }
+
+  /** Mark a cell as filled by a solid Object part. */
+  fillObjectCell(x: number, y: number, z: number): void {
+    if (!this.inBounds(x, y, z)) return;
+    if (!this.objectSolid || !this.objectHi) {
+      this.objectSolid = new Uint8Array(this.blocks.length);
+      this.objectHi = new Int16Array(this.sizeX * this.sizeZ).fill(-1);
+    }
+    this.objectSolid[this.index(x, y, z)] = 1;
+    const key = z * this.sizeX + x;
+    if (y > this.objectHi[key]) this.objectHi[key] = y;
+  }
+
   /**
    * The highest solid block at or below `maxY` with two non-solid cells above it
-   * (room to stand), or -1.
+   * (room to stand), or -1. Solid Object parts count as blocks, so a body can stand on them.
    */
   floorBelow(x: number, z: number, maxY: number): number {
     if (x < 0 || z < 0 || x >= this.sizeX || z >= this.sizeZ) return -1;
-    for (let y = Math.min(maxY, this.top[z * this.sizeX + x]); y >= 0; y--) {
-      if (
-        solid(this.blocks[this.index(x, y, z)]) &&
-        !solid(this.get(x, y + 1, z)) && !solid(this.get(x, y + 2, z))
-      ) return y;
+    const key = z * this.sizeX + x;
+    let limit = this.top[key];
+    if (this.objectHi && this.objectHi[key] > limit) limit = this.objectHi[key];
+    for (let y = Math.min(maxY, limit); y >= 0; y--) {
+      if (this.occupies(x, y, z) && !this.occupies(x, y + 1, z) && !this.occupies(x, y + 2, z)) {
+        return y;
+      }
     }
     return -1;
   }

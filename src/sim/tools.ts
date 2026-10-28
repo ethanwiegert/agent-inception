@@ -16,7 +16,7 @@ import {
 } from "./jobs.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
-import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
+import type { DesignContent, Entry, MaterialContent, RelationContent } from "./catalog.ts";
 import { habitatRefusal, plantInfo } from "./props.ts";
 import {
   type Agent,
@@ -27,7 +27,7 @@ import {
   TICK_HZ,
   TICKS_PER_DAY,
 } from "./sim.ts";
-import { Block } from "./world.ts";
+import { Block, solid } from "./world.ts";
 
 /**
  * The agent-facing API. Every game action is a tool; definitions are plain
@@ -47,6 +47,7 @@ export interface ToolDef {
 
 export const SPRITE_MAX = 32;
 const MAX_AREA = 16;
+const MAX_BUILD = 48;
 const CAST_RANGE = 4;
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -123,25 +124,85 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "place_block",
-    description:
-      "Stack a block from your inventory on top of a tile's column. Build walls by stacking.",
+    description: "Place a block Material from your inventory into an empty cell that touches " +
+      "something solid. Without y, it stacks on top of the column. Refuses a cell a villager " +
+      "stands in, and a tile a solid prop (tree, rock) occupies.",
     inputSchema: {
       type: "object",
       properties: {
         x: int("Column x."),
         z: int("Column z."),
-        block: { type: "string", enum: ["dirt", "stone"] },
+        y: int("Block height to fill. Omit to stack on top of the column."),
+        block: {
+          type: "string",
+          description:
+            'A placeable Material you hold, by Catalog name: "dirt", "planks", "cobble".',
+        },
       },
       required: ["x", "z", "block"],
     },
   },
   {
     name: "break_block",
-    description: "Dig the top block off a tile's column into your inventory. A block gives what " +
-      "its drops Relations say (grass and farmland give dirt), or itself. Harder blocks take longer.",
+    description: "Dig one block into your inventory. Without y, the top of the column. A block " +
+      "gives what its drops Relations say (grass and farmland give dirt), or itself. Harder " +
+      "blocks take longer. Refuses a tile that has a prop: use interact for trees, rocks, " +
+      "flowers, reeds and lily pads.",
     inputSchema: {
       type: "object",
-      properties: { x: int("Column x."), z: int("Column z.") },
+      properties: {
+        x: int("Column x."),
+        z: int("Column z."),
+        y: int("Block height to dig. Omit to dig the top block."),
+      },
+      required: ["x", "z"],
+    },
+  },
+  {
+    name: "craft",
+    description:
+      "Make something using its made_from Relations. One craft consumes `takes` of each " +
+      "ingredient (default 1) and gives `count` of the result: 1 log makes 4 planks, 4 wheat makes " +
+      "1 thatch, 1 clay makes 1 brick or 1 tiles. `count` is how many times to craft (1-16), so " +
+      "4 logs make 16 planks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        what: { type: "string", description: 'The Material to make, by Catalog name: "planks".' },
+        count: { ...int("How many times to craft, 1-16. Default 1."), minimum: 1, maximum: 16 },
+      },
+      required: ["what"],
+    },
+  },
+  {
+    name: "build",
+    description: "Build a Design at (x, z), sitting on the ground or at base y. Checks you hold " +
+      `every Material the remaining work needs, then places blocks layer by layer (at most ${MAX_BUILD} ` +
+      "cells per call; call again with the same y for the rest) and reports skipped cells. " +
+      "Each block cell costs one of that Material; each part costs one of its Material. A Design " +
+      "with a part of hardness 3 or more becomes an Object you walk around and stand on. Softer " +
+      "Designs are built, and don't collide yet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        x: int("Origin tile x. Local cell (0, 0, 0) lands here."),
+        z: int("Origin tile z."),
+        y: int(
+          "Base block height. Omit to sit on the ground, or to continue a build already there.",
+        ),
+        design: { type: "string", description: 'The Design to build, by name: "stone bench".' },
+      },
+      required: ["x", "z", "design"],
+    },
+  },
+  {
+    name: "interact",
+    description: "Use whatever is at (x, z). Chop a grown tree (logs and a sapling), dig up a " +
+      "sapling, break a rock, or pick flowers, reeds and lily pads. Shear a sheep, milk a cow, or " +
+      "collect an egg when that animal is ready.",
+    inputSchema: {
+      type: "object",
+      properties: { x: int("Tile x."), z: int("Tile z.") },
       required: ["x", "z"],
     },
   },
@@ -285,7 +346,9 @@ function join(sim: Sim, session: string, args: Args): string {
     "Materials, Designs, Rules that make things happen, and Relations between them " +
     "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
     "(seeds, saplings, wheat, wool, milk, eggs, fish), counted by its Catalog name. Changing " +
-    `shared entries goes through propose and vote. ${catalogSummary(sim)}\nStart with look.` +
+    "shared entries goes through propose and vote. place_block and break_block take any block " +
+    "you hold, at a chosen height. craft follows made_from, build puts up a Design, and interact " +
+    `chops, picks, shears, milks and collects. ${catalogSummary(sim)}\nStart with look.` +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "");
@@ -372,22 +435,25 @@ const HANDLERS: Record<string, Handler> = {
 
   place_block(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
-    const name = String(args.block);
-    const block = name === "dirt" ? Block.Dirt : name === "stone" ? Block.Stone : -1;
-    if (block < 0) throw new Error('block must be "dirt" or "stone".');
-    if (!agent.inventory[name]) throw new Error(`You have no ${name}. Dig some with break_block.`);
+    const yArg = args.y === undefined ? undefined : num(args.y, "y");
+    const mat = placeable(sim, args.block);
+    if (!(agent.inventory[mat.name] > 0)) {
+      throw new Error(`You have no ${mat.name}. Dig some with break_block, or craft it.`);
+    }
+    const block = sim.blocks.byName(mat.name)!.id;
     return (function* () {
-      yield* reach(sim, agent, x, z);
-      const blocked = solidProp(sim, x, z);
-      if (blocked) throw new Error(`Can't build there: ${blocked}.`);
-      const y = sim.world.heightAt(x, z) + 1;
-      if (y >= sim.world.sizeY - 2) throw new Error("That column is as tall as it can get.");
-      if (y > agent.y + 3) throw new Error("Too high to reach from here.");
-      yield* work(agent, Anim.Build, 20);
-      agent.inventory[name]--;
+      yield* reach(sim, agent, x, z, yArg);
+      const y = yArg ?? sim.world.heightAt(x, z) + 1;
+      const why = placeRefusal(sim, x, y, z);
+      if (why) throw new Error(`Can't place ${mat.name} at (${x}, ${y}, ${z}): ${why}.`);
+      yield* work(agent, Anim.Build, Math.round(12 + mat.hardness * 2));
+      if (!(agent.inventory[mat.name] > 0)) throw new Error(`You have no ${mat.name} left.`);
+      const again = placeRefusal(sim, x, y, z);
+      if (again) throw new Error(`Can't place ${mat.name} at (${x}, ${y}, ${z}): ${again}.`);
+      agent.inventory[mat.name]--;
       sim.setBlock(x, y, z, block);
-      sim.fire("placed", agent, x, y, z, name);
-      return `Placed ${name} at x=${x} y=${y} z=${z}. ${inventoryText(agent)}`;
+      sim.fire("placed", agent, x, y, z, mat.name);
+      return `Placed ${mat.name} at x=${x} y=${y} z=${z}. ${inventoryText(agent)}`;
     })();
   },
 
@@ -450,16 +516,20 @@ const HANDLERS: Record<string, Handler> = {
 
   break_block(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
+    const yArg = args.y === undefined ? undefined : num(args.y, "y");
     return (function* () {
-      yield* reach(sim, agent, x, z);
-      const blocked = solidProp(sim, x, z);
-      if (blocked) throw new Error(`Can't dig there: ${blocked}.`);
-      const y = sim.world.heightAt(x, z);
+      yield* reach(sim, agent, x, z, yArg);
+      const prop = propName(sim, x, z);
+      if (prop) throw new Error(`A ${prop} is there. Use interact.`);
+      const y = yArg ?? sim.world.heightAt(x, z);
       if (y <= 1) throw new Error("Bedrock. You can't dig any deeper here.");
       const b = sim.world.get(x, y, z);
+      if (!solid(b)) throw new Error(b === Block.Water ? "That's water." : "Nothing to dig there.");
       const entry = sim.catalog.get(sim.blocks.get(b)?.entry ?? 0);
       const hardness = (entry?.content as { hardness?: number } | undefined)?.hardness ?? 1;
       yield* work(agent, Anim.Build, Math.round(16 + hardness * 4));
+      if (propName(sim, x, z)) throw new Error("Something grew there. Use interact.");
+      if (sim.world.get(x, y, z) !== b) throw new Error("That block is already gone.");
       sim.setBlock(x, y, z, Block.Air);
       const got = entry ? sim.drops(entry) : [];
       for (const [item, n] of got) give(agent, item, n);
@@ -468,6 +538,182 @@ const HANDLERS: Record<string, Handler> = {
       return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got ${gave}. ${
         inventoryText(agent)
       }`;
+    })();
+  },
+
+  craft(sim, agent, args) {
+    const times = Math.min(16, Math.max(1, num(args.count ?? 1, "count")));
+    const { product, ingredients, yields } = recipe(sim, args.what);
+    for (const ing of ingredients) {
+      const need = ing.takes * times;
+      const have = agent.inventory[ing.name] ?? 0;
+      if (have < need) {
+        throw new Error(
+          `You need ${need} ${ing.name} to craft ${yields * times} ${product} (you have ${have}).`,
+        );
+      }
+    }
+    return (function* () {
+      yield* work(agent, Anim.Build, Math.min(80, 12 * times));
+      for (const ing of ingredients) {
+        if ((agent.inventory[ing.name] ?? 0) < ing.takes * times) {
+          throw new Error(`You no longer have enough ${ing.name}.`);
+        }
+      }
+      for (const ing of ingredients) agent.inventory[ing.name] -= ing.takes * times;
+      const made = yields * times;
+      give(agent, product, made);
+      const spent = ingredients.map((i) => `${i.takes * times} ${i.name}`).join(" and ");
+      return `Crafted ${made} ${product} from ${spent}. ${inventoryText(agent)}`;
+    })();
+  },
+
+  build(sim, agent, args) {
+    const x = num(args.x, "x"), z = num(args.z, "z");
+    const yArg = args.y === undefined ? undefined : num(args.y, "y");
+    const design = resolveDesign(sim, args.design);
+    const content = design.content as DesignContent;
+    const cells = designCells(content);
+    const base = resolveBase(sim, design, cells, x, z, yArg);
+    const remaining = cells.filter((c) =>
+      !cellMatches(sim, x + c.lx, base + c.ly, z + c.lz, c.material)
+    );
+    const existing = sim.objects.find(design.id, x, base, z);
+    const batch = remaining.slice(0, MAX_BUILD);
+    const finishes = remaining.length <= MAX_BUILD;
+    const need = new Map<string, number>();
+    for (const c of remaining) need.set(c.material, (need.get(c.material) ?? 0) + 1);
+    if (!existing && (finishes || !cells.length)) {
+      for (const p of content.parts) need.set(p.material, (need.get(p.material) ?? 0) + 1);
+    }
+    const missing: string[] = [];
+    for (const [mat, n] of need) {
+      const have = agent.inventory[mat] ?? 0;
+      if (have < n) missing.push(`${n} ${mat} (have ${have})`);
+    }
+    if (missing.length) {
+      throw new Error(`You need ${missing.join(", ")} to build ${design.name}.`);
+    }
+    if (!remaining.length && (existing || !content.parts.length)) {
+      return `The ${design.name} at x=${x} y=${base} z=${z} is already built.`;
+    }
+    return (function* () {
+      yield* reach(sim, agent, x, z, base);
+      let placed = 0;
+      const skipped: string[] = [];
+      for (const c of batch) {
+        const wx = x + c.lx, wy = base + c.ly, wz = z + c.lz;
+        const why = placeRefusal(sim, wx, wy, wz);
+        if (why) {
+          skipped.push(`(${wx},${wy},${wz}) ${why}`);
+          continue;
+        }
+        yield* work(agent, Anim.Build, 8);
+        const again = placeRefusal(sim, wx, wy, wz);
+        if (again) {
+          skipped.push(`(${wx},${wy},${wz}) ${again}`);
+          continue;
+        }
+        if (!(agent.inventory[c.material] > 0)) {
+          skipped.push(`(${wx},${wy},${wz}) out of ${c.material}`);
+          continue;
+        }
+        const id = sim.blocks.byName(c.material)?.id;
+        if (id === undefined) {
+          skipped.push(`(${wx},${wy},${wz}) ${c.material} isn't a block`);
+          continue;
+        }
+        agent.inventory[c.material]--;
+        sim.setBlock(wx, wy, wz, id);
+        sim.fire("placed", agent, wx, wy, wz, c.material);
+        placed++;
+      }
+      const done = cells.every((c) =>
+        cellMatches(sim, x + c.lx, base + c.ly, z + c.lz, c.material)
+      );
+      let object = sim.objects.find(design.id, x, base, z);
+      if ((done || !cells.length) && !object) {
+        for (const p of content.parts) {
+          if (!(agent.inventory[p.material] > 0)) {
+            throw new Error(`You no longer have the ${p.material} its parts need.`);
+          }
+        }
+        for (const p of content.parts) agent.inventory[p.material]--;
+        object = sim.objects.add(sim.catalog, design.id, x, base, z);
+      }
+      const left = cells.filter((c) =>
+        !cellMatches(sim, x + c.lx, base + c.ly, z + c.lz, c.material)
+      );
+      const tail = left.length
+        ? ` ${left.length} cells left; call build again with y=${base}.`
+        : object
+        ? " It's up."
+        : "";
+      return `Built ${placed} of ${design.name} at x=${x} y=${base} z=${z}.` +
+        (skipped.length ? ` Skipped: ${skipped.join("; ")}.` : "") + tail +
+        ` ${inventoryText(agent)}`;
+    })();
+  },
+
+  interact(sim, agent, args) {
+    const x = num(args.x, "x"), z = num(args.z, "z");
+    if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
+    return (function* () {
+      yield* reach(sim, agent, x, z);
+      const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
+      const prop = sim.props.at(x, z);
+      if (animal) {
+        const def = SPECIES[animal.species];
+        const body = sim.catalog.byName(def.name);
+        if (def.productEvery && body) {
+          const product = sim.drops(body);
+          const label = product[0]?.[0] ?? "product";
+          if (sim.tick < animal.readyAt) {
+            throw new Error(
+              `The ${def.name}'s ${label} isn't ready yet (${
+                gameDuration(animal.readyAt - sim.tick)
+              }).`,
+            );
+          }
+          yield* work(agent, Anim.Harvest, 20);
+          if (Math.hypot(animal.x - (x + 0.5), animal.z - (z + 0.5)) > 2.5) {
+            throw new Error(`The ${def.name} wandered off.`);
+          }
+          if (sim.tick < animal.readyAt) throw new Error(`The ${def.name} was already collected.`);
+          animal.readyAt = sim.tick + def.productEvery;
+          for (const [item, n] of product) give(agent, item, n);
+          const gave = product.length
+            ? product.map(([item, n]) => `${n} ${item}`).join(", ")
+            : "nothing";
+          return `You collect ${gave} from the ${def.name}. ${inventoryText(agent)}`;
+        }
+        if (!prop) throw new Error(`A ${def.name} is here, and it has nothing to collect.`);
+      }
+      if (!prop) throw new Error(`Nothing to interact with at (${x}, ${z}).`);
+      const info = sim.props.info(prop);
+      if (!info) throw new Error(`Nothing to interact with at (${x}, ${z}).`);
+      const grown = sim.props.growth(prop, sim.tick) >= 1;
+      const seed = !grown ? planterOf(sim, info.entry) : undefined;
+      if (seed) {
+        yield* work(agent, Anim.Build, 16);
+        if (sim.props.at(x, z) !== prop) throw new Error("It's gone.");
+        sim.props.set(x, z, null);
+        const name = sim.produce(seed);
+        if (name) give(agent, name, 1);
+        return `You dig up the young ${info.entry.name} and get ${name ?? "nothing"}. ${
+          inventoryText(agent)
+        }`;
+      }
+      const chopping = info.solid && sim.drops(info.entry).some(([item]) => item.endsWith("log"));
+      yield* work(agent, info.solid ? Anim.Build : Anim.Harvest, info.solid ? 36 : 12);
+      if (sim.props.at(x, z) !== prop) throw new Error("It's gone.");
+      sim.props.set(x, z, null);
+      const got = sim.drops(info.entry);
+      for (const [item, n] of got) give(agent, item, n);
+      sim.fire("broken", agent, x, sim.world.heightAt(x, z), z, info.entry.name);
+      const gave = got.length ? got.map(([item, n]) => `${n} ${item}`).join(", ") : "nothing";
+      const verb = chopping ? "chop" : info.solid ? "break" : "pick";
+      return `You ${verb} the ${info.entry.name} and get ${gave}. ${inventoryText(agent)}`;
     })();
   },
 
@@ -579,6 +825,154 @@ function eachTile(
  * it ("wheat" for "wheat seeds"), or the plant's name ("oak"). Its grows_into Relation says the
  * Design and how long it takes; a replaced Design grows its replacement.
  */
+const SUPPORT = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
+
+/** The villager whose body fills cell (x, y, z), if any. */
+function villagerIn(sim: Sim, x: number, y: number, z: number): string | undefined {
+  for (const a of sim.agents) {
+    if (Math.floor(a.x) !== x || Math.floor(a.z) !== z) continue;
+    if (y >= Math.floor(a.y) && y <= a.y + 1.8) return a.name;
+  }
+}
+
+/** Why this empty-looking cell refuses a block, or nothing if it can be placed. */
+function placeRefusal(sim: Sim, x: number, y: number, z: number): string | undefined {
+  const w = sim.world;
+  if (!w.inBounds(x, y, z) || y >= w.sizeY - 2) return "out of reach";
+  const b = w.get(x, y, z);
+  if (b === Block.Water) return "water";
+  if (b !== Block.Air) return "occupied";
+  if (w.occupies(x, y, z)) return "a built part is there";
+  const who = villagerIn(sim, x, y, z);
+  if (who) return `${who} is standing there`;
+  const blocked = solidProp(sim, x, z);
+  if (blocked) return blocked;
+  for (const [dx, dy, dz] of SUPPORT) if (w.occupies(x + dx, y + dy, z + dz)) return;
+  return "nothing to attach it to";
+}
+
+/** A Material that can be laid as a block, by the name the villager said. */
+function placeable(sim: Sim, raw: unknown): MaterialContent & { name: string } {
+  const want = String(raw ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const e = sim.catalog.byName(want);
+  if (!e || e.kind !== "material") throw new Error(`No block called "${want}".`);
+  const mat = e.content as MaterialContent;
+  if (mat.form !== "block" || sim.blocks.byName(e.name) === undefined) {
+    throw new Error(`${e.name} isn't a placeable block.`);
+  }
+  return { name: e.name, ...mat };
+}
+
+function propName(sim: Sim, x: number, z: number): string | undefined {
+  const p = sim.props.at(x, z);
+  if (!p) return;
+  const young = sim.props.growth(p, sim.tick) < 1 ? "young " : "";
+  return young + (sim.props.info(p)?.entry.name ?? "something");
+}
+
+/** What `made_from` says `what` is crafted from, following `replaced_by`. */
+function recipe(sim: Sim, raw: unknown): {
+  product: string;
+  ingredients: { name: string; takes: number }[];
+  yields: number;
+} {
+  const want = String(raw ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const entry = sim.catalog.byName(want);
+  if (!entry) throw new Error(`Nothing called "${want}" in the Catalog.`);
+  if (entry.kind !== "material") throw new Error(`"${entry.name}" isn't something you craft.`);
+  const live = sim.catalog.current(entry);
+  if (!live) throw new Error(`"${entry.name}" is retired.`);
+  const links = sim.catalog.links(entry.id, "made_from");
+  if (!links.length) {
+    const makes = sim.catalog.links(entry.id, "made_from", true)
+      .map(({ entry: e }) => sim.catalog.current(e)?.name ?? e.name);
+    throw new Error(
+      makes.length
+        ? `${entry.name} isn't crafted. It makes: ${makes.join(", ")}.`
+        : `Nothing is made from a recipe for ${entry.name}.`,
+    );
+  }
+  const ingredients = links.map(({ entry: ing, rel }) => {
+    const name = sim.catalog.current(ing)?.name;
+    if (!name) throw new Error(`${ing.name} is retired, so you can't craft ${live.name} now.`);
+    return { name, takes: rel.takes ?? 1, yields: rel.count };
+  });
+  const yields = ingredients[0].yields;
+  if (ingredients.some((i) => i.yields !== yields)) {
+    throw new Error(`The made_from counts for ${live.name} disagree.`);
+  }
+  return { product: live.name, ingredients, yields };
+}
+
+interface DesignCell {
+  lx: number;
+  ly: number;
+  lz: number;
+  material: string;
+}
+
+function designCells(d: DesignContent): DesignCell[] {
+  const cells: DesignCell[] = [];
+  d.blocks?.layers.forEach((layer, ly) => {
+    layer.forEach((row, lz) => {
+      [...row].forEach((ch, lx) => {
+        if (ch !== "." && ch !== " ") {
+          cells.push({ lx, ly, lz, material: d.blocks!.palette[ch] });
+        }
+      });
+    });
+  });
+  return cells;
+}
+
+function resolveDesign(sim: Sim, raw: unknown): Entry {
+  const want = String(raw ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const entry = want ? sim.catalog.byName(want) : undefined;
+  if (!entry) throw new Error(`Nothing called "${want}" in the Catalog.`);
+  const live = sim.catalog.current(entry);
+  if (!live || live.kind !== "design") {
+    throw new Error(`"${entry.name}" isn't a Design you can build.`);
+  }
+  return live;
+}
+
+/** A placed block of this material, not the generated terrain that happens to match. */
+function cellMatches(sim: Sim, x: number, y: number, z: number, material: string): boolean {
+  const w = sim.world;
+  if (!w.inBounds(x, y, z) || !sim.edits.has(w.index(x, y, z))) return false;
+  return sim.blocks.name(w.get(x, y, z)) === material;
+}
+
+/** Where a continued build sits: the base whose placed cells match, else on the ground. */
+function resolveBase(
+  sim: Sim,
+  design: Entry,
+  cells: DesignCell[],
+  x: number,
+  z: number,
+  yArg: number | undefined,
+): number {
+  if (yArg !== undefined) return yArg;
+  const anchored = sim.objects.list.find((o) => o.design === design.id && o.x === x && o.z === z);
+  if (anchored) return anchored.y;
+  const top = sim.world.heightAt(x, z);
+  const height = cells.reduce((m, c) => Math.max(m, c.ly), 0);
+  let bestY = top + 1, best = 0;
+  for (let y = top + 1; y >= top - height && y >= 0; y--) {
+    let n = 0;
+    for (const c of cells) if (cellMatches(sim, x + c.lx, y + c.ly, z + c.lz, c.material)) n++;
+    if (n > best) best = n, bestY = y;
+  }
+  return bestY;
+}
+
+/** The Material that grows into this Design, if it was planted rather than grown wild. */
+function planterOf(sim: Sim, design: Entry): string | undefined {
+  const link = sim.catalog.links(design.id, "grows_into", true)
+    .find(({ entry }) => entry.kind === "material");
+  return link?.entry.name;
+}
+
 function plantable(
   sim: Sim,
   agent: Agent,
@@ -690,6 +1084,38 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   let ripe = 0, growing = 0, soonest = Infinity;
   /** Map marks of the plants in view, and what they are. */
   const marks = new Map<string, Set<string>>();
+  const natural: Record<number, string> = {
+    [Block.Grass]: ".",
+    [Block.Dirt]: "d",
+    [Block.Stone]: "#",
+    [Block.Farmland]: ",",
+    [Block.Sand]: ":",
+    [Block.Gravel]: ":",
+    [Block.Clay]: ":",
+  };
+  const taken = new Set("@.,swWd#:~≈f&MvYt+0123456789 ");
+  for (const e of sim.catalog.entries) {
+    if (e.kind === "design" && (e.content as DesignContent).mark) {
+      taken.add((e.content as DesignContent).mark!);
+    }
+  }
+  const builtMarks = new Map<string, string>();
+  const builtSeen = new Map<string, string>();
+  const markFor = (name: string): string => {
+    const hit = builtMarks.get(name);
+    if (hit) return hit;
+    const letters = name.toLowerCase().replace(/[^a-z]/g, "");
+    let mark = "?";
+    for (const ch of letters + "abcdefghijklmnopqrstuvwxyz") {
+      if (!taken.has(ch)) {
+        mark = ch;
+        break;
+      }
+    }
+    taken.add(mark);
+    builtMarks.set(name, mark);
+    return mark;
+  };
 
   for (let z = az - r; z <= az + r; z++) {
     let row = "", hrow = "";
@@ -699,16 +1125,18 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         row += " ", hrow += " ";
         continue;
       }
-      let c = ({
-        [Block.Grass]: ".",
-        [Block.Dirt]: "d",
-        [Block.Stone]: "#",
-        [Block.Farmland]: ",",
-        [Block.Sand]: ":",
-        [Block.Gravel]: ":",
-        [Block.Clay]: ":",
-      } as Record<number, string>)[w.get(x, h, z)] ?? "?";
-      if (w.waterTop[z * w.sizeX + x] >= 0) c = w.waterTop[z * w.sizeX + x] - h > 1 ? "≈" : "~";
+      const block = w.get(x, h, z);
+      let c = natural[block] ?? "?";
+      let ground = c in { ".": 1, "d": 1, "#": 1, ",": 1, ":": 1 };
+      if (w.waterTop[z * w.sizeX + x] >= 0) {
+        c = w.waterTop[z * w.sizeX + x] - h > 1 ? "≈" : "~";
+        ground = false;
+      } else if (!(block in natural)) {
+        const name = sim.blocks.name(block);
+        c = markFor(name);
+        builtSeen.set(name, c);
+        ground = false;
+      }
       const prop = sim.props.at(x, z);
       const info = prop && sim.props.info(prop);
       if (prop && info) {
@@ -716,6 +1144,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         c = young ? "t" : info.mark;
         const names = marks.get(c) ?? new Set();
         marks.set(c, names.add(young ? `young ${info.entry.name}` : info.entry.name));
+        ground = false;
       }
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
@@ -723,12 +1152,20 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         c = g >= 1 ? "W" : g >= 0.4 ? "w" : "s";
         if (g >= 1) ripe++;
         else growing++, soonest = Math.min(soonest, (1 - g) * crop.grow);
+        ground = false;
       }
       if (sim.schools.some((f) => f.count > 0 && Math.floor(f.x) === x && Math.floor(f.z) === z)) {
         c = "f";
+        ground = false;
       }
       const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
-      if (animal) c = SPECIES[animal.species].mark;
+      if (animal) c = SPECIES[animal.species].mark, ground = false;
+      const builtHere = ground ? sim.objects.at(x, z) : [];
+      if (builtHere.length) {
+        const e = sim.catalog.get(builtHere[0].design);
+        const name = e?.name ?? "object";
+        c = (e?.content as DesignContent | undefined)?.mark ?? markFor(name);
+      }
       const other = others.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (other) c = others.indexOf(other) < 9 ? String(others.indexOf(other) + 1) : "+";
       if (x === ax && z === az) c = "@";
@@ -737,6 +1174,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     tiles.push(`${String(z).padStart(4)} ${row}`);
     heights.push(hrow);
   }
+  const objects = sim.objects.list.filter((o) =>
+    Math.max(Math.abs(o.x - ax), Math.abs(o.z - az)) <= r
+  );
 
   const lines = [
     `${agent.name} — Day ${sim.day()}, ${clock(t)} (${partOfDay(t)}).`,
@@ -754,6 +1194,22 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         `Plants: ${
           [...marks].sort().map(([m, names]) => `${m} ${[...names].sort().join("/")}`).join("  ")
         } (trees and rocks block walking)`,
+      ]
+      : []),
+    ...(builtSeen.size
+      ? [`Built: ${[...builtSeen].map(([name, m]) => `${m} ${name}`).join("  ")}`]
+      : []),
+    ...(objects.length
+      ? [
+        `Objects: ${
+          objects.map((o) => {
+            const e = sim.catalog.get(o.design);
+            const name = e?.name ?? "object";
+            const mark = (e?.content as DesignContent | undefined)?.mark ?? builtMarks.get(name) ??
+              name[0];
+            return `${mark} ${name} at x=${o.x} y=${o.y} z=${o.z}`;
+          }).join("  ")
+        } (a solid Design, hardness 3 or more, blocks walking)`,
       ]
       : []),
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),

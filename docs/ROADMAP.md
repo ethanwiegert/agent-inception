@@ -39,6 +39,9 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
+- **M6 — built-ins become entries.** Nature's content is Catalog data; playtest
+  [0002](playtests/0002-m6-built-ins.md). Hardware GPU remeasure is deferred to Ethan's review (no
+  number recorded; the gate VM had no real GPU).
 
 ## V1
 
@@ -94,7 +97,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries (in progress)
+### M6 — built-ins become entries
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -183,28 +186,54 @@ Visual pass (seed 7, daytime), closed without editing `nature.ts`:
   the shoulders and a stride frame missed the walker, so those two were not judged from a picture.
 
 Playtest [0002](playtests/0002-m6-built-ins.md) covers the bridge sessions, the fixes, check, and
-test. Still open:
-
-- **TODO: hardware GPU remeasure.** Run `deno task shot "seed=7&time=0.62&speed=0"` on a machine
-  with a real GPU and record the milliseconds. The gate VM only got SwiftShader, then lost the
-  device, so no GPU time was measured. The older ~2.9 ms figure is not this gate's number. M6 stays
-  open until that shot is in the playtest report.
+test. M6 is done. Hardware GPU remeasure is deferred to Ethan's review: run
+`deno task shot "seed=7&time=0.62&speed=0"` on a machine with a real GPU and record the
+milliseconds. The gate VM only got SwiftShader, then lost the device, so no GPU time was measured.
+The older ~2.9 ms figure is not that shot.
 
 ### M7 — building, crafting, physics phase 1
 
-Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in the M7 grill:
+Groundwork is in (`sim/jobs.ts`, `reach` with `y`).
 
-- `place_block` for any placeable Material in the inventory, optional `y`; needs a solid neighbour,
-  refuses cells a villager stands in and solid-prop tiles. `break_block` with optional `y`, drops
-  from engine Relations.
-- `build` a Design (Blocks + Parts) at x, z, optional base y: checks the inventory up front, places
-  layer by layer (≤ 48 cells per call to stay under MCP timeouts), reports skipped cells.
-- `craft` through _made from_ Relations (log → planks, stone → cobble, clay → brick or tiles, wheat
-  → thatch as the built-in examples).
-- `interact` at x, z: chop a grown tree (logs + sapling, axe swing), dig up a sapling, break a rock,
-  pick flowers/reeds/lily pads, shear sheep, milk cows, collect eggs when ready.
-- Physics 1: collision shapes for Parts; static Objects that villagers walk around and on.
-- `look` legend for built Materials and Objects.
+Grill outcome (2026-10-28), Ethan's locks:
+
+- **Extend** `place_block` and `break_block`. No new place or break tools. Any placeable Material,
+  optional `y`, needs a solid neighbour; refuse a cell a villager stands in and a solid-prop tile.
+  `break_block` takes optional `y` and gives drops from Relations.
+- **`craft` is counted recipes**, not 1→1 only. `made_from` carries `count` (how many you get: 1 log
+  → 4 planks) and optional `takes` (how many you spend: 4 wheat → 1 thatch). `count` on the tool is
+  how many times to run that recipe (4 logs → 16 planks).
+- **`break_block` refuses props.** Trees, rocks, flowers, reeds, lily pads, and shearing, milking
+  and eggs go through `interact`, which also digs up a sapling and chops a grown tree.
+- **Physics 1 is solid Designs only.** A Design is solid when a part's Material has hardness ≥ 3
+  (the same line as `PlantInfo.solid`). Those Objects get part collision shapes (box, sphere,
+  cylinder, cone, including turn and tilt) and bodies walk around them and stand on them. Softer
+  parts and non-solid Designs do not collide yet.
+
+Decided in the build:
+
+- One craft consumes every `made_from` ingredient of the product (`takes`, default 1) and gives
+  `count` of it. Nature's recipes: 1 log → 4 planks, 1 stone → 1 cobble, 1 clay → 1 brick or 1
+  tiles, 4 wheat → 1 thatch. Picked plants drop their petals, reed or lily leaf.
+- `build` checks the whole remainder is in the inventory, then places at most 48 new block cells.
+  Each cell costs one of its Material; each part costs one of its Material, spent when the blocks
+  are finished. A call says which cells it skipped and the base `y` to pass to continue. The built
+  Design is an Object either way; only the solid ones stamp collision.
+- `look` keeps the old marks for terrain and plants. Other surface Materials get a Built legend, and
+  Objects in view are listed by name and origin. Natural Materials (stone, dirt, …) keep their
+  existing marks.
+- Part shapes are rasterized into the cells they cover. A column is blocked when a body would stand
+  inside one, and standable when the top of a filled cell has two empty cells above it, same as
+  voxels. Save version stays 2; `objects` is optional on older saves.
+
+Left for the gate:
+
+- Playtest (builder, crafter, adversary), report, and screenshots.
+- Drawing part Objects. Placed blocks already mesh with the terrain; a bench's plank top and a
+  parts-only pillar do not draw yet.
+- Shearing does not shrink the wool part yet.
+- No tool removes an Object, and breaking the blocks under one leaves its parts.
+- Hardware GPU remeasure stays on Ethan's machine.
 
 ### M8 — character and land
 
