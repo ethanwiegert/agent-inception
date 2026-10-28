@@ -226,14 +226,23 @@ Decided in the build:
   inside one, and standable when the top of a filled cell has two empty cells above it, same as
   voxels. Save version stays 2; `objects` is optional on older saves.
 
+Decided while closing the engine leftovers (the gate is still open):
+
+- Part Objects are drawn. The page mirrors the built list and meshes each Design's parts, with the
+  instance origin at the tile center on the design's base (where (0.5, 0, 0.5) sits). Placed blocks
+  stay voxels. A blocks-only Design has nothing extra to draw.
+- A sheep's product parts draw at full size while its wool is ready, and at 0.78 after `interact`
+  shears it, until `readyAt`. That flag already rides on the animal stream.
+- `interact` on an Object's origin tile, when no prop or collectable animal is there, takes it down:
+  matching block cells are cleared, and those Materials plus one of each part Material come back.
+  `break_block` still refuses props and does not remove an Object. Optional `y` picks which Object
+  when several share the tile.
+
 Left for the gate:
 
-- Playtest (builder, crafter, adversary), report, and screenshots.
-- Drawing part Objects. Placed blocks already mesh with the terrain; a bench's plank top and a
-  parts-only pillar do not draw yet.
-- Shearing does not shrink the wool part yet.
-- No tool removes an Object, and breaking the blocks under one leaves its parts.
-- Hardware GPU remeasure stays on Ethan's machine.
+- Playtest (builder, crafter, adversary) and screenshots. Not run here: this VM has no WebGPU device
+  and no playtest agents. See [0003](playtests/0003-m7-building.md). Do not treat M7 as done.
+- Hardware GPU remeasure stays on Ethan's machine. No GPU time is recorded.
 
 ### M8 — character and land
 

@@ -51,6 +51,19 @@ export class Objects {
   restore(catalog: Catalog, rows: [number, number, number, number][]) {
     this.list = rows.map(([design, x, y, z], i) => ({ id: i + 1, design, x, y, z }));
     this.next = this.list.length + 1;
+    this.rebuild(catalog);
+  }
+
+  /** Take an Object out of the world and rebuild whatever collision remains. */
+  remove(id: number, catalog: Catalog): GameObject | undefined {
+    const i = this.list.findIndex((o) => o.id === id);
+    if (i < 0) return;
+    const [gone] = this.list.splice(i, 1);
+    this.rebuild(catalog);
+    return gone;
+  }
+
+  private rebuild(catalog: Catalog) {
     this.world.clearObjectCells();
     for (const o of this.list) this.stamp(catalog, o);
     this.version++;

@@ -331,3 +331,40 @@ Deno.test("only solid designs block walking, and that survives a save", () => {
   assert(loaded.world.occupies(x, y + 1, z));
   assertEquals(loaded.world.floorBelow(x + 2, z, y + 2), y + 1);
 });
+
+Deno.test("interact takes down a built object; break_block still refuses props only", () => {
+  const { sim, fern, x, z, y } = patch();
+  fern.inventory.stone = 3;
+  fern.inventory.planks = 1;
+  ok(run(sim, "a", "build", { x, z, design: "stone bench" }));
+  // Digging a bench block does not remove the Object.
+  assert(ok(run(sim, "a", "break_block", { x, z, y: y + 1 })).includes("stone"));
+  assertEquals(sim.objects.list.length, 1);
+  const down = ok(run(sim, "a", "interact", { x, z }));
+  assert(down.includes("take down the stone bench"), down);
+  assert(down.includes("1 stone"), down);
+  assert(down.includes("1 planks"), down);
+  assertEquals(sim.objects.list.length, 0);
+  assertEquals(sim.world.get(x + 2, y + 1, z), Block.Air);
+
+  fern.inventory.stone = 1;
+  sim.catalog.add(
+    {
+      kind: "design",
+      name: "pillar",
+      content: {
+        parts: [{ part: "box", material: "stone", at: [0.5, 1.25, 0.5], size: [0.6, 2.5, 0.6] }],
+      },
+    },
+    "Fern",
+    sim.tick,
+  );
+  ok(run(sim, "a", "build", { x: x + 1, z, design: "pillar" }));
+  err(run(sim, "a", "walk_to", { x: x + 1, z }), "can't find a way");
+  const cleared = ok(run(sim, "a", "interact", { x: x + 1, z }));
+  assert(cleared.includes("take down the pillar"), cleared);
+  assert(cleared.includes("1 stone"), cleared);
+  assert(!sim.world.occupies(x + 1, y + 1, z));
+  ok(run(sim, "a", "walk_to", { x: x + 1, z }));
+  assertEquals(Sim.load(sim.save(0)).objects.list.length, 0);
+});

@@ -247,6 +247,8 @@ function draw(now: number) {
     blocks: client.blocks,
     catalog: client.catalog,
     props: client.props,
+    objects: client.objects,
+    objectsVersion: client.objectsVersion,
     tick: client.tick,
     day: client.day,
     weather: { clouds: client.clouds },

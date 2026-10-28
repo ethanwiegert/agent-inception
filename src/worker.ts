@@ -29,6 +29,7 @@ let lastSave = 0;
 let sentAgentsVersion = -1;
 let sentCropsVersion = -1;
 let sentPropsVersion = -1;
+let sentObjectsVersion = -1;
 let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
@@ -99,6 +100,7 @@ function start(caughtUp: number) {
   s.pendingEdits = [];
   sentAgentsVersion = sentCropsVersion = -1;
   sentPropsVersion = s.props.version;
+  sentObjectsVersion = s.objects.version;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -108,6 +110,9 @@ function start(caughtUp: number) {
     edits: Int32Array.from(edits),
     caughtUp,
     props: s.props.diff(),
+    objects: s.objects.list.map((o) =>
+      [o.design, o.x, o.y, o.z] as [number, number, number, number]
+    ),
     catalog: s.catalog.save(),
   });
   lastStep = performance.now();
@@ -193,6 +198,10 @@ function send(now: number) {
     clouds: s.clouds(),
     props: s.props.version !== sentPropsVersion
       ? (sentPropsVersion = s.props.version, s.props.diff())
+      : undefined,
+    objects: s.objects.version !== sentObjectsVersion
+      ? (sentObjectsVersion = s.objects.version,
+        s.objects.list.map((o) => [o.design, o.x, o.y, o.z] as [number, number, number, number]))
       : undefined,
     agents,
     animals,

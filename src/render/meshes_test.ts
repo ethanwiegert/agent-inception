@@ -1,7 +1,10 @@
 import { deepStrictEqual as assertEquals, ok } from "node:assert/strict";
 import { identity, mat4, rotateY, translate } from "../math.ts";
-import { Catalog } from "../sim/catalog.ts";
-import { FaunaModels } from "./fauna.ts";
+import { Catalog, type DesignContent } from "../sim/catalog.ts";
+import { ANIMAL_READY } from "../sim/protocol.ts";
+import { meshDesign } from "./designs.ts";
+import { buildAnimals, FaunaModels, SHORN } from "./fauna.ts";
+import { buildObjects, FloraModels } from "./flora.ts";
 import {
   INSTANCE_FLOATS,
   InstanceBatch,
@@ -126,4 +129,42 @@ Deno.test("a replaced animal design replaces the cached rig", () => {
   assertEquals(after.map((p) => p.role), ["body"]);
   ok(after[0].id !== before[0].id);
   assertEquals(fauna.pieces(catalog, 0), after);
+});
+
+Deno.test("sheared wool draws at 0.78 until it grows back", () => {
+  const catalog = Catalog.create();
+  const fauna = new FaunaModels(new MeshLibrary());
+  const wool = fauna.pieces(catalog, 0).find((p) => p.role === "product");
+  ok(wool, "sheep has a product part");
+  const shorn = new InstanceBatch();
+  const full = new InstanceBatch();
+  const body = { id: 1, species: 0, x: 3, y: 1, z: 4, yaw: 0, anim: 0, stride: 0, flags: 0 };
+  buildAnimals([body], 0, shorn, fauna, catalog);
+  buildAnimals([{ ...body, flags: ANIMAL_READY }], 0, full, fauna, catalog);
+  const scale = (batch: InstanceBatch) => {
+    batch.sort(64);
+    const o = batch.first[wool!.id] * INSTANCE_FLOATS;
+    return Math.hypot(batch.sorted[o], batch.sorted[o + 1], batch.sorted[o + 2]);
+  };
+  assertEquals(Math.round(scale(shorn) * 100) / 100, SHORN);
+  assertEquals(Math.round(scale(full) * 100) / 100, 1);
+});
+
+Deno.test("a built design's parts are drawn on its tile", () => {
+  const catalog = Catalog.create();
+  const bench = catalog.byName("stone bench")!;
+  const mesh = new MeshBuilder();
+  meshDesign(mesh, catalog, bench.content as DesignContent, { role: null });
+  let top = -Infinity;
+  for (let i = 1; i < mesh.positions.length; i += 3) top = Math.max(top, mesh.positions[i]);
+  ok(top > 1, "the plank top is in the mesh");
+
+  const models = new FloraModels(new MeshLibrary());
+  const batch = new InstanceBatch();
+  buildObjects([{ design: bench.id, x: 10, y: 4, z: 20 }], catalog, batch, models);
+  assertEquals(batch.count, 1);
+  batch.sort(8);
+  const id = models.template(catalog, bench.id);
+  const o = batch.first[id] * INSTANCE_FLOATS;
+  assertEquals([batch.sorted[o + 12], batch.sorted[o + 13], batch.sorted[o + 14]], [10.5, 4, 20.5]);
 });

@@ -75,6 +75,28 @@ export function buildProps(
   }
 }
 
+/**
+ * Built Designs, drawn from their parts. The instance origin is the tile center on the design's
+ * base, which is where `meshDesign` puts (0.5, 0, 0.5). Blocks of the same Design are voxels.
+ */
+export function buildObjects(
+  objects: { design: number; x: number; y: number; z: number }[],
+  catalog: Catalog,
+  out: InstanceBatch,
+  models: FloraModels,
+) {
+  out.clear();
+  for (const o of objects) {
+    const e = catalog.get(o.design);
+    if (e?.kind !== "design" || !(e.content as DesignContent).parts.length) continue;
+    const tid = models.template(catalog, o.design);
+    if (tid < 0) continue;
+    identity(m);
+    translate(m, o.x + 0.5, o.y, o.z + 0.5);
+    out.add(tid, m, 1, 1, 1, 1);
+  }
+}
+
 /** Whether any prop is still growing (so the batch needs refreshing now and then). */
 export function anyGrowing(props: Props, tick: number): boolean {
   for (const p of props.map.values()) if (props.growth(p, tick) < 1) return true;

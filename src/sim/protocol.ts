@@ -47,6 +47,8 @@ export interface ReadyMessage {
   caughtUp: number;
   /** Props that differ from generation (the page regenerates the rest from the seed). */
   props: PropDiff;
+  /** Built Designs: [design, x, y, z]. */
+  objects: [number, number, number, number][];
   catalog: CatalogSave;
 }
 
@@ -65,6 +67,8 @@ export interface TickMessage {
   edits: Int32Array<ArrayBuffer>;
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
+  /** Built Designs, sent when one is added or taken down: [design, x, y, z]. */
+  objects?: [number, number, number, number][];
   catalog?: CatalogDelta;
   /** Sent when crops change and once a second while they grow. */
   crops?: Float32Array<ArrayBuffer>;

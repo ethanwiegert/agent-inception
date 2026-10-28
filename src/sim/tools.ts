@@ -17,6 +17,7 @@ import {
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, MaterialContent, RelationContent } from "./catalog.ts";
+import type { GameObject } from "./objects.ts";
 import { habitatRefusal, plantInfo } from "./props.ts";
 import {
   type Agent,
@@ -199,10 +200,16 @@ export const TOOL_DEFS: ToolDef[] = [
     name: "interact",
     description: "Use whatever is at (x, z). Chop a grown tree (logs and a sapling), dig up a " +
       "sapling, break a rock, or pick flowers, reeds and lily pads. Shear a sheep, milk a cow, or " +
-      "collect an egg when that animal is ready.",
+      "collect an egg when that animal is ready. On a built Object's origin tile, with nothing " +
+      "else there, take it down and get its blocks and parts back. Optional y picks which Object " +
+      "when several share the tile.",
     inputSchema: {
       type: "object",
-      properties: { x: int("Tile x."), z: int("Tile z.") },
+      properties: {
+        x: int("Tile x."),
+        z: int("Tile z."),
+        y: int("Object base height, if several were built on this tile."),
+      },
       required: ["x", "z"],
     },
   },
@@ -657,11 +664,13 @@ const HANDLERS: Record<string, Handler> = {
 
   interact(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
+    const yArg = args.y === undefined ? undefined : num(args.y, "y");
     if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
     return (function* () {
-      yield* reach(sim, agent, x, z);
+      yield* reach(sim, agent, x, z, yArg);
       const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       const prop = sim.props.at(x, z);
+      const object = builtAt(sim, x, z, yArg);
       if (animal) {
         const def = SPECIES[animal.species];
         const body = sim.catalog.byName(def.name);
@@ -687,7 +696,18 @@ const HANDLERS: Record<string, Handler> = {
             : "nothing";
           return `You collect ${gave} from the ${def.name}. ${inventoryText(agent)}`;
         }
-        if (!prop) throw new Error(`A ${def.name} is here, and it has nothing to collect.`);
+        if (!prop && !object) {
+          throw new Error(`A ${def.name} is here, and it has nothing to collect.`);
+        }
+      }
+      if (!prop && object) {
+        const name = sim.catalog.get(object.design)?.name ?? "object";
+        yield* work(agent, Anim.Build, 24);
+        const still = sim.objects.list.find((o) => o.id === object.id);
+        if (!still) throw new Error("It's already gone.");
+        const got = takeDown(sim, agent, still);
+        const gave = got.length ? got.map(([item, n]) => `${n} ${item}`).join(", ") : "nothing";
+        return `You take down the ${name} and get ${gave}. ${inventoryText(agent)}`;
       }
       if (!prop) throw new Error(`Nothing to interact with at (${x}, ${z}).`);
       const info = sim.props.info(prop);
@@ -971,6 +991,39 @@ function planterOf(sim: Sim, design: Entry): string | undefined {
   const link = sim.catalog.links(design.id, "grows_into", true)
     .find(({ entry }) => entry.kind === "material");
   return link?.entry.name;
+}
+
+/** The built Object whose origin is this tile, highest base first. `y` picks one. */
+function builtAt(sim: Sim, x: number, z: number, y?: number): GameObject | undefined {
+  const here = sim.objects.at(x, z).filter((o) => y === undefined || o.y === y);
+  return here.sort((a, b) => b.y - a.y)[0];
+}
+
+/**
+ * Remove a built Object: clear the block cells it still occupies, hand those Materials and its
+ * part Materials back, and drop its collision.
+ */
+function takeDown(sim: Sim, agent: Agent, object: GameObject): [string, number][] {
+  const entry = sim.catalog.get(object.design);
+  const content = entry?.kind === "design" ? entry.content as DesignContent : null;
+  const got = new Map<string, number>();
+  const add = (name: string, n: number) => {
+    const live = sim.produce(name);
+    if (!live) return;
+    got.set(live, (got.get(live) ?? 0) + n);
+  };
+  if (content) {
+    for (const c of designCells(content)) {
+      const wx = object.x + c.lx, wy = object.y + c.ly, wz = object.z + c.lz;
+      if (!cellMatches(sim, wx, wy, wz, c.material)) continue;
+      sim.setBlock(wx, wy, wz, Block.Air);
+      add(c.material, 1);
+    }
+    for (const p of content.parts) add(p.material, 1);
+  }
+  sim.objects.remove(object.id, sim.catalog);
+  for (const [item, n] of got) give(agent, item, n);
+  return [...got];
 }
 
 function plantable(

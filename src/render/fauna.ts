@@ -90,6 +90,9 @@ export class FaunaModels {
 
 const root = mat4(), m = mat4();
 
+/** A collected product (a sheep's wool) stays this big until it is ready again. */
+export const SHORN = 0.78;
+
 export function buildAnimals(
   animals: AnimalView[],
   time: number,
@@ -132,8 +135,8 @@ export function buildAnimals(
           }
           break;
         case "product": {
-          // Sheared sheep look trimmed until the wool grows back.
-          const k = a.flags & ANIMAL_READY ? 1 : 0.78;
+          // Sheared sheep look trimmed until the wool grows back. Ready wool is full size.
+          const k = a.flags & ANIMAL_READY ? 1 : SHORN;
           scale(m, k, k, k);
           break;
         }

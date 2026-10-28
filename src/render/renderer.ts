@@ -9,7 +9,7 @@ import type { AgentView, AnimalView } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels } from "./fauna.ts";
-import { anyGrowing, buildProps, FloraModels } from "./flora.ts";
+import { anyGrowing, buildObjects, buildProps, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
@@ -44,6 +44,9 @@ export interface SceneState {
   /** What everything looks like: Materials and Designs. */
   catalog: Catalog;
   props: Props | null;
+  /** Built Designs, drawn from their parts. */
+  objects: { design: number; x: number; y: number; z: number }[];
+  objectsVersion: number;
   tick: number;
   day: number;
   weather: Weather;
@@ -83,7 +86,9 @@ export class Renderer {
   private fishModels: number[];
   private flora = new ModelBatch(new InstanceBatch());
   private groundCover = new ModelBatch(new InstanceBatch(), 70);
+  private built = new ModelBatch(new InstanceBatch());
   private floraVersion = -1;
+  private objectsVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
   private targets: {
@@ -190,6 +195,7 @@ export class Renderer {
     buildFish(scene.schools, this.world, time, this.bodies.instances, this.fishModels);
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);
+    this.updateObjects(scene);
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -228,7 +234,10 @@ export class Renderer {
     if (!this.debug.has("shadow")) {
       this.terrain.drawShadow(shadowPass);
       this.models.drawShadow(shadowPass, this.bodies);
-      if (!this.debug.has("props")) this.models.drawShadow(shadowPass, this.flora);
+      if (!this.debug.has("props")) {
+        this.models.drawShadow(shadowPass, this.flora);
+        this.models.drawShadow(shadowPass, this.built);
+      }
     }
     shadowPass.end();
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
@@ -254,6 +263,7 @@ export class Renderer {
     if (!skip.has("bodies")) this.models.draw(main, this.bodies);
     if (!skip.has("props")) {
       this.models.draw(main, this.flora);
+      this.models.draw(main, this.built);
       this.models.draw(main, this.groundCover);
     }
     this.crops.draw(main);
@@ -301,6 +311,14 @@ export class Renderer {
     );
     this.models.upload(flora);
     this.models.upload(groundCover);
+  }
+
+  /** Rebuild part Objects when one is built or taken down. */
+  private updateObjects(scene: SceneState) {
+    if (scene.objectsVersion === this.objectsVersion) return;
+    this.objectsVersion = scene.objectsVersion;
+    buildObjects(scene.objects, scene.catalog, this.built.instances, this.floraModels);
+    this.models.upload(this.built);
   }
 
   /** Orthographic sun/moon shadow volume around the view target, snapped to texels to stop shimmer. */

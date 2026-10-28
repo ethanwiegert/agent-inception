@@ -16,7 +16,8 @@ How to live here:
    a plot, plant it, and keep track of where it is.
 3. While crops grow, do something worth watching: tend nearby ground, build a low border with
    `break_block`/`place_block` (any block you hold, or `craft` planks and thatch), `build` a small
-   Design, `interact` with a tree, rock, flower or animal, `fish` from a nearby bank, or `wait`.
+   Design, `interact` with a tree, rock, flower, animal, or a building's origin to take it down,
+   `fish` from a nearby bank, or `wait`.
 4. Narrate with `say` now and then — a short, in-character line, not a status report. Don't say
    something after every action.
 5. Harvest ripe wheat (W on the map) and replant with the seeds you get back.

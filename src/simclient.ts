@@ -58,6 +58,9 @@ export class SimClient {
   private registry = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
+  /** Built Designs, so their parts can be drawn. */
+  objects: { design: number; x: number; y: number; z: number }[] = [];
+  objectsVersion = 0;
   /** Mirror of the sim's Catalog. */
   catalog = new Catalog();
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
@@ -161,6 +164,8 @@ export class SimClient {
       // From the pristine terrain, like the sim.
       this.props = new Props(world, msg.seed, this.catalog);
       this.props.applyDiff(msg.props);
+      this.objects = msg.objects.map(([design, x, y, z]) => ({ design, x, y, z }));
+      this.objectsVersion++;
       applyEdits(world, msg.edits);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
@@ -193,6 +198,10 @@ export class SimClient {
       this.catalog.mirror(d.entries, d.status ?? [], d.proposals);
     }
     if (msg.props && this.props) this.props.reset(msg.props);
+    if (msg.objects) {
+      this.objects = msg.objects.map(([design, x, y, z]) => ({ design, x, y, z }));
+      this.objectsVersion++;
+    }
     if (msg.crops) {
       this.crops = msg.crops;
       this.cropsVersion++;
