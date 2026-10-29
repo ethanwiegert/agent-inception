@@ -205,7 +205,6 @@ export class Renderer {
       scene.agents,
       time,
       this.bodies.instances,
-      camera.yaw,
       this.bodyModels,
       scene.catalog,
     );

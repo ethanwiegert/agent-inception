@@ -23,7 +23,7 @@ import {
 import { octile } from "./path.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
-import { solid } from "./world.ts";
+import { Block, solid } from "./world.ts";
 
 /**
  * Building: lay blocks one column at a time or a whole area, dig them back out, and build a
@@ -42,6 +42,8 @@ export const MAX_CELLS = 48;
 const PLACE_TICKS = 20, STACK_TICKS = 12, BUILD_TICKS = 12;
 /** A build call stops starting new blocks after this long, to answer within about a minute. */
 const BUILD_BUDGET = 50 * TICK_HZ;
+/** Terraforming: an 8 × 8 area, 64 blocks a call, earthwork pace (about 3× place_block). */
+const LAND_SIDE = 8, LAND_CELLS = 64, LAND_TICKS = 7;
 
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -90,6 +92,30 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
         y: int("Optional height of the lowest block to dig, instead of the top of each column."),
       },
       required: ["x", "z"],
+    },
+  },
+  {
+    name: "terraform",
+    description: "Reshape the land over an area of up to 8 × 8 columns: `raise` or `lower` " +
+      "every column by `amount` blocks (1-4), or `flatten` it to one `height` (your own ground " +
+      "level if you leave it out). Lowering gives you what it digs; raising spends dirt (or the " +
+      "`block` you name) from your inventory; flatten digs the high columns first, then fills " +
+      "the low ones. Grass stays on top. Earthwork is quick, about 3× place_block, and moves " +
+      `at most ${LAND_CELLS} blocks a call: call flatten again with the same area and height ` +
+      "to carry on. Trees, rocks, crops and Objects are left alone.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["raise", "lower", "flatten"] },
+        x: int("West edge of the area."),
+        z: int("North edge of the area."),
+        width: { ...int("Columns along x, default 1."), minimum: 1, maximum: LAND_SIDE },
+        depth: { ...int("Columns along z, default 1."), minimum: 1, maximum: LAND_SIDE },
+        amount: layers("Blocks to raise or lower each column"),
+        height: int("flatten: the ground level to shape the area to (look's 'ground level')."),
+        block: { type: "string", description: 'What to raise with, default "dirt".' },
+      },
+      required: ["action", "x", "z"],
     },
   },
   {
@@ -221,6 +247,158 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       const what = dug ? `Dug ${list(dugWhat)}${where(cols)}` : `Dug nothing${where(cols)}`;
       return `${what}, got ${got.size ? list(got) : "nothing"}.` + skippedText(skipped) +
         ` ${inventoryText(agent)}`;
+    })();
+  },
+
+  terraform(sim, agent, args) {
+    const action = String(args.action ?? "").trim().toLowerCase();
+    if (!["raise", "lower", "flatten"].includes(action)) {
+      throw new Error('action is "raise", "lower" or "flatten".');
+    }
+    const cols = columns(args, LAND_SIDE * LAND_SIDE, LAND_SIDE);
+    const w = sim.world;
+    if (cols.every(([x, z]) => w.heightAt(x, z) < 0)) {
+      throw new Error(`(${cols[0][0]}, ${cols[0][1]}) is outside the world.`);
+    }
+    const amount = action === "flatten" ? 0 : count(args.amount, "amount");
+    if (action === "flatten" && args.amount !== undefined) {
+      throw new Error("flatten takes a height, not an amount.");
+    }
+    const ax = Math.floor(agent.x), az = Math.floor(agent.z);
+    const level = args.height === undefined ? w.heightAt(ax, az) : num(args.height, "height");
+    if (action === "flatten" && (level < 2 || level > w.sizeY - 4)) {
+      throw new Error(`height is 2-${w.sizeY - 4}.`);
+    }
+    const fill = action === "lower" ? null : heldBlock(sim, agent, args.block ?? "dirt", true);
+    // Where each column should end up; for raise and lower, fixed now.
+    const target = new Map<number, number>();
+    for (const [x, z] of cols) {
+      const top = w.heightAt(x, z);
+      if (top < 0) continue;
+      target.set(
+        z * w.sizeX + x,
+        action === "flatten" ? level : top + (action === "raise" ? amount : -amount),
+      );
+    }
+    const todo = () => {
+      let n = 0;
+      for (const [key, t] of target) {
+        n += Math.abs(t - w.heightAt(key % w.sizeX, Math.floor(key / w.sizeX)));
+      }
+      return n;
+    };
+    const total = todo();
+    if (action !== "flatten" && total > LAND_CELLS) {
+      throw new Error(
+        `That's ${total} blocks; at most ${LAND_CELLS} a call. Use a smaller area, or flatten ` +
+          "to a height (it carries on over several calls).",
+      );
+    }
+    if (action === "raise" && (agent.inventory[fill!.name] ?? 0) < total) {
+      throw new Error(
+        `Raising that takes ${total} ${fill!.name}; you have ${
+          agent.inventory[fill!.name] ?? 0
+        }. ` +
+          "Dig some (lower or break_block) or name another block.",
+      );
+    }
+    if (!total) {
+      return `The ground there is already ${action === "flatten" ? `at ${level}` : "done"}.`;
+    }
+    const inArea = (x: number, z: number) => target.has(z * w.sizeX + x);
+    const dugAt = new Set<number>();
+    const inPit = (x: number, z: number) => dugAt.has(z * w.sizeX + x);
+    return (function* () {
+      let moved = 0, ranOut = false;
+      const got = new Map<string, number>();
+      const skipped: string[] = [];
+      const left = () => moved < LAND_CELLS;
+      // Dig first (the high columns, inside-out so the digger ends on the rim), then fill.
+      for (const [x, z] of digOrder(cols)) {
+        const t = target.get(z * w.sizeX + x);
+        if (t === undefined || w.heightAt(x, z) <= t) continue;
+        if (sim.crops.has(z * w.sizeX + x)) {
+          skipped.push(`(${x},${z}) a crop is growing`);
+          continue;
+        }
+        while (left() && w.heightAt(x, z) > t) {
+          const y = w.heightAt(x, z);
+          const why = digRefusal(sim, x, y, z);
+          if (why) {
+            skipped.push(`(${x},${y},${z}) ${why}`);
+            break;
+          }
+          try {
+            yield* reach(sim, agent, x, z, y, inPit);
+          } catch {
+            skipped.push(`(${x},${y},${z}) out of reach`);
+            break;
+          }
+          const b = w.get(x, y, z);
+          const entry = sim.catalog.get(sim.blocks.get(b)?.entry ?? 0);
+          const hardness = (entry?.content as { hardness?: number } | undefined)?.hardness ?? 1;
+          yield* work(agent, Anim.Build, Math.round(LAND_TICKS + hardness));
+          if (digRefusal(sim, x, y, z) || w.get(x, y, z) !== b) continue;
+          const name = sim.blocks.name(b);
+          sim.setBlock(x, y, z, 0);
+          dugAt.add(z * w.sizeX + x);
+          // The turf moves down with the ground.
+          if (b === Block.Grass && w.get(x, y - 1, z) === Block.Dirt) sim.setBlock(x, y - 1, z, b);
+          for (const [item, n] of entry ? sim.drops(entry) : []) {
+            give(agent, item, n);
+            got.set(item, (got.get(item) ?? 0) + n);
+          }
+          sim.fire("broken", agent, x, y, z, name);
+          moved++;
+        }
+      }
+      for (const [x, z] of cols) {
+        const t = target.get(z * w.sizeX + x);
+        if (!fill || t === undefined || w.heightAt(x, z) >= t || ranOut || !left()) continue;
+        if (sim.crops.has(z * w.sizeX + x)) {
+          skipped.push(`(${x},${z}) a crop is growing`);
+          continue;
+        }
+        while (left() && w.heightAt(x, z) < t) {
+          if (!agent.inventory[fill.name]) {
+            ranOut = true;
+            break;
+          }
+          const y = w.heightAt(x, z) + 1;
+          const why = placeRefusal(sim, agent, x, y, z, false);
+          if (why) {
+            skipped.push(`(${x},${y},${z}) ${why}`);
+            break;
+          }
+          try {
+            yield* reach(sim, agent, x, z, y, inArea);
+          } catch {
+            skipped.push(`(${x},${y},${z}) out of reach`);
+            break;
+          }
+          yield* work(agent, Anim.Build, LAND_TICKS);
+          if (placeRefusal(sim, agent, x, y, z, false)) continue;
+          const below = w.get(x, y - 1, z);
+          agent.inventory[fill.name]--;
+          // The turf moves up: grass stays on top of a raised meadow.
+          if (fill.id === Block.Dirt && below === Block.Grass) {
+            sim.setBlock(x, y - 1, z, Block.Dirt);
+            sim.setBlock(x, y, z, Block.Grass);
+          } else sim.setBlock(x, y, z, fill.id);
+          sim.fire("placed", agent, x, y, z, fill.name);
+          moved++;
+        }
+      }
+      const rest = todo();
+      const list = (m: Map<string, number>) => [...m].map(([k, n]) => `${n} ${k}`).join(", ");
+      let text = `Moved ${moved} block${moved === 1 ? "" : "s"} of earth${where(cols)}` +
+        (got.size ? `, got ${list(got)}` : "") + ".";
+      if (rest && action === "flatten" && !ranOut && !left()) {
+        text +=
+          ` ${rest} to go: call terraform flatten again with the same area and height=${level}.`;
+      } else if (rest) text += ` ${rest} left undone.`;
+      if (ranOut) text += ` Ran out of ${fill!.name}.`;
+      return text + skippedText(skipped) + ` ${inventoryText(agent)}`;
     })();
   },
 
@@ -488,8 +666,13 @@ function quarterTurns(value: unknown): number {
 
 // ---------------------------------------------------------------- helpers
 
-/** The block Material named `value` that `agent` holds, with its block id. */
-function heldBlock(sim: Sim, agent: Agent, value: unknown): { id: number; name: string } {
+/** The block Material named `value` that `agent` holds (or may, with `emptyOk`), and its id. */
+function heldBlock(
+  sim: Sim,
+  agent: Agent,
+  value: unknown,
+  emptyOk = false,
+): { id: number; name: string } {
   const want = String(value ?? "").trim().toLowerCase().replace(/_/g, " ");
   if (!want) throw new Error('Say which block to place, e.g. block: "stone".');
   const def = sim.blocks.byName(want);
@@ -500,7 +683,8 @@ function heldBlock(sim: Sim, agent: Agent, value: unknown): { id: number; name: 
   if (!def || def.id === 0 || !sim.holdable(def.name)) {
     throw new Error(`"${want}" isn't a block Material.${hint}`);
   }
-  if (!agent.inventory[def.name]) throw new Error(`You have no ${def.name}.${hint}`);
+  // Flatten may dig what it fills with, so it can start empty-handed.
+  if (!emptyOk && !agent.inventory[def.name]) throw new Error(`You have no ${def.name}.${hint}`);
   return { id: def.id, name: def.name };
 }
 
@@ -512,11 +696,12 @@ function placeableHeld(sim: Sim, agent: Agent): string[] {
 }
 
 /** The width × depth columns at (x, z), in a serpentine sweep. */
-function columns(args: Args): [number, number][] {
+function columns(args: Args, max = MAX_COLUMNS, side = MAX_COLUMNS): [number, number][] {
   const x0 = num(args.x, "x"), z0 = num(args.z, "z");
   const width = Math.max(1, num(args.width ?? 1, "width"));
   const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width * depth > MAX_COLUMNS) throw new Error(`At most ${MAX_COLUMNS} columns per call.`);
+  if (width > side || depth > side) throw new Error(`width and depth are 1-${side}.`);
+  if (width * depth > max) throw new Error(`At most ${max} columns per call.`);
   const out: [number, number][] = [];
   for (let j = 0; j < depth; j++) {
     for (let i = 0; i < width; i++) out.push([x0 + (j % 2 ? width - 1 - i : i), z0 + j]);

@@ -28,13 +28,6 @@ export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5,
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
 
-/** Pixel art an agent chose to appear as: row-major, -1 transparent, else 0xRRGGBB (sRGB). */
-export interface Sprite {
-  width: number;
-  height: number;
-  pixels: number[];
-}
-
 export interface Agent {
   id: number;
   name: string;
@@ -48,8 +41,8 @@ export interface Agent {
   stride: number;
   inventory: Record<string, number>;
   journal: string[];
-  /** Custom look; null means the default farmer body. */
-  sprite: Sprite | null;
+  /** The Design this villager looks like; null means the default farmer, in their own tints. */
+  body: number | null;
   /** Last tick this villager called a tool; villagers active within a game day vote. */
   lastActive: number;
   /** Ticks of recent Catalog entries this villager added (rate limit). */
@@ -219,7 +212,7 @@ export class Sim {
       stride: 0,
       inventory: this.starterKit(),
       journal: [],
-      sprite: null,
+      body: null,
       lastActive: this.tick,
       authored: [],
       notes: [],
@@ -477,7 +470,7 @@ export class Sim {
       const agent = structuredClone(a);
       sim.agents.push({
         ...agent,
-        sprite: agent.sprite ?? null,
+        body: agent.body ?? null,
         lastActive: agent.lastActive ?? 0,
         authored: agent.authored ?? [],
         notes: [],

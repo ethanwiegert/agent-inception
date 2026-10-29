@@ -29,6 +29,8 @@ export function materialRgb(hex: string): Rgb {
 export interface MeshOptions {
   /** Only the parts with this role (undefined: the parts without a role; null: all parts). */
   role?: Role | null;
+  /** Only the parts this accepts (instead of `role`). */
+  only?: (p: DesignPart) => boolean;
   /** The point that becomes the template origin; ANCHOR by default. */
   origin?: Vec3;
   /** Bodies hold still in the wind; plants sway. */
@@ -51,7 +53,7 @@ export function meshDesign(
   for (const p of design.parts) top = Math.max(top, p.at[1] + p.size[1] / 2);
   let drawn = 0;
   design.parts.forEach((p, i) => {
-    if (o.role !== null && p.role !== o.role) return;
+    if (o.only ? !o.only(p) : o.role !== null && p.role !== o.role) return;
     const mat = catalog.byName(p.material)?.content as MaterialContent | undefined;
     if (!mat) return;
     meshPart(b, p, i, mat, o.colors?.get(p.material), origin, o.sway === false ? 0 : top);

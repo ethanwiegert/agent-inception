@@ -365,3 +365,61 @@ Deno.test("playtest 0004: a resumed build finds its work under a Rule's blocks",
   const again = ok(run(sim, "a", "build", { design: "dirt pad", x, z }));
   assert(again.includes(`already complete at x=${x} y=${h + 1}`), again);
 });
+
+// ---------------------------------------------------------------- terraform
+
+Deno.test("terraform lowers and raises land, keeping the grass on top and the dirt", () => {
+  const { sim, fern, x, z, h } = site(8, 8);
+  const w = sim.world;
+  const low = ok(
+    run(sim, "a", "terraform", { action: "lower", x, z, width: 3, depth: 3, amount: 2 }),
+  );
+  assert(low.startsWith("Moved 18 blocks of earth") && low.includes("got 18 dirt"), low);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      assertEquals(w.heightAt(x + i, z + j), h - 2);
+      assertEquals(w.get(x + i, h - 2, z + j), Block.Grass);
+    }
+  }
+  // The digger ends on the rim, free to walk away.
+  ok(run(sim, "a", "walk_to", { x: x + 6, z: z + 6 }));
+  err(run(sim, "a", "terraform", { action: "raise", x, z, width: 8, depth: 8 }), "takes 64 dirt");
+  const high = ok(
+    run(sim, "a", "terraform", { action: "raise", x, z, width: 3, depth: 3, amount: 2 }),
+  );
+  assert(high.startsWith("Moved 18 blocks"), high);
+  assertEquals(w.heightAt(x + 1, z + 1), h);
+  assertEquals(w.get(x + 1, h, z + 1), Block.Grass);
+  assertEquals(w.get(x + 1, h - 1, z + 1), Block.Dirt);
+  assertEquals(fern.inventory.dirt, 0);
+  err(run(sim, "a", "terraform", { action: "dig", x, z }), 'action is "raise"');
+  err(run(sim, "a", "terraform", { action: "lower", x, z, width: 9 }), "width and depth are 1-8");
+  err(
+    run(sim, "a", "terraform", { action: "lower", x, z, width: 8, depth: 8, amount: 2 }),
+    "at most 64",
+  );
+});
+
+Deno.test("terraform flatten digs high ground, fills low ground, and carries on over calls", () => {
+  const { sim, fern, x, z, h } = site(8, 8);
+  const w = sim.world;
+  fern.inventory.dirt = 8;
+  ok(run(sim, "a", "place_block", { x, z, width: 2, block: "dirt", layers: 3 })); // a bump
+  ok(run(sim, "a", "terraform", { action: "lower", x: x + 4, z, width: 2 })); // a dip
+  const sapling = sim.catalog.byName("oak")!.id;
+  sim.props.set(x + 7, z + 7, { design: sapling, planted: GROWN, grow: 0 });
+  // Flatten 8 × 8 one higher than the meadow: 6 dug, then 62 filled; more than one call.
+  fern.inventory.dirt = 70;
+  const first = ok(
+    run(sim, "a", "terraform", { action: "flatten", x, z, width: 8, depth: 8, height: h + 1 }),
+  );
+  assert(first.includes("to go: call terraform flatten again"), first);
+  const second = ok(
+    run(sim, "a", "terraform", { action: "flatten", x, z, width: 8, depth: 8, height: h + 1 }),
+  );
+  assert(second.includes("a oak is in the way"), second);
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 8; j++) if (i + j < 14) assertEquals(w.heightAt(x + i, z + j), h + 1);
+  }
+  assertEquals(w.heightAt(x + 7, z + 7), h, "the tree's ground is left alone");
+});

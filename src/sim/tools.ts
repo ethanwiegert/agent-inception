@@ -19,16 +19,9 @@ import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
+import { partBounds } from "./objects.ts";
 import { habitatRefusal, plantInfo } from "./props.ts";
-import {
-  type Agent,
-  Anim,
-  type Job,
-  type Sim,
-  type Sprite,
-  TICK_HZ,
-  TICKS_PER_DAY,
-} from "./sim.ts";
+import { type Agent, Anim, type Job, type Sim, TICK_HZ, TICKS_PER_DAY } from "./sim.ts";
 import { Block } from "./world.ts";
 
 /**
@@ -47,7 +40,8 @@ export interface ToolDef {
   client?: boolean;
 }
 
-export const SPRITE_MAX = 32;
+/** A body Design fits in this box (x, height, z), in blocks. */
+export const BODY_SIZE = [1.2, 2.4, 1.2] as const;
 const MAX_AREA = 16;
 const CAST_RANGE = 4;
 const int = (description: string) => ({ type: "integer", description });
@@ -147,35 +141,18 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
-    name: "set_sprite",
-    description: "Choose how you look: pixel art (up to 32×32) that becomes your body, extruded " +
-      "into blocks. Draw yourself facing right; you'll flip when walking left. Either give `rows` " +
-      "plus a `palette`, or upload an image. Call with `reset: true` to go back to the farmer. " +
-      'Example: rows ["..hh..", ".hhhh.", "..ff..", ".bbbb.", "b.bb.b", "..ll..", ".l..l."], ' +
-      'palette {"h": "#e8b23a", "f": "#f1c9a5", "b": "#3b6fd1", "l": "#2a2a35"}.',
+    name: "set_body",
+    description: "Choose how you look: your body becomes any Design with a part whose role " +
+      'is "body" and that fits in about 1.2 × 2.4 × 1.2 blocks (stand on (0.5, 0, 0.5)). Its ' +
+      "roles move: head turns, arms and legs swing; parts with other roles ride on the body. " +
+      'Read the "farmer" Design (catalog_get) as the worked example, fork it with your own ' +
+      'parts and Materials, then set_body it. design "farmer" goes back to the default look.',
     inputSchema: {
       type: "object",
       properties: {
-        rows: {
-          type: "array",
-          items: { type: "string" },
-          maxItems: SPRITE_MAX,
-          description: `Top-to-bottom rows of palette keys, at most ${SPRITE_MAX} long. ` +
-            '"." and " " are transparent.',
-        },
-        palette: {
-          type: "object",
-          additionalProperties: { type: "string" },
-          description: 'Single-character keys to colors like "#a0522d" or "#fc0".',
-        },
-        image_base64: {
-          type: "string",
-          description:
-            "A PNG/JPEG/WebP image instead of rows; transparent pixels are see-through. " +
-            `Scaled to fit ${SPRITE_MAX}×${SPRITE_MAX}.`,
-        },
-        reset: { type: "boolean", description: "Go back to the default farmer body." },
+        design: { type: "string", description: 'The Design\'s name or id, e.g. "farmer".' },
       },
+      required: ["design"],
     },
   },
   {
@@ -265,8 +242,8 @@ function join(sim: Sim, session: string, args: Args): string {
     "an Object like a bench). interact chops trees, breaks rocks, picks flowers and shears, " +
     "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
     "into brick. People are watching " +
-    "you live here, so take your time and narrate now and then with say. Draw how you look " +
-    "with set_sprite.\n" +
+    "you live here, so take your time and narrate now and then with say. Choose how you look " +
+    "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
     "Materials, Designs, Rules that make things happen, and Relations between them " +
     "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
@@ -425,19 +402,22 @@ const HANDLERS: Record<string, Handler> = {
     })();
   },
 
-  set_sprite(sim, agent, args) {
-    if (args.reset) {
-      agent.sprite = null;
+  set_body(sim, agent, args) {
+    const e = sim.catalog.resolve(args.design, "Design");
+    if (e.kind !== "design") throw new Error(`"${e.name}" is a ${e.kind}, not a Design.`);
+    const live = sim.catalog.current(e);
+    if (!live) throw new Error(`"${e.name}" is retired, so nobody takes its shape now.`);
+    const farmer = sim.catalog.byName("farmer");
+    if (farmer && sim.catalog.current(farmer)?.id === live.id) {
+      agent.body = null;
       sim.agentsVersion++;
-      return "You look like a farmer again.";
+      return `You look like the ${live.name} again, in your own shirt and skin.`;
     }
-    const sprite = args._pixels ? fromPixels(args._pixels) : fromRows(args.rows, args.palette);
-    const opaque = sprite.pixels.filter((p) => p >= 0).length;
-    if (!opaque) throw new Error("That sprite is completely transparent.");
-    agent.sprite = sprite;
+    const why = bodyRefusal(live.content as DesignContent);
+    if (why) throw new Error(`"${live.name}" can't be a body: ${why}.`);
+    agent.body = live.id;
     sim.agentsVersion++;
-    return `You now look like your ${sprite.width}×${sprite.height} sprite (${opaque} pixels). ` +
-      "Anyone watching sees the change.";
+    return `You now look like the ${live.name}. Anyone watching sees the change.`;
   },
 
   say(sim, agent, args) {
@@ -594,46 +574,27 @@ function plantable(
   return { seed: hit.seed, design, grow: Math.round(((hit.rel.hours ?? 24) / 24) * TICKS_PER_DAY) };
 }
 
-function parseColor(value: unknown, key: string): number {
-  const hex = String(value ?? "").trim().replace(/^#/, "");
-  if (/^[0-9a-f]{3}$/i.test(hex)) return parseInt([...hex].map((c) => c + c).join(""), 16);
-  if (/^[0-9a-f]{6}$/i.test(hex)) return parseInt(hex, 16);
-  throw new Error(`Palette color for "${key}" should look like "#a0522d" or "#fc0".`);
-}
-
-function fromRows(rows: unknown, palette: unknown): Sprite {
-  if (!Array.isArray(rows) || !rows.length) throw new Error("Give `rows` (or `image_base64`).");
-  if (rows.length > SPRITE_MAX) throw new Error(`At most ${SPRITE_MAX} rows.`);
-  const colors = new Map<string, number>();
-  for (const [key, value] of Object.entries((palette ?? {}) as Record<string, unknown>)) {
-    if ([...key].length !== 1) throw new Error(`Palette keys are single characters, not "${key}".`);
-    colors.set(key, parseColor(value, key));
+/**
+ * Why a Design can't be a villager's body, or nothing: it needs a "body" part and has to fit a
+ * villager's space, standing on its first cell.
+ */
+export function bodyRefusal(d: DesignContent): string | void {
+  if (!d.parts.some((p) => p.role === "body")) return 'none of its parts has the role "body"';
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of d.parts) {
+    const [a, b] = partBounds(p);
+    for (let k = 0; k < 3; k++) lo[k] = Math.min(lo[k], a[k]), hi[k] = Math.max(hi[k], b[k]);
   }
-  const lines = rows.map(String);
-  const width = Math.max(...lines.map((r) => [...r].length));
-  if (width > SPRITE_MAX) throw new Error(`Rows can be at most ${SPRITE_MAX} characters.`);
-  const pixels: number[] = [];
-  for (const line of lines) {
-    const chars = [...line];
-    for (let x = 0; x < width; x++) {
-      const c = chars[x] ?? ".";
-      if (c === "." || c === " ") pixels.push(-1);
-      else if (colors.has(c)) pixels.push(colors.get(c)!);
-      else throw new Error(`"${c}" isn't in the palette.`);
-    }
+  const r = (n: number) => Math.round(n * 100) / 100;
+  if (hi[0] - lo[0] > BODY_SIZE[0] || hi[2] - lo[2] > BODY_SIZE[2]) {
+    return `it's ${r(hi[0] - lo[0])} × ${r(hi[2] - lo[2])} across; a body fits in ` +
+      `${BODY_SIZE[0]} × ${BODY_SIZE[2]}`;
   }
-  return { width, height: lines.length, pixels };
-}
-
-/** Pixels the page decoded from an uploaded image. */
-function fromPixels(value: unknown): Sprite {
-  const { width, height, pixels } = value as Sprite;
-  const ok = Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 &&
-    width <= SPRITE_MAX && height <= SPRITE_MAX && Array.isArray(pixels) &&
-    pixels.length === width * height &&
-    pixels.every((p) => Number.isInteger(p) && p >= -1 && p <= 0xffffff);
-  if (!ok) throw new Error("Couldn't read that image.");
-  return { width, height, pixels: [...pixels] };
+  if (hi[1] > BODY_SIZE[1]) return `it's ${r(hi[1])} tall; a body is at most ${BODY_SIZE[1]}`;
+  if (lo[1] < -0.1) return "it reaches below the ground (y < 0)";
+  if (Math.abs((lo[0] + hi[0]) / 2 - 0.5) > 0.35 || Math.abs((lo[2] + hi[2]) / 2 - 0.5) > 0.35) {
+    return "it isn't centered on (0.5, 0, 0.5), where a villager stands";
+  }
 }
 
 function partOfDay(t: number): string {

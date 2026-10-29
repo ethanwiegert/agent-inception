@@ -266,6 +266,21 @@ Decided in the build and the gate:
 - `terraform`: raise, lower, flatten an area.
 - Agent-authored crops: a Design + growth Rules + Relations.
 
+Grill outcome (2026-10-29):
+
+- **`set_body {design}` replaces `set_sprite`**, free (a look, not a build): any live Design with a
+  `body` role that fits in about 1.2 × 2.4 × 1.2 blocks. Its roles animate (head, arms, legs);
+  missing roles just hold still. The default stays the farmer with per-villager shirt and skin
+  tints; a chosen body shows its own Materials.
+- **`terraform` conserves material**: lowering gives what it digs, raising spends dirt (or a named
+  block Material) from the inventory, flatten does both to a target height. Earthwork pace, about
+  three times faster per block than `place_block`; up to 8 × 8 columns and 64 blocks a call, and
+  calling again carries on.
+- **Crop looks are data**: a Design with `"look": "blades"` draws as the GPU blade field (wheat opts
+  in); any other crop draws its own Parts, scaled up as it grows, like a sapling.
+- **A `grow` Rule effect** (`{"grow": {"what": "radish", "hours": 2}}`) advances matching crops near
+  the event, or everywhere on a timer: rain makes radishes grow, compost speeds wheat.
+
 ### M9-M11 — physics phases 2-4
 
 Deterministic on the fixed tick, simple shapes (box, sphere, capsule, compounds), sleeping bodies.

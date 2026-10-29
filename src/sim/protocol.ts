@@ -1,7 +1,7 @@
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
-import type { CallResult, SimEvent, Sprite } from "./sim.ts";
+import type { CallResult, SimEvent } from "./sim.ts";
 import type { WorldData } from "./world.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
@@ -21,7 +21,8 @@ export const CROP_STRIDE = 8;
 
 export interface AgentProfile {
   name: string;
-  sprite: Sprite | null;
+  /** The Design they look like; null for the default farmer. */
+  body: number | null;
 }
 
 /** Catalog changes since the last tick message. The Catalog is append-only, so new entries suffice. */

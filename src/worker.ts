@@ -168,7 +168,7 @@ function send() {
   let profiles: AgentProfile[] | undefined;
   if (s.agentsVersion !== sentAgentsVersion) {
     sentAgentsVersion = s.agentsVersion;
-    profiles = s.agents.map((a) => ({ name: a.name, sprite: a.sprite }));
+    profiles = s.agents.map((a) => ({ name: a.name, body: a.body }));
   }
 
   let catalog: CatalogDelta | undefined;
