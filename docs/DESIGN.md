@@ -128,8 +128,7 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 
 - **Tools** are defined once in `src/sim/tools.ts` (JSON schema + handler). The bridge imports the
   definitions to list them; the sim runs them. `screenshot` runs in the page (offscreen, 1024×640,
-  villager name tags burnt in, so it works in a hidden tab), and the page decodes `set_sprite`
-  images to pixels before the sim sees them.
+  villager name tags burnt in, so it works in a hidden tab).
 - **Bridge** (`tools/bridge.ts`, zero deps): a Streamable HTTP MCP server (JSON responses, no SSE,
   Origin-checked). In dev it shares port 5173 with the game; standalone it's `deno task bridge` on
   7777. It is a pipe, not an authority: the tab owns the world. Latest connected tab wins. The V1
@@ -159,7 +158,8 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 | `build`                          | Build a Design at x, z (on the highest ground under it, or `y`), `turn` 0/90/180/270: its `blocks` bottom layer first, ≤48 blocks or ~50 s a call (calling again carries on), then its `parts` as one Object costing each part's volume in its Material (at least 1). Checks the whole remaining cost up front. Never shuts the builder in or strands them on the roof.                             |
 | `craft`                          | Make a Material from another along a made_from recipe (4 planks from a log), ~1 s a batch, up to 16 batches. Agents' recipes only make agent-authored Materials.                                                                                                                                                                                                                                    |
 | `interact`                       | Gather from an area (≤16 tiles): chop trees, break rocks, pick flowers/reeds/lily pads/berries (they replant), dig up young saplings, take Objects apart for their Materials; shear, milk and collect eggs when the animal's product is ready (approaching slowly). Yields are `drops` Relations.                                                                                                   |
-| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.                                                                                                                                                                                                                                                                                                                |
+| `set_body`                       | Look like any Design with a `body` part that fits about 1.2 × 2.4 × 1.2 (roles animate); "farmer" goes back to the default.                                                                                                                                                                                                                                                                         |
+| `terraform`                      | Raise, lower or flatten up to 8 × 8 columns, ≤64 blocks a call (flatten carries on); lowering gives what it digs, raising spends dirt or a named block; grass stays on top.                                                                                                                                                                                                                         |
 | `say`                            | Speech bubble + activity feed line.                                                                                                                                                                                                                                                                                                                                                                 |
 | `wait`                           | Rest 1-60 real seconds.                                                                                                                                                                                                                                                                                                                                                                             |
 | `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                                                                                                                                                                                                                                                                                                                            |
@@ -179,8 +179,9 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
   their normal from screen-space derivatives.
 - Grass has no per-blade data: the vertex shader generates blades in a grid around the camera from
   the rgba16uint surface texture (height, block, slope mask, water). Editing the world rewrites it.
-- Villagers are procedural farmers by default; until M8, `set_sprite` swaps in pixel art rendered as
-  extruded voxel runs that billboard toward the camera.
+- Villagers wear the "farmer" Design by default, in their own shirt and skin tints; `set_body` puts
+  them in any Design with a `body` part. Its head, arms and legs are posed from the sim (walking,
+  working, idle life); parts with other roles ride on the body (ADR 0005).
 - Spectators click a name tag (or the panel list) to glide over and follow that villager.
 
 ## Simulation
@@ -188,8 +189,10 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 - Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world, which the worker
   sends whole once (voxels, heights and the generated props) and then patches with streamed edits,
   and interpolates villager positions between ticks. Nothing is generated twice.
-- Crops grow from the clock, so idle progress is free; the page draws their growth on the GPU from
-  each crop's planting tick, so fields ripen smoothly and nothing is re-sent while they grow.
+- Crops grow from the clock, so idle progress is free; the page draws their growth from each crop's
+  planting tick, so fields ripen smoothly and nothing is re-sent while they grow. A crop Design with
+  `"look": "blades"` (wheat) is a swaying blade field on the GPU; any other crop draws its own
+  parts, scaled up as it grows. A Rule's `grow` effect brings crops and young plants forward.
 - Worldgen memoizes noise gradients per lattice point (bit-identical output, ~3× faster), and the
   mesher skips buried blocks (identical meshes, ~2.5× faster), so placing a block remeshes in about
   a millisecond per chunk instead of hitching the frame.
