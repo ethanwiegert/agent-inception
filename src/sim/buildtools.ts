@@ -174,7 +174,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           try {
             yield* reach(sim, agent, x, z, y);
           } catch {
-            skipped.push(`(${x},${y},${z}) out of reach`);
+            skipped.push(`(${x},${y},${z}) ${unreachable(agent, x, z)}`);
             continue;
           }
           yield* work(agent, Anim.Build, k ? STACK_TICKS : PLACE_TICKS);
@@ -219,7 +219,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           try {
             yield* reach(sim, agent, x, z, y, inPit);
           } catch {
-            skipped.push(`(${x},${y},${z}) out of reach`);
+            skipped.push(`(${x},${y},${z}) ${unreachable(agent, x, z)}`);
             continue;
           }
           const b = sim.world.get(x, y, z);
@@ -332,7 +332,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           try {
             yield* reach(sim, agent, x, z, y, inPit);
           } catch {
-            skipped.push(`(${x},${y},${z}) out of reach`);
+            skipped.push(`(${x},${y},${z}) ${unreachable(agent, x, z)}`);
             break;
           }
           const b = w.get(x, y, z);
@@ -374,7 +374,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           try {
             yield* reach(sim, agent, x, z, y, inArea);
           } catch {
-            skipped.push(`(${x},${y},${z}) out of reach`);
+            skipped.push(`(${x},${y},${z}) ${unreachable(agent, x, z)}`);
             break;
           }
           yield* work(agent, Anim.Build, LAND_TICKS);
@@ -502,7 +502,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
         try {
           yield* reach(sim, agent, x, z, y, avoid);
         } catch {
-          skipped.push(`(${x},${y},${z}) out of reach`);
+          skipped.push(`(${x},${y},${z}) ${unreachable(agent, x, z)}`);
           return true;
         }
         if (wouldShutIn(x, y, z, c.id)) return false;
@@ -742,6 +742,12 @@ function where(cols: [number, number][]): string {
   if (cols.length === 1) return ` at x=${x} z=${z}`;
   const xs = cols.map((c) => c[0]), zs = cols.map((c) => c[1]);
   return ` over x=${Math.min(...xs)}..${Math.max(...xs)} z=${Math.min(...zs)}..${Math.max(...zs)}`;
+}
+
+/** Why a block couldn't be worked on: too far to find a way to, or close but out of reach. */
+function unreachable(agent: Agent, x: number, z: number): string {
+  const far = Math.max(Math.abs(Math.floor(agent.x) - x), Math.abs(Math.floor(agent.z) - z)) > 3;
+  return far ? "no way there from here (walk_to somewhere near it first)" : "out of reach";
 }
 
 /** Up to eight skip reasons, then a count, so a big area doesn't bury the result. */
