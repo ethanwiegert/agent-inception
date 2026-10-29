@@ -49,6 +49,10 @@ Saves may break freely until M14; save versioning and migrations come last befor
   instant tool answers and no `_whoami` round trip; building pulled forward from M7 (below); PBR
   Neutral tonemap, sharpening, warm sunsets, lit clouds, organic ground edges; offscreen
   `screenshot` with name tags; a headless harness for VMs without a display.
+- **M7 — building, crafting, physics phase 1.** `craft` along made_from, `interact` (gather,
+  dismantle, collect from animals), Designs' parts built as Objects in quarter turns and paid by
+  volume, Objects rasterized for walking (stand on low tops, walk around tall ones); playtest
+  [0004](playtests/0004-m7.md).
 
 ## V1
 
@@ -199,7 +203,7 @@ test. Still open:
   M6 on 2026-10-29 without it; the remeasure is one standing TODO under Known gaps for M6, the
   overhaul and M7.
 
-### M7 — building, crafting, physics phase 1
+### M7 — building, crafting, physics phase 1 (done)
 
 Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, as it stood before the grill:
 
@@ -241,6 +245,20 @@ Grill outcome (2026-10-29):
 - **Playtests** run as cost-effective subagents calling the MCP bridge through a small shell helper,
   since the cloud session has no MCP connection of its own.
 
+Decided in the build and the gate:
+
+- Objects live in their own store (`sim/objects.ts`), saved with the world and mirrored whole to the
+  page on change. Each column keeps the Object over it, whether it's in the way, and how far it
+  lifts a body; paths, animals, `place_block`, `break_block`, `till`, `plant`, spread and
+  `set_block` Rules all respect it. A part's box after its own turn and tilt is what's rasterized.
+- A parts-only Object stands on the highest ground under it (`y` refused); a mixed Design's parts
+  stand on its block base. The builder raises parts from any tile beside the footprint.
+- Agents' recipes yield at most 4 per ingredient and may not loop. Picked plants give items that
+  grow back into the plant (poppy → poppies, reed → reeds, lily leaf → lily pads, berries → bush);
+  berries are chicken food. Rules gain `crafted`, `gathered` and `built`.
+- `interact` targets match names or what a thing gives; animals up to two tiles outside the area
+  count, since they wander.
+
 ### M8 — character and land
 
 - Villager bodies are 3D Designs from Parts (ADR 0005); `set_sprite` and sprite dolls are removed.
@@ -263,6 +281,8 @@ Budget: sim tick < 4 ms with 500 awake bodies.
   death.
 - Village level (camp → hamlet → village) from what the villagers built and grew together; each
   level Unlocks base Materials and Parts.
+- From playtest 0004: recipe chains of agent Materials still amplify (×4 per step, no loops).
+  Scarcity (what a recipe may cost or yield, workbenches as `needs`) belongs here.
 - Errands offered by the world; any villager may take or ignore one.
 - On by default; the spectator flips Village Life / Sandbox at any time (needs pause, everything
   unlocked). Agents learn the mode from `join` and `look`.
@@ -299,6 +319,8 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
   spread rule has to be named or described as one.
 - A plant Design can be replaced by a Design with no habitat. New planting of that seed then fails;
   the proposal itself is allowed.
+- Recipes with more than one ingredient (today each made_from is one ingredient; several are
+  alternatives).
 
 ## Known gaps (polish backlog)
 
@@ -314,6 +336,8 @@ Pick these up in the gate of whichever milestone touches them.
   s of work by design). `build` stops at ~50 s and resumes; area digs and lays don't resume.
 - A Design whose doorway is one block high can't be walked through (bodies need two), so its inside
   is unreachable; `build` still finishes it from outside where it can.
+- Playtests: spawn cheap players as an agent type limited to Bash, so they can't stray into
+  unrelated tools (two did in 0004, harmlessly).
 - The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
