@@ -15,6 +15,7 @@ import {
   work,
 } from "./jobs.ts";
 import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
+import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
@@ -124,6 +125,7 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: { type: "object", properties: area, required: ["x", "z"] },
   },
   ...BUILD_TOOL_DEFS,
+  ...MAKE_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -259,7 +261,10 @@ function join(sim: Sim, session: string, args: Args): string {
     ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
     "to ripen, harvest, and build what you like: place_block lays a floor or raises a wall in " +
-    "one call, break_block digs, and build puts up a whole Design's blocks. People are watching " +
+    "one call, break_block digs, and build puts up a whole Design (its blocks, and its parts as " +
+    "an Object like a bench). interact chops trees, breaks rocks, picks flowers and shears, " +
+    "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
+    "into brick. People are watching " +
     "you live here, so take your time and narrate now and then with say. Draw how you look " +
     "with set_sprite.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
@@ -275,6 +280,7 @@ function join(sim: Sim, session: string, args: Args): string {
 const HANDLERS: Record<string, Handler> = {
   ...CATALOG_HANDLERS,
   ...BUILD_HANDLERS,
+  ...MAKE_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -291,7 +297,7 @@ const HANDLERS: Record<string, Handler> = {
     eachTile(sim, agent, args, "Tilled", Anim.Till, 24, {
       check(x, y, z) {
         const b = sim.world.get(x, y, z);
-        const blocked = solidProp(sim, x, z);
+        const blocked = solidProp(sim, x, z) ?? objectThere(sim, x, z);
         if (blocked) return blocked;
         if (b === Block.Farmland) return "already farmland";
         if (b !== Block.Grass && b !== Block.Dirt) return `${sim.blocks.name(b)} can't be tilled`;
@@ -315,6 +321,8 @@ const HANDLERS: Record<string, Handler> = {
         if (ground?.startsWith("grows on")) return `${design.name} ${ground}`;
         if (ground) return ground;
         if (sim.crops.has(key)) return "already planted";
+        const object = objectThere(sim, x, z);
+        if (object) return object;
         const prop = sim.props.at(x, z);
         if (prop) return `${sim.props.info(prop)?.entry.name ?? "something"} already there`;
         if (info.solid && Math.floor(agent.x) === x && Math.floor(agent.z) === z) {
@@ -512,6 +520,12 @@ function eachTile(
 
 // ---------------------------------------------------------------- helpers
 
+/** Why an Object on (x, z) stops work there, or nothing. */
+function objectThere(sim: Sim, x: number, z: number): string | undefined {
+  const o = sim.objects.at(x, z);
+  return o ? `the ${sim.catalog.get(o.design)?.name ?? "Object"} stands there` : undefined;
+}
+
 /**
  * Which held Material to plant and what it grows into: by its name ("oak sapling"), the start of
  * it ("wheat" for "wheat seeds"), or the plant's name ("oak"). Its grows_into Relation says the
@@ -653,6 +667,29 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
   }
   const built = new Map<number, string>();
+  /** Marks for Objects in view by Design, and how bodies get past each. */
+  const objMarks = new Map<number, { mark: string; name: string; how: string }>();
+  const objectMark = (x: number, z: number): string | null => {
+    const o = sim.objects.at(x, z);
+    if (!o) return null;
+    let m = objMarks.get(o.design);
+    if (!m) {
+      const e = sim.catalog.get(o.design);
+      const name = e?.name ?? "Object";
+      const own = (e?.content as DesignContent | undefined)?.mark;
+      const mark = own && !taken.has(own) ? own : [
+        ...name.toUpperCase(),
+        ...name.toLowerCase(),
+        ...SPARE_MARKS,
+      ].find((ch) => /[^\s\d]/.test(ch) && !taken.has(ch)) ?? "?";
+      taken.add(mark);
+      objMarks.set(o.design, m = { mark, name, how: "" });
+    }
+    const key = z * w.sizeX + x;
+    const how = w.objSolid[key] ? "in the way" : w.objLift[key] ? "stand on" : "walk under";
+    if (!m.how.includes(how)) m.how = m.how ? `${m.how}/${how}` : how;
+    return m.mark;
+  };
   const blockMark = (b: number) => {
     let mark = NATURAL_MARKS[b] ?? built.get(b);
     if (mark) return mark;
@@ -682,6 +719,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         const names = marks.get(c) ?? new Set();
         marks.set(c, names.add(young ? `young ${info.entry.name}` : info.entry.name));
       }
+      const om = objectMark(x, z);
+      if (om) c = om;
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
         const g = sim.cropGrowth(crop);
@@ -716,6 +755,13 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }  1-9 other villagers | height = same, 1-9 higher, a-i lower`,
     ...(built.size
       ? [`Blocks: ${[...built].map(([b, m]) => `${m} ${sim.blocks.name(b)}`).join("  ")}`]
+      : []),
+    ...(objMarks.size
+      ? [
+        `Objects: ${
+          [...objMarks.values()].map((m) => `${m.mark} ${m.name} (${m.how})`).join("  ")
+        } (interact takes one apart)`,
+      ]
       : []),
     ...(marks.size
       ? [
@@ -754,7 +800,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     });
     lines.push(
       "  (Animals shy away from villagers walking right at them, and follow anyone carrying " +
-        "their food: is_food_for in the Catalog.)",
+        "their food: is_food_for in the Catalog. interact shears, milks or collects eggs when " +
+        "theirs is ready.)",
     );
   }
   const schools = sim.schools

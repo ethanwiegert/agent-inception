@@ -30,6 +30,7 @@ let sentAgentsVersion = -1;
 let sentCropsVersion = -1;
 let sentCropsCatalog = -1;
 let sentPropsVersion = -1;
+let sentObjectsVersion = -1;
 let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
@@ -93,6 +94,7 @@ function start(caughtUp: number) {
   s.pendingEdits = [];
   sentAgentsVersion = sentCropsVersion = sentCropsCatalog = -1;
   sentPropsVersion = s.props.version;
+  sentObjectsVersion = s.objects.version;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -104,6 +106,7 @@ function start(caughtUp: number) {
     world,
     caughtUp,
     props: { generated, diff: s.props.diff() },
+    objects: structuredClone(s.objects.list),
     catalog: s.catalog.save(),
   }, [world.blocks.buffer, world.top.buffer, world.waterTop.buffer, generated.buffer]);
   lastStep = performance.now();
@@ -191,6 +194,9 @@ function send() {
     clouds: s.clouds(),
     props: s.props.version !== sentPropsVersion
       ? (sentPropsVersion = s.props.version, s.props.diff())
+      : undefined,
+    objects: s.objects.version !== sentObjectsVersion
+      ? (sentObjectsVersion = s.objects.version, structuredClone(s.objects.list))
       : undefined,
     agents,
     animals,

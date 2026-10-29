@@ -1,6 +1,7 @@
 import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import type { BlockRegistry } from "../sim/blocks.ts";
 import type { Catalog } from "../sim/catalog.ts";
+import type { Objects } from "../sim/objects.ts";
 import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
@@ -46,6 +47,7 @@ export interface SceneState {
   /** What everything looks like: Materials and Designs. */
   catalog: Catalog;
   props: Props | null;
+  objects: Objects | null;
   tick: number;
   day: number;
   weather: Weather;
@@ -103,6 +105,7 @@ export class Renderer {
   private flora = new ModelBatch(new InstanceBatch(), 0, 2);
   private groundCover = new ModelBatch(new InstanceBatch(), 70, 1);
   private floraVersion = -1;
+  private objectsVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
   /** MSAA scene targets for the view, and a separate set for captures at their own size. */
@@ -314,10 +317,12 @@ export class Renderer {
   private updateFlora(scene: SceneState, time: number) {
     const props = scene.props;
     if (!props) return;
-    const stale = props.version !== this.floraVersion ||
+    const objectsVersion = scene.objects?.version ?? 0;
+    const stale = props.version !== this.floraVersion || objectsVersion !== this.objectsVersion ||
       (time - this.floraBuiltAt > 2 && anyGrowing(props, scene.tick));
     if (!stale) return;
     this.floraVersion = props.version;
+    this.objectsVersion = objectsVersion;
     this.floraBuiltAt = time;
     const { flora, groundCover } = this;
     buildProps(
@@ -327,6 +332,7 @@ export class Renderer {
       flora.instances,
       groundCover.instances,
       this.floraModels,
+      scene.objects,
     );
     this.models.upload(flora);
     this.models.upload(groundCover);

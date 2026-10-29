@@ -8,16 +8,27 @@ import {
   reach,
   route,
   solidProp,
+  walk,
   work,
 } from "./jobs.ts";
+import {
+  costText,
+  designSpan,
+  Objects,
+  PART_TICKS,
+  partCost,
+  turnPoint,
+  type WorldObject,
+} from "./objects.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
 import { solid } from "./world.ts";
 
 /**
  * Building: lay blocks one column at a time or a whole area, dig them back out, and build a
- * Design's block grid. Every call stays under MCP timeouts by capping the cells it touches;
- * `build` picks up where the last call stopped, so agents just call it again.
+ * Design: its block grid, then its parts as one Object. Every call stays under MCP timeouts by
+ * capping the cells it touches; `build` picks up where the last call stopped, so agents just call
+ * it again.
  */
 
 /** Columns one call may cover, as for till and plant. */
@@ -82,13 +93,16 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "build",
-    description: "Build a Design's blocks (its `blocks` grid) with its west-north corner at " +
-      "(x, z): bottom layer first, using block Materials from your inventory. It stands on the " +
-      "highest ground under it unless you give `y`. Cells already right are kept; cells taken by " +
+    description: "Build a Design with its west-north corner at (x, z): its blocks bottom layer " +
+      "first, then its parts as one Object (a bench, a fence, a statue) that villagers walk " +
+      "around, or stand on if its top is at most a block high. It stands on the highest ground " +
+      "under it unless you give `y`; `turn` rotates it clockwise. You need everything it still " +
+      "needs before you start: each block, and for each part its volume in its Material (at " +
+      "least 1); the refusal lists what's missing. Cells already right are kept; cells taken by " +
       `something else are skipped. Lays at most ${MAX_CELLS} blocks per call: call it again with ` +
-      "the same design, x and z to carry on (it also stops after about 50 seconds of work). " +
-      "Find Designs with catalog_find kind design; make " +
-      "your own with catalog_add.",
+      "the same design, x, z and turn to carry on (it also stops after about 50 seconds of " +
+      "work). interact takes an Object apart again. Find Designs with catalog_find kind " +
+      "design; make your own with catalog_add.",
     inputSchema: {
       type: "object",
       properties: {
@@ -96,6 +110,11 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
         x: int("West edge (the design's first column)."),
         z: int("North edge (the design's first row)."),
         y: int("Optional height of the bottom layer."),
+        turn: {
+          type: "integer",
+          enum: [0, 90, 180, 270],
+          description: "Degrees clockwise seen from above (east turns south). Default 0.",
+        },
       },
       required: ["design", "x", "z"],
     },
@@ -206,20 +225,59 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
 
   build(sim, agent, args) {
     const design = buildable(sim, args.design);
-    const blocks = (design.content as DesignContent).blocks!;
+    const content = design.content as DesignContent;
     const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-    const cells = designCells(sim, blocks);
-    if (cells.every((c) => sim.world.heightAt(x0 + c.dx, z0 + c.dz) < 0)) {
+    const turn = quarterTurns(args.turn);
+    const span = designSpan(content);
+    const cells = designCells(sim, content, turn, span);
+    const partTiles = content.parts.length
+      ? Objects.cover(sim.world, Objects.boxes(content, x0, 0, z0, turn))
+      : [];
+    const sizeX = sim.world.sizeX;
+    const columnsOf = [
+      ...cells.map((c) => (z0 + c.dz) * sizeX + x0 + c.dx),
+      ...partTiles,
+    ];
+    if (
+      columnsOf.every((key) => sim.world.heightAt(key % sizeX, Math.floor(key / sizeX)) < 0) ||
+      sim.world.heightAt(x0, z0) < 0
+    ) {
       throw new Error(`(${x0}, ${z0}) is outside the world.`);
     }
-    const base = args.y === undefined ? findBase(sim, cells, x0, z0) : num(args.y, "y");
+    const base = args.y !== undefined
+      ? num(args.y, "y")
+      : cells.length
+      ? findBase(sim, cells, x0, z0)
+      : groundBase(sim, partTiles);
     const at = (c: Cell) => [x0 + c.dx, base + c.dy, z0 + c.dz] as const;
     const left = () => cells.filter((c) => sim.world.get(...at(c)) !== c.id);
-    const todo = left();
     const name = `"${design.name}"`;
-    const place = `at x=${x0} y=${base} z=${z0}`;
-    const sizeX = sim.world.sizeX;
-    const footprint = new Set(cells.map((c) => (z0 + c.dz) * sizeX + x0 + c.dx));
+    const place = `at x=${x0} y=${base} z=${z0}${turn ? ` turned ${turn * 90}°` : ""}`;
+    const builtHere = () =>
+      sim.objects.list.find((o) =>
+        o.design === design.id && o.x === x0 && o.z === z0 && o.turn === turn
+      );
+    const partsLeft = content.parts.length > 0 && !builtHere();
+    const todo = left();
+    if (!todo.length && !partsLeft) return `${name} is already complete ${place}.`;
+    // Everything still needed, up front: a half-built house helps nobody.
+    const needs = tally(todo);
+    if (partsLeft) {
+      for (const [m, n] of partCost(content)) needs.set(m, (needs.get(m) ?? 0) + n);
+    }
+    const short = new Map([...needs].filter(([m, n]) => (agent.inventory[m] ?? 0) < n));
+    if (short.size) {
+      throw new Error(
+        `${name} still needs ${needText(needs, agent)}. You're short of ` +
+          `${[...short].map(([m, n]) => `${n - (agent.inventory[m] ?? 0)} ${m}`).join(", ")}; ` +
+          "gather it all before you build (craft makes some Materials from others).",
+      );
+    }
+    if (partsLeft) {
+      const why = objectRefusal(sim, agent, partTiles);
+      if (why) throw new Error(`${name} can't stand ${place}: ${why}.`);
+    }
+    const footprint = new Set(columnsOf);
     const inFootprint = (x: number, z: number) => footprint.has(z * sizeX + x);
     // Keep off anything of theirs two above the base: a villager steps down only two blocks.
     const high = (x: number, z: number) =>
@@ -233,13 +291,8 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       w.set(x, y, z, was);
       return stuck;
     };
-    if (!todo.length) return `${name} is already complete ${place}.`;
-    const needs = tally(todo);
-    if (![...needs.keys()].some((m) => agent.inventory[m] > 0)) {
-      throw new Error(`You have none of what ${name} still needs: ${needText(needs, agent)}.`);
-    }
     return (function* () {
-      let built = 0, layer = -1, short = false;
+      let built = 0;
       const skipped: string[] = [];
       const deferred: Cell[] = [];
       const started = sim.tick;
@@ -273,16 +326,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       }
       for (const c of todo) {
         if (spent()) break;
-        // Bottom up: a layer left unfinished for want of material holds back the ones above.
-        if (c.dy !== layer) {
-          if (short) break;
-          layer = c.dy;
-        }
-        if (sim.world.get(...at(c)) === c.id) continue;
-        if (!agent.inventory[c.material]) {
-          short = true; // counted in what's still needed
-          continue;
-        }
+        if (sim.world.get(...at(c)) === c.id || !agent.inventory[c.material]) continue;
         if (!(yield* lay(c, high))) deferred.push(c);
       }
       // Blocks that would have closed the builder in go in last, laid from outside.
@@ -292,23 +336,131 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
         if (!(yield* lay(c, inFootprint))) skipped.push(`(${at(c).join(",")}) would shut you in`);
       }
       const rest = left();
+      // The parts go up as one Object once the blocks under them are in.
+      let object: WorldObject | null = null;
+      if (partsLeft && !rest.length && !spent()) {
+        const r = yield* raise(sim, agent, design.id, content, x0, base, z0, turn, partTiles);
+        if (typeof r === "string") skipped.push(r);
+        else object = r;
+      }
       const done = cells.length - rest.length;
-      let text = `Built ${built} block${built === 1 ? "" : "s"} of ${name} ${place}: ` +
-        `${done} of ${cells.length} done.`;
-      if (rest.length) {
+      let text = cells.length
+        ? `Built ${built} block${built === 1 ? "" : "s"} of ${name} ${place}: ` +
+          `${done} of ${cells.length} done.`
+        : object
+        ? `Built ${name} ${place}.`
+        : `Didn't build ${name} ${place}.`;
+      if (object) {
+        const n = content.parts.length;
+        text += ` Its ${n} part${n === 1 ? "" : "s"} stand as one Object (${
+          costText(partCost(content))
+        } used).`;
+      }
+      const unfinished = rest.length || (partsLeft && !object);
+      if (unfinished) {
         const stuck = new Set(skipped.map((s) => s.slice(0, s.indexOf(")") + 1)));
         const open = rest.filter((c) => !stuck.has(`(${at(c).join(",")})`));
-        const missing = tally(open.filter((c) => !agent.inventory[c.material]));
-        text += open.length
-          ? ` To carry on, call build again with design ${name}, x=${x0}, z=${z0}, y=${base}.`
+        text += open.length || (partsLeft && !object && !skipped.length)
+          ? ` To carry on, call build again with design ${name}, x=${x0}, z=${z0}, y=${base}` +
+            `${turn ? `, turn=${turn * 90}` : ""}.`
           : " The rest is blocked.";
-        if (missing.size) text += ` Still needed: ${needText(missing, agent)}.`;
       }
       if (shutIn()) text += " You're shut in by your own work: break_block a wall to get out.";
       return text + skippedText(skipped) + ` ${inventoryText(agent)}`;
     })();
   },
 };
+
+/**
+ * Put up a Design's parts as one Object: stand beside it (off its tiles), work a while per part,
+ * check again, pay, and place it. Returns the Object, or why it couldn't.
+ */
+function* raise(
+  sim: Sim,
+  agent: Agent,
+  design: number,
+  content: DesignContent,
+  x: number,
+  y: number,
+  z: number,
+  turn: number,
+  tiles: number[],
+): Generator<void, WorldObject | string> {
+  const sizeX = sim.world.sizeX;
+  const mine = new Set(tiles);
+  const onIt = (cx: number, cz: number) => mine.has(cz * sizeX + cx);
+  const name = sim.catalog.get(design)!.name;
+  try {
+    yield* reach(sim, agent, x, z, undefined, onIt);
+  } catch {
+    return `${name}: out of reach`;
+  }
+  // Step off its tiles so it isn't built around you.
+  if (onIt(Math.floor(agent.x), Math.floor(agent.z))) {
+    try {
+      yield* walk(sim, agent, (cx, cz) => !onIt(cx, cz), () => 0, "clear ground");
+    } catch {
+      return `${name}: you can't step off its tiles`;
+    }
+  }
+  yield* work(agent, Anim.Build, Math.min(8 * TICK_HZ, PART_TICKS * content.parts.length));
+  const cost = partCost(content);
+  const why = objectRefusal(sim, agent, tiles) ??
+    [...cost].filter(([m, n]) => (agent.inventory[m] ?? 0) < n).map(([m]) => `out of ${m}`)[0];
+  if (why) return `${name}: ${why}`;
+  for (const [m, n] of cost) agent.inventory[m] -= n;
+  // Flowers and tall grass under it are cleared; anything solid already refused.
+  for (const key of tiles) {
+    const tx = key % sizeX, tz = Math.floor(key / sizeX);
+    if (sim.props.at(tx, tz)) sim.props.set(tx, tz, null);
+  }
+  const o: WorldObject = { id: sim.objects.nextId(), design, x, y, z, turn, by: agent.name };
+  sim.objects.add(o);
+  sim.fire("built", agent, x, y, z, name);
+  return o;
+}
+
+/** Why an Object can't take these tiles, or nothing. `self` may stand there: they step aside. */
+function objectRefusal(sim: Sim, self: Agent, tiles: number[]): string | undefined {
+  const w = sim.world, sizeX = w.sizeX;
+  for (const key of tiles) {
+    const x = key % sizeX, z = Math.floor(key / sizeX);
+    const where = `(${x},${z})`;
+    if (w.heightAt(x, z) < 0) return `${where} is outside the world`;
+    const other = sim.objects.at(x, z);
+    if (other) {
+      return `the ${sim.catalog.get(other.design)?.name ?? "Object"} at ${where} is in the way`;
+    }
+    const prop = solidProp(sim, x, z);
+    if (prop) return `${prop} at ${where}`;
+    if (w.waterTop[key] >= 0) return `${where} is water (Objects stand on dry ground)`;
+    if (sim.crops.has(key)) return `a crop is growing at ${where}`;
+    const v = sim.agents.find((a) => a !== self && Math.floor(a.x) === x && Math.floor(a.z) === z);
+    if (v) return `${v.name} is standing at ${where}`;
+  }
+}
+
+/** The bottom of a parts-only Design: on the highest ground under its tiles. */
+function groundBase(sim: Sim, tiles: number[]): number {
+  let top = 0;
+  for (const key of tiles) {
+    top = Math.max(
+      top,
+      sim.world.heightAt(key % sim.world.sizeX, Math.floor(key / sim.world.sizeX)),
+    );
+  }
+  return top + 1;
+}
+
+/** 0-3 quarter turns from 0, 90, 180 or 270 degrees. */
+function quarterTurns(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  const deg = Number(value);
+  if (![0, 90, 180, 270, 360, -90].includes(deg)) {
+    throw new Error("turn is 0, 90, 180 or 270 degrees.");
+  }
+  return ((deg / 90) % 4 + 4) % 4;
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -416,6 +568,10 @@ function placeRefusal(
     const prop = solidProp(sim, x, z);
     if (prop) return prop;
   }
+  if (y >= top) {
+    const o = sim.objects.at(x, z);
+    if (o) return `the ${sim.catalog.get(o.design)?.name ?? "Object"} is in the way`;
+  }
   const v = villagerAt(sim, x, y, z, builder);
   if (v) return `${v.name} is standing there`;
   if (free) {
@@ -435,6 +591,12 @@ function digRefusal(sim: Sim, x: number, y: number, z: number): string | void {
   if (y === top) {
     const prop = solidProp(sim, x, z);
     if (prop) return prop;
+    const o = sim.objects.at(x, z);
+    if (o) {
+      return `the ${
+        sim.catalog.get(o.design)?.name ?? "Object"
+      } stands on it (interact takes it apart)`;
+    }
   }
 }
 
@@ -455,20 +617,23 @@ function buildable(sim: Sim, value: unknown): Entry {
   if (e.kind !== "design") throw new Error(`"${e.name}" is a ${e.kind}, not a Design.`);
   const live = c.current(e);
   if (!live) throw new Error(`"${e.name}" is retired, so nothing new is built from it.`);
-  if (!(live.content as DesignContent).blocks) {
-    throw new Error(
-      `"${live.name}" has no blocks to build (only parts). Designs with a blocks grid can be built.`,
-    );
-  }
   return live;
 }
 
 /**
- * Filled cells bottom layer first, each row swept back and forth so the builder walks less. In a
- * layer the inside comes before its edge, so a roof is closed from outside, last.
+ * Filled cells bottom layer first, turned `turn` quarter turns, each row swept back and forth so
+ * the builder walks less. In a layer the inside comes before its edge, so a roof is closed from
+ * outside, last.
  */
-function designCells(sim: Sim, blocks: NonNullable<DesignContent["blocks"]>): Cell[] {
+function designCells(
+  sim: Sim,
+  d: DesignContent,
+  turn: number,
+  span: [number, number],
+): Cell[] {
   const cells: Cell[] = [];
+  const blocks = d.blocks;
+  if (!blocks) return cells;
   blocks.layers.forEach((layer, dy) => {
     const start = cells.length;
     layer.forEach((row, dz) => {
@@ -480,7 +645,8 @@ function designCells(sim: Sim, blocks: NonNullable<DesignContent["blocks"]>): Ce
         if (ch === "." || ch === " ") continue;
         const material = blocks.palette[ch];
         const id = sim.blocks.byName(material)?.id ?? 0;
-        if (id) cells.push({ dx, dy, dz, material, id });
+        const [tx, tz] = turnPoint(dx + 0.5, dz + 0.5, turn, span);
+        if (id) cells.push({ dx: Math.floor(tx), dy, dz: Math.floor(tz), material, id });
       }
     });
     const mine = cells.splice(start);

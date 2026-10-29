@@ -557,7 +557,7 @@ export class Catalog {
       case "rule":
         return validateRule(raw, this);
       case "relation":
-        return validateRelation(raw, this);
+        return validateRelation(raw, this, author);
     }
   }
 }
@@ -748,7 +748,11 @@ function habitat(v: unknown, c: Catalog): Habitat {
   };
 }
 
-function validateRelation(o: Record<string, unknown>, c: Catalog): RelationContent {
+function validateRelation(
+  o: Record<string, unknown>,
+  c: Catalog,
+  author: string,
+): RelationContent {
   onlyKeys(o, ["type", "from", "to", "count", "hours"], "relation");
   const type = String(o.type ?? "").trim().toLowerCase();
   if (!(ENGINE_RELATIONS as readonly string[]).includes(type) && !FREE_RELATION_RE.test(type)) {
@@ -784,7 +788,21 @@ function validateRelation(o: Record<string, unknown>, c: Catalog): RelationConte
       );
     }
     out.hours = numberIn(o.hours ?? 24, 0.1, LIMITS.growHours, "hours");
-  } else if (o.hours !== undefined) {
+  } else if (type === "made_from") {
+    // A recipe: `count` of `from` crafted out of one `to`. Nature's Materials keep nature's
+    // recipes, so nobody crafts logs out of dirt; agents' recipes make their own Materials.
+    if (from.kind !== "material" || to.kind !== "material") {
+      throw new Error("made_from goes from the Material you craft to the Material it's made of.");
+    }
+    if (from.id === to.id) throw new Error("A Material can't be made from itself.");
+    if (author !== NATURE && from.author === NATURE) {
+      throw new Error(
+        `"${from.name}" is nature's, and comes only from nature's recipes. Make your own ` +
+          `Material (catalog_fork "${from.name}") and give that a recipe.`,
+      );
+    }
+  }
+  if (type !== "grows_into" && o.hours !== undefined) {
     throw new Error("hours is only for grows_into.");
   }
   return out;

@@ -152,7 +152,7 @@ Deno.test("catalog_add validates every kind", () => {
   err(
     run(sim, "a", "catalog_add", {
       kind: "relation",
-      content: { type: "made_from", from: "planks", to: "log" },
+      content: { type: "drops", from: "grass", to: "dirt" },
     }),
     "already",
   );

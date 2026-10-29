@@ -8,6 +8,7 @@ import {
 } from "./sim/protocol.ts";
 import { BlockRegistry } from "./sim/blocks.ts";
 import { Catalog } from "./sim/catalog.ts";
+import { Objects } from "./sim/objects.ts";
 import { Props } from "./sim/props.ts";
 import type { SimEvent, Sprite } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
@@ -57,6 +58,8 @@ export class SimClient {
   private registry = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
+  /** Mirror of the sim's Objects, rasterized on the page's world too. */
+  objects: Objects | null = null;
   /** Mirror of the sim's Catalog. */
   catalog = new Catalog();
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
@@ -171,6 +174,8 @@ export class SimClient {
       const world = World.fromData(msg.world);
       this.props = new Props(world, msg.props.generated, this.catalog);
       this.props.applyDiff(msg.props.diff);
+      this.objects = new Objects(world, this.catalog);
+      this.objects.reset(msg.objects);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
       this.prevAnimals = this.currAnimals = new Float32Array(0);
@@ -216,6 +221,7 @@ export class SimClient {
       this.cropsVersion++;
     }
     if (this.world) applyEdits(this.world, msg.edits);
+    if (msg.objects && this.objects) this.objects.reset(msg.objects);
     for (const event of msg.events) this.onEvent(event);
     this.resolve(msg.results);
   }

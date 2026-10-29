@@ -1,9 +1,10 @@
 import { identity, mat4, rotateY, scale, translate } from "../math.ts";
 import type { Catalog, DesignContent } from "../sim/catalog.ts";
+import { designSpan, type Objects, turnPoint } from "../sim/objects.ts";
 import type { Props } from "../sim/props.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { World } from "../sim/world.ts";
-import { meshDesign } from "./designs.ts";
+import { ANCHOR, meshDesign } from "./designs.ts";
 import type { InstanceBatch, MeshLibrary } from "./meshes.ts";
 
 /** Water surfaces sit this far below the top of their water block (see water.ts). */
@@ -12,13 +13,14 @@ const SURFACE_DROP = 0.12;
 /** Mesh templates for plant Designs, made the first time each Design is drawn. */
 export class FloraModels {
   private ids = new Map<number, number>();
+  private still = new Map<number, number>();
   private catalog: Catalog | null = null;
 
   constructor(private lib: MeshLibrary) {}
 
   /** Template id for Design `design` in `catalog`, or -1 if it isn't a drawable Design. */
   template(catalog: Catalog, design: number): number {
-    if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear();
+    if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear(), this.still.clear();
     let id = this.ids.get(design);
     if (id !== undefined) return id;
     const e = catalog.get(design);
@@ -30,6 +32,23 @@ export class FloraModels {
       );
     }
     this.ids.set(design, id);
+    return id;
+  }
+
+  /** The same, held still: built Objects don't sway in the wind. */
+  stillTemplate(catalog: Catalog, design: number): number {
+    if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear(), this.still.clear();
+    let id = this.still.get(design);
+    if (id !== undefined) return id;
+    const e = catalog.get(design);
+    id = -1;
+    if (e?.kind === "design") {
+      id = this.lib.define(
+        `object:${design}`,
+        (b) => meshDesign(b, catalog, e.content as DesignContent, { role: null, sway: false }),
+      );
+    }
+    this.still.set(design, id);
     return id;
   }
 }
@@ -47,9 +66,21 @@ export function buildProps(
   out: InstanceBatch,
   small: InstanceBatch,
   models: FloraModels,
+  objects: Objects | null = null,
 ) {
   out.clear();
   small.clear();
+  // Built Objects: exactly where and as turned as they were built.
+  for (const o of objects?.list ?? []) {
+    const d = objects!.design(o);
+    const tid = d ? models.stillTemplate(props.catalog, o.design) : -1;
+    if (!d || tid < 0) continue;
+    const [ax, az] = turnPoint(ANCHOR[0], ANCHOR[2], o.turn, designSpan(d));
+    identity(m);
+    translate(m, o.x + ax, o.y, o.z + az);
+    rotateY(m, -o.turn * Math.PI / 2);
+    out.add(tid, m, 1, 1, 1, 1);
+  }
   const w = world.sizeX;
   for (const [key, p] of props.map) {
     const info = props.info(p);

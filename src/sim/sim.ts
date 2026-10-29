@@ -9,6 +9,7 @@ import {
 } from "./catalog.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
+import { Objects, type WorldObject } from "./objects.ts";
 import { standY } from "./path.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
@@ -53,6 +54,8 @@ export interface Agent {
   lastActive: number;
   /** Ticks of recent Catalog entries this villager added (rate limit). */
   authored: number[];
+  /** Approaching animals slowly (to shear, milk or collect), so they don't shy away. Not saved. */
+  gentle?: boolean;
   /** Things Rules did to this villager, told with the next tool result. Not saved. */
   notes: string[];
   queue: { callId: number; job: Job }[];
@@ -95,6 +98,8 @@ export interface SaveData {
   agents: Omit<Agent, "queue" | "anim" | "stride" | "notes">[];
   /** Trees, rocks, flowers etc. that differ from generation. */
   props?: PropDiff;
+  /** Objects villagers built from Designs' parts. */
+  objects?: WorldObject[];
   /** Missing in old saves: those worlds get freshly spawned herds. */
   animals?: Animal[];
   schools?: School[];
@@ -116,6 +121,8 @@ export class Sim {
   dayOffset = Math.round(TICKS_PER_DAY * 0.3);
   readonly world: World;
   readonly props: Props;
+  /** Designs built from Parts: benches, fences, statues (static until physics phase 2). */
+  readonly objects: Objects;
   animals: Animal[];
   /** Fish schools in rivers and the sea. */
   schools: School[];
@@ -142,6 +149,7 @@ export class Sim {
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed, this.catalog);
+    this.objects = new Objects(this.world, this.catalog);
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
@@ -189,6 +197,8 @@ export class Sim {
     }
     // Whatever stood on the column (flowers, a lily pad) goes with the change.
     if (this.props.at(x, z)) this.props.set(x, z, null);
+    // An Object over the column stands on the new ground.
+    if (w.objectAt[key]) this.objects.refresh(x, z);
   }
 
   cropGrowth(crop: Crop): number {
@@ -384,7 +394,7 @@ export class Sim {
     f.length = this.agents.length;
     this.agents.forEach((a, i) => {
       const o = f[i] ??= { x: 0, z: 0, moving: false, food: 0 };
-      o.x = a.x, o.z = a.z, o.moving = a.anim === Anim.Walk;
+      o.x = a.x, o.z = a.z, o.moving = a.anim === Anim.Walk && !a.gentle;
       o.food = 0;
       SPECIES.forEach((_, s) => {
         if (this.foodFor(s).some((item) => (a.inventory[item] ?? 0) > 0)) o.food |= 1 << s;
@@ -406,7 +416,7 @@ export class Sim {
         const flat = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) =>
           w.heightAt(x + dx, z + dz) === h
         );
-        const free = !w.propSolid[z * w.sizeX + x];
+        const free = !w.blocked(x, z) && !w.objectAt[z * w.sizeX + x];
         if (h >= 0 && flat && free && w.get(x, h, z) === Block.Grass) return [x, z];
       }
     }
@@ -423,6 +433,7 @@ export class Sim {
       edits: [...this.edits].flat(),
       crops: [...this.crops].map(([key, c]) => [key, c.design, c.planted, c.grow]),
       props: this.props.diff(),
+      objects: structuredClone(this.objects.list),
       animals: structuredClone(this.animals),
       schools: structuredClone(this.schools),
       weatherOverride: this.weatherOverride,
@@ -441,6 +452,7 @@ export class Sim {
     sim.weatherOverride = data.weatherOverride ?? null;
     if (data.catalog) sim.catalog = Catalog.load(data.catalog);
     sim.props.catalog = sim.catalog;
+    sim.objects.catalog = sim.catalog;
     for (const [id, stat] of data.ruleStats ?? []) sim.rules.stats.set(id, structuredClone(stat));
     sim.dayOffset = data.dayOffset;
     const w = sim.world;
@@ -452,6 +464,7 @@ export class Sim {
       sim.setBlock(x, y, z, block);
     }
     if (data.props) sim.props.applyDiff(data.props);
+    if (data.objects) sim.objects.reset(data.objects);
     if (data.animals) sim.animals = structuredClone(data.animals);
     // Saves from before a placement change get fresh schools.
     if (data.schools?.every((f) => schoolFits(sim.world, f))) {

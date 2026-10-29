@@ -1,4 +1,5 @@
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
+import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
 import type { WorldData } from "./world.ts";
@@ -49,6 +50,7 @@ export interface ReadyMessage {
   caughtUp: number;
   /** Nature's generated props (packed quads, see `Props.packGenerated`) and today's difference. */
   props: { generated: Int32Array<ArrayBuffer>; diff: PropDiff };
+  objects: WorldObject[];
   catalog: CatalogSave;
 }
 
@@ -67,6 +69,8 @@ export interface TickMessage {
   edits: Int32Array<ArrayBuffer>;
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
+  /** Every Object, sent when one is built or taken apart. */
+  objects?: WorldObject[];
   catalog?: CatalogDelta;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;

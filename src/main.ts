@@ -351,6 +351,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
       blocks: client.blocks,
       catalog: client.catalog,
       props: client.props,
+      objects: client.objects,
       tick: client.tick,
       day: client.day,
       weather: { clouds: client.clouds },

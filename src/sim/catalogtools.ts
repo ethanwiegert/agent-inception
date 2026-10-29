@@ -77,7 +77,9 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "way. role and joints make a body move (body, head, eyes, left arm, left leg, front left " +
       "leg, product, …). mark is one look-map character. habitat says the ground it grows on " +
       `and where nature plants it (zones: ${ZONES.join(", ")}); (0.5, 0, 0.5) is the tile ` +
-      "center on the ground. Up to 16×16×16 blocks and 32 parts. Building comes later.\n" +
+      "center on the ground. Up to 16×16×16 blocks and 32 parts. build makes a Design: its " +
+      "blocks are laid as blocks and its parts become one Object (each part costs its volume " +
+      "in its Material, at least 1).\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
       `when: {"event": "harvested", "what": "wheat"} (events: ${RULE_EVENTS.join(", ")}; ` +
       'optional "what" matches the block, crop, fish or villager, or words for said), ' +
@@ -97,7 +99,10 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "timer. A rule fires at most " +
       `${RULE_LIMITS.firingsPerHour} times per game hour and can't trigger other rules.\n` +
       '- relation: {"type": "grows_into", "from": "wheat seeds", "to": "wheat crop", "count": 1, ' +
-      '"hours": 18}. hours is only for grows_into: game hours from planting to grown. Engine ' +
+      '"hours": 18}. hours is only for grows_into: game hours from planting to grown. ' +
+      '{"type": "made_from", "from": "oak boards", "to": "log", "count": 4} is a recipe for ' +
+      "craft: count of from out of one to (nature's own Materials keep nature's recipes; " +
+      "invent a Material and give it one). drops says what interact or digging gives. Engine " +
       `types the world will enforce: ${ENGINE_RELATIONS.join(", ")}; or your own ` +
       'lower_snake_case label like "sacred_to" that just records knowledge. No name needed.\n' +
       'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "wildflowers ' +

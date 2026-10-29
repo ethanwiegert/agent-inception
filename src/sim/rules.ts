@@ -19,6 +19,9 @@ export const RULE_EVENTS = [
   "placed",
   "broken",
   "caught",
+  "crafted",
+  "gathered",
+  "built",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -521,6 +524,7 @@ export class Rules {
     const here = w.get(x, y, z);
     if (here === Block.Water) return "can't change water";
     if (w.propSolid[z * w.sizeX + x]) return "a tree or rock is in the way";
+    if (w.objectAt[z * w.sizeX + x] && y >= w.heightAt(x, z)) return "an Object is in the way";
     const name = to === "air" ? "air" : sim.produce(to);
     if (!name) return `${to} is retired`;
     const block = name === "air" ? Block.Air : sim.blocks.byName(name)?.id;
@@ -589,7 +593,7 @@ export class Rules {
       const x = sx + dx, z = sz + dz;
       const y = w.heightAt(x, z);
       if (y < 0) continue;
-      if (sim.props.at(x, z) || sim.crops.has(z * size + x)) continue;
+      if (sim.props.at(x, z) || sim.crops.has(z * size + x) || w.objectAt[z * size + x]) continue;
       const ground = sim.blocks.name(w.get(x, y, z));
       if (habitatRefusal(w, info, x, z, ground)) continue;
       if (info.solid) {

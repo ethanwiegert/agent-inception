@@ -44,6 +44,12 @@ export class World {
   readonly waterTop: Int16Array;
   /** 1 where a solid prop (tree, rock) stands on the column; set by `Props`. */
   readonly propSolid: Uint8Array;
+  /** The Object covering each column (its id), or 0; set by `Objects`. */
+  readonly objectAt: Int32Array;
+  /** 1 where an Object is too tall to stand on, so bodies walk around it. */
+  readonly objSolid: Uint8Array;
+  /** How far an Object's low top lifts a body standing on the column (0-1 block). */
+  readonly objLift: Float32Array;
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
@@ -58,6 +64,9 @@ export class World {
     this.top = data?.top ?? new Int16Array(sizeX * sizeZ).fill(-1);
     this.waterTop = data?.waterTop ?? new Int16Array(sizeX * sizeZ).fill(-1);
     this.propSolid = new Uint8Array(sizeX * sizeZ);
+    this.objectAt = new Int32Array(sizeX * sizeZ);
+    this.objSolid = new Uint8Array(sizeX * sizeZ);
+    this.objLift = new Float32Array(sizeX * sizeZ);
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);
@@ -146,6 +155,9 @@ export class World {
     const below = feet === undefined ? h : this.floorBelow(ix, iz, Math.floor(feet + 0.5));
     const floor = below < 0 ? h : below;
     if (floor !== h) return floor + 1;
+    // The flat top of a bench or a low platform.
+    const lift = this.objLift[iz * this.sizeX + ix];
+    if (lift) return h + 1 + lift;
     const mask = this.slopeMask(ix, iz);
     return h + 1 - (mask ? slopeDrop(mask, x - ix, z - iz) : 0);
   }
@@ -163,6 +175,12 @@ export class World {
       ) return y;
     }
     return -1;
+  }
+
+  /** Whether a body can't stand on column (x, z): a tree, a rock, or a tall Object. */
+  blocked(x: number, z: number): boolean {
+    const key = z * this.sizeX + x;
+    return this.propSolid[key] === 1 || this.objSolid[key] === 1;
   }
 
   /** Water standing above the floor at `floor`, in blocks (0 if dry). */
