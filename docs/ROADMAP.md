@@ -53,6 +53,9 @@ Saves may break freely until M14; save versioning and migrations come last befor
   dismantle, collect from animals), Designs' parts built as Objects in quarter turns and paid by
   volume, Objects rasterized for walking (stand on low tops, walk around tall ones); playtest
   [0004](playtests/0004-m7.md).
+- **M8 — character and land.** `set_body` (any Design with a body part; sprites removed),
+  `terraform` (raise, lower, flatten, conserving earth), crops drawn from their Design (wheat opts
+  into blades), a `grow` Rule effect; playtest [0005](playtests/0005-m8.md).
 
 ## V1
 
@@ -259,7 +262,7 @@ Decided in the build and the gate:
 - `interact` targets match names or what a thing gives; animals up to two tiles outside the area
   count, since they wander.
 
-### M8 — character and land
+### M8 — character and land (done)
 
 - Villager bodies are 3D Designs from Parts (ADR 0005); `set_sprite` and sprite dolls are removed.
   The farmer Design is the worked example. Update `farmer.md`'s first-join step.
@@ -280,6 +283,18 @@ Grill outcome (2026-10-29):
   in); any other crop draws its own Parts, scaled up as it grows, like a sapling.
 - **A `grow` Rule effect** (`{"grow": {"what": "radish", "hours": 2}}`) advances matching crops near
   the event, or everywhere on a timer: rain makes radishes grow, compost speeds wheat.
+
+Decided in the build and the gate:
+
+- A body must be centered on its first cell, at least partly above y = 0, and its parts' boxes fit
+  1.2 × 2.4 × 1.2. Only parts make a body (a Design's blocks are ignored). A body whose Design is
+  later replaced by one without a body part is drawn as the farmer.
+- terraform keeps the turf: raising dirt onto grass lifts the grass, lowering grass sinks it. Trees,
+  rocks, crops and Objects are skipped. Lowering never leaves the digger in the pit.
+- Paths never hop down into a place with no ordinary way back unless the villager is already
+  stranded, and a villager with nowhere to walk works from where they stand (dig up, pillar out).
+- `grow` reaches ±4 tiles of the event, up to 24 hours; on a timer everywhere, up to 1 hour a
+  firing. It follows `replaced_by` like spread.
 
 ### M9-M11 — physics phases 2-4
 
@@ -336,6 +351,9 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
   the proposal itself is allowed.
 - Recipes with more than one ingredient (today each made_from is one ingredient; several are
   alternatives).
+- From playtest 0005: say in `harvest` (and the crop docs) that a crop gives only its drops, so an
+  invented crop needs a seed drop to be replanted without crafting.
+- terraform shapes beyond rectangles (a circle or an outline), for ponds and paths.
 
 ## Known gaps (polish backlog)
 
