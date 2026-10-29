@@ -309,7 +309,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const dugAt = new Set<number>();
     const inPit = (x: number, z: number) => dugAt.has(z * w.sizeX + x);
     return (function* () {
-      let moved = 0, ranOut = false;
+      let moved = 0, ranOut = false, used = 0;
       const got = new Map<string, number>();
       const skipped: string[] = [];
       const left = () => moved < LAND_CELLS;
@@ -380,6 +380,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           if (placeRefusal(sim, agent, x, y, z, false)) continue;
           const below = w.get(x, y - 1, z);
           agent.inventory[fill.name]--;
+          used++;
           // The turf moves up: grass stays on top of a raised meadow.
           if (fill.id === Block.Dirt && below === Block.Grass) {
             sim.setBlock(x, y - 1, z, Block.Dirt);
@@ -392,7 +393,8 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       const rest = todo();
       const list = (m: Map<string, number>) => [...m].map(([k, n]) => `${n} ${k}`).join(", ");
       let text = `Moved ${moved} block${moved === 1 ? "" : "s"} of earth${where(cols)}` +
-        (got.size ? `, got ${list(got)}` : "") + ".";
+        (got.size ? `, got ${list(got)}` : "") + (used ? `, used ${used} ${fill!.name}` : "") +
+        ".";
       if (rest && action === "flatten" && !ranOut && !left()) {
         text +=
           ` ${rest} to go: call terraform flatten again with the same area and height=${level}.`;

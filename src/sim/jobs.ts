@@ -22,7 +22,12 @@ export function* walk(
   label: string,
 ): Generator<void, void> {
   const path = route(sim, agent, goal, heuristic);
-  if (!path) throw new Error(`You can't find a way to ${label}.`);
+  if (!path) {
+    throw new Error(
+      `You can't find a way to ${label}: you climb 1 block and drop 2, and trees, rocks and tall ` +
+        "Objects are in the way. A step (place_block, or terraform) gets you up a bigger rise.",
+    );
+  }
   agent.anim = Anim.Walk;
   for (let i = 0; i < path.length; i += 2) {
     const tx = path[i] + 0.5, tz = path[i + 1] + 0.5;

@@ -551,5 +551,6 @@ function relationText(sim: Sim, e: Entry): string {
   const from = sim.catalog.get(r.from)!, to = sim.catalog.get(r.to)!;
   const engine = (ENGINE_RELATIONS as readonly string[]).includes(r.type) ? "" : " (free label)";
   const count = r.count !== 1 ? `${r.count} × ` : "";
-  return `${count}"${from.name}" ${r.type} "${to.name}"${engine}`;
+  const hours = r.hours !== undefined ? ` in ${r.hours} game hours` : "";
+  return `${count}"${from.name}" ${r.type} "${to.name}"${hours}${engine}`;
 }

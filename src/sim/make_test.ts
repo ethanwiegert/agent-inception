@@ -387,7 +387,7 @@ Deno.test("terraform lowers and raises land, keeping the grass on top and the di
   const high = ok(
     run(sim, "a", "terraform", { action: "raise", x, z, width: 3, depth: 3, amount: 2 }),
   );
-  assert(high.startsWith("Moved 18 blocks"), high);
+  assert(high.startsWith("Moved 18 blocks") && high.includes("used 18 dirt"), high);
   assertEquals(w.heightAt(x + 1, z + 1), h);
   assertEquals(w.get(x + 1, h, z + 1), Block.Grass);
   assertEquals(w.get(x + 1, h - 1, z + 1), Block.Dirt);
@@ -473,6 +473,8 @@ Deno.test("agents' crops: a Design, grows_into, drops, and Rules that grow them"
       content: { type: "drops", from: "radish crop", to: "radish", count: 2 },
     }),
   );
+  const rel = ok(run(sim, "a", "catalog_get", { entry: "radish seed grows_into radish crop" }));
+  assert(rel.includes('"radish seed" grows_into "radish crop" in 12 game hours'), rel);
   fern.authored.length = 0; // past this hour's authoring limit
   const rule = (name: string, content: unknown) =>
     run(sim, "a", "catalog_add", { kind: "rule", name, content });
