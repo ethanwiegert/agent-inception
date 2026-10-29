@@ -272,6 +272,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const fill = action === "lower" ? null : heldBlock(sim, agent, args.block ?? "dirt", true);
     // Where each column should end up; for raise and lower, fixed now.
     const target = new Map<number, number>();
+    const outside = cols.filter(([x, z]) => w.heightAt(x, z) < 0).length;
     for (const [x, z] of cols) {
       const top = w.heightAt(x, z);
       if (top < 0) continue;
@@ -311,14 +312,14 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     return (function* () {
       let moved = 0, ranOut = false, used = 0;
       const got = new Map<string, number>();
-      const skipped: string[] = [];
+      const skipped: string[] = outside ? [`${outside} columns outside the world`] : [];
       const left = () => moved < LAND_CELLS;
       // Dig first (the high columns, inside-out so the digger ends on the rim), then fill.
       for (const [x, z] of digOrder(cols)) {
         const t = target.get(z * w.sizeX + x);
         if (t === undefined || w.heightAt(x, z) <= t) continue;
         if (sim.crops.has(z * w.sizeX + x)) {
-          skipped.push(`(${x},${z}) a crop is growing`);
+          skipped.push(`(${x},${z}) a crop is planted there`);
           continue;
         }
         while (left() && w.heightAt(x, z) > t) {
@@ -356,7 +357,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
         const t = target.get(z * w.sizeX + x);
         if (!fill || t === undefined || w.heightAt(x, z) >= t || ranOut || !left()) continue;
         if (sim.crops.has(z * w.sizeX + x)) {
-          skipped.push(`(${x},${z}) a crop is growing`);
+          skipped.push(`(${x},${z}) a crop is planted there`);
           continue;
         }
         while (left() && w.heightAt(x, z) < t) {
@@ -700,9 +701,11 @@ function placeableHeld(sim: Sim, agent: Agent): string[] {
 /** The width × depth columns at (x, z), in a serpentine sweep. */
 function columns(args: Args, max = MAX_COLUMNS, side = MAX_COLUMNS): [number, number][] {
   const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-  const width = Math.max(1, num(args.width ?? 1, "width"));
-  const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width > side || depth > side) throw new Error(`width and depth are 1-${side}.`);
+  const width = num(args.width ?? 1, "width");
+  const depth = num(args.depth ?? 1, "depth");
+  if (width < 1 || depth < 1 || width > side || depth > side) {
+    throw new Error(`width and depth are 1-${side}.`);
+  }
   if (width * depth > max) throw new Error(`At most ${max} columns per call.`);
   const out: [number, number][] = [];
   for (let j = 0; j < depth; j++) {
@@ -745,7 +748,12 @@ function where(cols: [number, number][]): string {
 function skippedText(skipped: string[]): string {
   if (!skipped.length) return "";
   const shown = skipped.slice(0, 8).join("; ");
-  return ` Skipped: ${shown}${skipped.length > 8 ? `; and ${skipped.length - 8} more` : ""}.`;
+  const reach = skipped.some((s) => s.includes("out of reach"))
+    ? " (You work on blocks within 2 tiles of somewhere you can stand and 3 up or down from " +
+      "your feet; walk closer, or cut a step.)"
+    : "";
+  return ` Skipped: ${shown}${skipped.length > 8 ? `; and ${skipped.length - 8} more` : ""}.` +
+    reach;
 }
 
 /** A villager other than `self` whose body fills cell (x, y, z), if any. */

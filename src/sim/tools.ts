@@ -411,13 +411,13 @@ const HANDLERS: Record<string, Handler> = {
     if (farmer && sim.catalog.current(farmer)?.id === live.id) {
       agent.body = null;
       sim.agentsVersion++;
-      return `You look like the ${live.name} again, in your own shirt and skin.`;
+      return `You look like the "${live.name}" again, in your own shirt and skin.`;
     }
     const why = bodyRefusal(live.content as DesignContent);
     if (why) throw new Error(`"${live.name}" can't be a body: ${why}.`);
     agent.body = live.id;
     sim.agentsVersion++;
-    return `You now look like the ${live.name}. Anyone watching sees the change.`;
+    return `You now look like "${live.name}". Anyone watching sees the change.`;
   },
 
   say(sim, agent, args) {

@@ -507,3 +507,36 @@ Deno.test("agents' crops: a Design, grows_into, drops, and Rules that grow them"
   const got = ok(run(sim, "a", "harvest", { x, z, width: 2 }));
   assert(got.startsWith("Harvested 2 tiles") && fern.inventory.radish === 4, got);
 });
+
+Deno.test("playtest 0005: no walking into a pit you can't leave, and a way out of one", () => {
+  const { sim, fern, x, z, h } = site(8, 8);
+  const w = sim.world;
+  // A 3-deep, 1-wide pit: hopping in would strand you, so walk_to refuses.
+  for (let y = h; y > h - 3; y--) sim.setBlock(x + 3, y, z + 3, 0);
+  err(run(sim, "a", "walk_to", { x: x + 3, z: z + 3 }), "You can't find a way");
+  // Dropped in anyway (an old save, a Rule), you can build your way out from where you stand.
+  fern.x = x + 3.5, fern.z = z + 3.5, fern.y = h - 2;
+  for (let i = 0; i < 10; i++) sim.step();
+  err(run(sim, "a", "walk_to", { x, z }), "climb 1 block and drop 2");
+  fern.inventory.dirt = 3;
+  for (let k = 0; k < 3; k++) {
+    const feet = Math.floor(fern.y + 0.5);
+    ok(run(sim, "a", "place_block", { x: x + 3, z: z + 3, y: feet, block: "dirt" }));
+    for (let i = 0; i < 20; i++) sim.step();
+  }
+  assertEquals(w.heightAt(x + 3, z + 3), h);
+  ok(run(sim, "a", "walk_to", { x, z }));
+});
+
+Deno.test("playtest 0005: tidy refusals for terraform and grow", () => {
+  const { sim } = site();
+  err(
+    run(sim, "a", "terraform", { action: "raise", x: 10, z: 10, width: 0 }),
+    "width and depth are 1-8",
+  );
+  const rule = (when: unknown, grow: unknown) =>
+    run(sim, "a", "catalog_add", { kind: "rule", name: "g", content: { when, do: [{ grow }] } });
+  err(rule({ every: 10 }, { what: "wheat crop", hours: 24 }), "from 0.1 to 1");
+  err(rule({ event: "said" }, { hours: 2 }), "names a plant");
+  ok(rule({ event: "said" }, { what: "wheat crop", hours: 24 }));
+});

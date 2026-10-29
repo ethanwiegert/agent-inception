@@ -70,8 +70,9 @@ export const RULE_LIMITS = {
    */
   crowd: 3,
   weatherHours: 12,
-  /** Game hours one grow effect may bring plants forward. */
+  /** Game hours one grow effect may bring plants forward: near an event, and on a timer. */
   growHours: 24,
+  growHoursEverywhere: 1,
   /** Each Rule fires at most this often per game hour. */
   firingsPerHour: 20,
   /** Condition and effect steps the engine spends on Rules per tick, across all Rules. */
@@ -168,7 +169,10 @@ export function heldMaterial(catalog: Catalog, v: unknown, where: string): Entry
 
 /** A Design with a habitat: the kind of plant `spread` copies. Underscores read as spaces. */
 function plantDesign(catalog: Catalog, v: unknown, where: string): Entry {
-  const raw = String(v ?? "").trim().toLowerCase();
+  if (typeof v !== "string" || !v.trim()) {
+    throw new Error(`${where} names a plant, like "poppies" or "wheat crop".`);
+  }
+  const raw = v.trim().toLowerCase();
   const e = catalog.byName(raw) ?? catalog.byName(raw.replace(/_/g, " "));
   if (!e || e.kind !== "design" || !(e.content as DesignContent).habitat) {
     throw new Error(
@@ -311,7 +315,13 @@ function effect(v: unknown, c: Check, where: string): Effect {
       return {
         grow: {
           what: plantDesign(c.catalog, o.what, `${at}.what`).name,
-          hours: num(o.hours ?? 1, 0.1, RULE_LIMITS.growHours, `${at}.hours`),
+          // On a timer it reaches every plant in the world, so it moves them gently.
+          hours: num(
+            o.hours ?? 1,
+            0.1,
+            c.local ? RULE_LIMITS.growHours : RULE_LIMITS.growHoursEverywhere,
+            `${at}.hours`,
+          ),
         },
       };
     }
