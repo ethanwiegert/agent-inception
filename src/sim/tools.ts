@@ -14,6 +14,7 @@ import {
   walk,
   work,
 } from "./jobs.ts";
+import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
@@ -74,7 +75,8 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "look",
     description: "Describe your surroundings: time, inventory, a map of nearby tiles " +
-      "with heights, crops and other farmers. Cheap; use it whenever you need to orient.",
+      "with heights, crops, plants, built blocks and other villagers. Cheap; use it whenever " +
+      "you need to orient.",
     inputSchema: {
       type: "object",
       properties: {
@@ -121,30 +123,7 @@ export const TOOL_DEFS: ToolDef[] = [
       `tile (a crop's drops Relations say what). Unripe crops are left alone. ${areaNote}`,
     inputSchema: { type: "object", properties: area, required: ["x", "z"] },
   },
-  {
-    name: "place_block",
-    description:
-      "Stack a block from your inventory on top of a tile's column. Build walls by stacking.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        x: int("Column x."),
-        z: int("Column z."),
-        block: { type: "string", enum: ["dirt", "stone"] },
-      },
-      required: ["x", "z", "block"],
-    },
-  },
-  {
-    name: "break_block",
-    description: "Dig the top block off a tile's column into your inventory. A block gives what " +
-      "its drops Relations say (grass and farmland give dirt), or itself. Harder blocks take longer.",
-    inputSchema: {
-      type: "object",
-      properties: { x: int("Column x."), z: int("Column z.") },
-      required: ["x", "z"],
-    },
-  },
+  ...BUILD_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -279,8 +258,10 @@ function join(sim: Sim, session: string, args: Args): string {
   return (returning ? `Welcome back, ${agent.name}.` : `Welcome, ${agent.name}.`) +
     ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
-    "to ripen, harvest, and build what you like. People are watching you live here, so take your " +
-    "time and narrate now and then with say. Draw how you look with set_sprite.\n" +
+    "to ripen, harvest, and build what you like: place_block lays a floor or raises a wall in " +
+    "one call, break_block digs, and build puts up a whole Design's blocks. People are watching " +
+    "you live here, so take your time and narrate now and then with say. Draw how you look " +
+    "with set_sprite.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
     "Materials, Designs, Rules that make things happen, and Relations between them " +
     "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
@@ -293,6 +274,7 @@ function join(sim: Sim, session: string, args: Args): string {
 
 const HANDLERS: Record<string, Handler> = {
   ...CATALOG_HANDLERS,
+  ...BUILD_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -370,27 +352,6 @@ const HANDLERS: Record<string, Handler> = {
       },
     }),
 
-  place_block(sim, agent, args) {
-    const x = num(args.x, "x"), z = num(args.z, "z");
-    const name = String(args.block);
-    const block = name === "dirt" ? Block.Dirt : name === "stone" ? Block.Stone : -1;
-    if (block < 0) throw new Error('block must be "dirt" or "stone".');
-    if (!agent.inventory[name]) throw new Error(`You have no ${name}. Dig some with break_block.`);
-    return (function* () {
-      yield* reach(sim, agent, x, z);
-      const blocked = solidProp(sim, x, z);
-      if (blocked) throw new Error(`Can't build there: ${blocked}.`);
-      const y = sim.world.heightAt(x, z) + 1;
-      if (y >= sim.world.sizeY - 2) throw new Error("That column is as tall as it can get.");
-      if (y > agent.y + 3) throw new Error("Too high to reach from here.");
-      yield* work(agent, Anim.Build, 20);
-      agent.inventory[name]--;
-      sim.setBlock(x, y, z, block);
-      sim.fire("placed", agent, x, y, z, name);
-      return `Placed ${name} at x=${x} y=${y} z=${z}. ${inventoryText(agent)}`;
-    })();
-  },
-
   fish(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
     const casts = Math.min(5, Math.max(1, num(args.casts ?? 1, "casts")));
@@ -445,29 +406,6 @@ const HANDLERS: Record<string, Handler> = {
       }
       return `${tries} at (${x}, ${z}) and caught ${caught.length}: ${caught.join(", ")}. ` +
         inventoryText(agent);
-    })();
-  },
-
-  break_block(sim, agent, args) {
-    const x = num(args.x, "x"), z = num(args.z, "z");
-    return (function* () {
-      yield* reach(sim, agent, x, z);
-      const blocked = solidProp(sim, x, z);
-      if (blocked) throw new Error(`Can't dig there: ${blocked}.`);
-      const y = sim.world.heightAt(x, z);
-      if (y <= 1) throw new Error("Bedrock. You can't dig any deeper here.");
-      const b = sim.world.get(x, y, z);
-      const entry = sim.catalog.get(sim.blocks.get(b)?.entry ?? 0);
-      const hardness = (entry?.content as { hardness?: number } | undefined)?.hardness ?? 1;
-      yield* work(agent, Anim.Build, Math.round(16 + hardness * 4));
-      sim.setBlock(x, y, z, Block.Air);
-      const got = entry ? sim.drops(entry) : [];
-      for (const [item, n] of got) give(agent, item, n);
-      sim.fire("broken", agent, x, y, z, sim.blocks.name(b));
-      const gave = got.length ? got.map(([item, n]) => `${n} ${item}`).join(", ") : "nothing";
-      return `Dug ${sim.blocks.name(b)} at x=${x} y=${y} z=${z}, got ${gave}. ${
-        inventoryText(agent)
-      }`;
     })();
   },
 
@@ -669,6 +607,21 @@ function partOfDay(t: number): string {
   return "night";
 }
 
+/** Map marks for the ground the terrain is made of. */
+const NATURAL_MARKS: Record<number, string> = {
+  [Block.Grass]: ".",
+  [Block.Dirt]: "d",
+  [Block.Stone]: "#",
+  [Block.Farmland]: ",",
+  [Block.Sand]: ":",
+  [Block.Gravel]: ":",
+  [Block.Clay]: ":",
+};
+/** Marks the legend already means something by (villagers are digits). */
+const FIXED_MARKS = "@.,swWd#:~≈ft+";
+/** For built blocks once their names' letters are all taken. */
+const SPARE_MARKS = "$=^!?;<>";
+
 /** Height marks: "=" level with you, 1-9 higher, a-i lower. */
 function heightMark(dh: number): string {
   if (dh === 0) return "=";
@@ -690,6 +643,26 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   let ripe = 0, growing = 0, soonest = Infinity;
   /** Map marks of the plants in view, and what they are. */
   const marks = new Map<string, Set<string>>();
+  // Built blocks (planks, brick, anything agents invent) get a mark no plant or animal uses.
+  const taken = new Set([...FIXED_MARKS, ...SPECIES.map((d) => d.mark)]);
+  for (let z = az - r; z <= az + r; z++) {
+    for (let x = ax - r; x <= ax + r; x++) {
+      const prop = sim.props.at(x, z);
+      const info = prop && sim.props.info(prop);
+      if (info) taken.add(info.mark);
+    }
+  }
+  const built = new Map<number, string>();
+  const blockMark = (b: number) => {
+    let mark = NATURAL_MARKS[b] ?? built.get(b);
+    if (mark) return mark;
+    const name = sim.blocks.name(b);
+    mark = [...name.toUpperCase(), ...name.toLowerCase(), ...SPARE_MARKS]
+      .find((ch) => /[^\s\d]/.test(ch) && !taken.has(ch)) ?? "?";
+    taken.add(mark);
+    built.set(b, mark);
+    return mark;
+  };
 
   for (let z = az - r; z <= az + r; z++) {
     let row = "", hrow = "";
@@ -699,15 +672,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         row += " ", hrow += " ";
         continue;
       }
-      let c = ({
-        [Block.Grass]: ".",
-        [Block.Dirt]: "d",
-        [Block.Stone]: "#",
-        [Block.Farmland]: ",",
-        [Block.Sand]: ":",
-        [Block.Gravel]: ":",
-        [Block.Clay]: ":",
-      } as Record<number, string>)[w.get(x, h, z)] ?? "?";
+      let c = blockMark(w.get(x, h, z));
       if (w.waterTop[z * w.sizeX + x] >= 0) c = w.waterTop[z * w.sizeX + x] - h > 1 ? "≈" : "~";
       const prop = sim.props.at(x, z);
       const info = prop && sim.props.info(prop);
@@ -749,6 +714,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  f fish school  ${
       SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
     }  1-9 other villagers | height = same, 1-9 higher, a-i lower`,
+    ...(built.size
+      ? [`Blocks: ${[...built].map(([b, m]) => `${m} ${sim.blocks.name(b)}`).join("  ")}`]
+      : []),
     ...(marks.size
       ? [
         `Plants: ${

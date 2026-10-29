@@ -1,6 +1,7 @@
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent, Sprite } from "./sim.ts";
+import type { WorldData } from "./world.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
 export const AGENT_STRIDE = 8;
@@ -11,8 +12,9 @@ export const ANIMAL_READY = 1;
 /** Floats per fish school in `TickMessage.schools`: id, species, x, z, count. */
 export const SCHOOL_STRIDE = 5;
 /**
- * Floats per crop in `TickMessage.crops`: x, y, z, growth, then the stalk color and the ripe color
- * (sRGB 0xRRGGBB, exact in a float) and two spare.
+ * Floats per crop in `TickMessage.crops`: x, y, z, the tick it was planted (relative to the
+ * message's tick), then the stalk color and the ripe color (sRGB 0xRRGGBB, exact in a float), the
+ * ticks it takes to ripen (0: always ripe) and one spare. The page works out growth on the GPU.
  */
 export const CROP_STRIDE = 8;
 
@@ -41,12 +43,12 @@ export type ToWorker =
 export interface ReadyMessage {
   type: "ready";
   seed: number;
-  /** Flat x, y, z, block for every cell that differs from the generated world. */
-  edits: Int32Array<ArrayBuffer>;
+  /** The world as it stands, edits included, so the page doesn't regenerate it. */
+  world: WorldData;
   /** Ticks fast-forwarded to cover time spent away. */
   caughtUp: number;
-  /** Props that differ from generation (the page regenerates the rest from the seed). */
-  props: PropDiff;
+  /** Nature's generated props (packed quads, see `Props.packGenerated`) and today's difference. */
+  props: { generated: Int32Array<ArrayBuffer>; diff: PropDiff };
   catalog: CatalogSave;
 }
 
@@ -66,10 +68,16 @@ export interface TickMessage {
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
   catalog?: CatalogDelta;
-  /** Sent when crops change and once a second while they grow. */
+  /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;
   events: SimEvent[];
   results: CallResult[];
 }
 
-export type FromWorker = ReadyMessage | TickMessage;
+/** Results of tools that answered at once (look, say, Catalog reads), sent without waiting a tick. */
+export interface ResultsMessage {
+  type: "results";
+  results: CallResult[];
+}
+
+export type FromWorker = ReadyMessage | TickMessage | ResultsMessage;

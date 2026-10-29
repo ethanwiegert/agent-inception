@@ -21,6 +21,16 @@ export function slopeDrop(mask: number, fx: number, fz: number): number {
     : d11 + (d10 - d11) * (1 - fz) + (d01 - d11) * (1 - fx);
 }
 
+/** A world's voxels and column heights, as the worker hands them to the page's mirror. */
+export interface WorldData {
+  sizeX: number;
+  sizeY: number;
+  sizeZ: number;
+  blocks: Uint8Array<ArrayBuffer>;
+  top: Int16Array<ArrayBuffer>;
+  waterTop: Int16Array<ArrayBuffer>;
+}
+
 /**
  * Fixed-size voxel world. Blocks are stored y-major per column-slab so a chunk
  * column is contiguous enough for meshing. Every edit bumps its chunk's version
@@ -38,14 +48,39 @@ export class World {
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
 
-  constructor(readonly sizeX: number, readonly sizeY: number, readonly sizeZ: number) {
-    this.blocks = new Uint8Array(sizeX * sizeY * sizeZ);
-    this.top = new Int16Array(sizeX * sizeZ).fill(-1);
-    this.waterTop = new Int16Array(sizeX * sizeZ).fill(-1);
+  constructor(
+    readonly sizeX: number,
+    readonly sizeY: number,
+    readonly sizeZ: number,
+    data?: WorldData,
+  ) {
+    this.blocks = data?.blocks ?? new Uint8Array(sizeX * sizeY * sizeZ);
+    this.top = data?.top ?? new Int16Array(sizeX * sizeZ).fill(-1);
+    this.waterTop = data?.waterTop ?? new Int16Array(sizeX * sizeZ).fill(-1);
     this.propSolid = new Uint8Array(sizeX * sizeZ);
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);
+  }
+
+  /** A world around `data`'s arrays (taken, not copied), every chunk due for meshing. */
+  static fromData(data: WorldData): World {
+    const w = new World(data.sizeX, data.sizeY, data.sizeZ, data);
+    w.chunkVersion.fill(1);
+    return w;
+  }
+
+  /** A copy of the voxels and heights, safe to transfer. */
+  data(): WorldData {
+    const { sizeX, sizeY, sizeZ } = this;
+    return {
+      sizeX,
+      sizeY,
+      sizeZ,
+      blocks: this.blocks.slice(),
+      top: this.top.slice(),
+      waterTop: this.waterTop.slice(),
+    };
   }
 
   index(x: number, y: number, z: number): number {

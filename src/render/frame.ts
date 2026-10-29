@@ -18,10 +18,10 @@ export const F = {
   grassCenter: 84, // center x, center z, world size x, world size z
   wind: 88, // dir x, dir z, strength, -
   grade: 92, // saturation, contrast, warmth, vignette
-  extra: 96, // star visibility, daylight, sea level, -
+  extra: 96, // star visibility, 1 - moonlit grading, sea level, -
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
-  weather: 108, // cloud cover 0-1, cloud drift speed, -, -
+  weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, -
   size: 112,
 } as const;
 
@@ -104,6 +104,13 @@ fn skyColor(dir: vec3f) -> vec3f {
   let h = pow(1.0 - max(up, 0.0), 5.0);
   var c = mix(frame.skyZenith.rgb, frame.skyHorizon.rgb, h);
   c = mix(c, frame.skyHorizon.rgb * 0.8, smoothstep(0.0, -0.3, up));
+  // Around sunrise and sunset a warm band hugs the horizon, deepest on the sun's side.
+  let twilight = clamp(1.0 - abs(frame.sunPos.y) / 0.25, 0.0, 1.0);
+  let flat = vec2f(dir.x, dir.z);
+  let sunFlat = vec2f(frame.sunPos.x, frame.sunPos.z);
+  let toward = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4) * 0.5 + 0.5;
+  let band = exp(-max(up, 0.0) * 9.0) * twilight * (0.25 + 0.75 * toward * toward);
+  c += vec3f(1.0, 0.42, 0.14) * band * 0.45;
   let s = max(dot(dir, frame.sunPos.xyz), 0.0);
   let glow = mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0, 0.9, 0.75), clamp(frame.sunPos.y * 3.0, 0.0, 1.0));
   c += glow * frame.sunPos.w * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.5);

@@ -26,7 +26,9 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 - `deno task check` — type check, lint, fmt check (run `deno fmt` to fix formatting)
 - `deno task test` — sim + world tests (headless, fast)
 - `deno task shot [out.png] [query]` — build, open Chromium on the real GPU, print frame/GPU
-  timings, save a screenshot. Query is URL params, e.g. `"seed=7&time=0.62&speed=0"`.
+  timings, save a screenshot. Query is URL params, e.g. `"seed=7&time=0.62&speed=0"`. With no
+  display (cloud VMs, CI) it runs headless on SwiftShader and captures offscreen: the picture is
+  real, the milliseconds are CPU emulation (`gpuMeasured: false`), good only for before/after.
 - `deno task camshot out.png "query" '{"distance":60,"pitch":0.2,"yaw":2.1,"dx":-60,"dz":30}'` —
   like `shot`, but poses the camera (offset from world center) and prints GPU errors
 - `deno task build` — minified `dist/main.js` + `dist/worker.js`
@@ -35,15 +37,18 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
 `time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
 `storybook`), `bridge` (WebSocket URL override), `debug` (comma list of passes to skip for
-profiling: `shadow,terrain,grass,water,sky,bodies,props`).
+profiling: `shadow,terrain,grass,water,sky,bodies,props`), `headless` (never touch the canvas;
+frames render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
 
 ## Code map
 
 ```
-src/main.ts         page entry: WebGPU init, frame loop, tool routing, screenshot, sprite decoding
+src/main.ts         page entry: WebGPU init, frame loop, tool routing, offscreen screenshot/capture
+                    (name tags burnt in), session → villager cache, sprite decoding
 src/worker.ts       sim worker: 20 Hz loop, streams ticks to the page, IndexedDB save/load
 src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation, tool calls
-src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect)
+src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect; a tab another tab replaced waits to be
+                    looked at again)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
@@ -54,30 +59,34 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     farmer, animal bodies, drops/growth/food Relations, example Rules),
                     rules.ts (Rule schema + engine: triggers, budget, effects),
                     catalogtools.ts (catalog_* / propose / vote tools),
+                    buildtools.ts (place_block / break_block over areas and layers, build a
+                    Design's blocks across calls, never trapping the builder),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),
                     animals.ts (species, herds, wander/graze/sleep/shy/follow-wheat AI),
                     fish.ts (fish species, schools, river/sea habitat),
                     path.ts (A* over floors, wading, swimming), protocol.ts, noise.ts, rng.ts
-src/render/         renderer.ts (passes, shadows, GPU timer, debug skips), frame.ts (uniforms +
-                    common/lighting WGSL: noise, sky, clouds, shadows), terrain.ts + mesher.ts,
-                    surface.ts (per-column GPU texture), grass.ts (compute cull + indirect),
-                    water.ts, crops.ts, meshes.ts (primitives → templates, instance batches) + models.ts
-                    (instanced draws, wind) + designs.ts (any Design → mesh: parts in their
+src/render/         renderer.ts (passes into any target, shadows, GPU timer, debug skips, readback
+                    captures), frame.ts (uniforms + common/lighting WGSL: noise, sky, clouds,
+                    shadows), terrain.ts + mesher.ts (skips buried blocks), surface.ts
+                    (per-column GPU texture), grass.ts (compute cull + indirect), water.ts (wet
+                    columns of visible chunks), crops.ts (growth on the GPU from planting ticks),
+                    meshes.ts (primitives → templates, instance batches) + models.ts (instanced
+                    draws, wind, GPU culling per view) + designs.ts (any Design → mesh: parts in their
                     Materials' looks, role groups around joints) + body.ts (villager rig from the
                     "farmer" Design, tools, sprite dolls) + flora.ts (plant templates and
                     instances) + fauna.ts (animal rigs from their Designs; fish schools),
-                    sky.ts,
-                    post.ts, look.ts (presets, sun/moon, weather)
+                    sky.ts, post.ts (PBR Neutral tonemap, grading, sharpening), look.ts (presets,
+                    sun/moon, weather)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
 
 Uniform layout lives in `render/frame.ts`: the `F` offsets and the WGSL `Frame` struct must change
 together. The surface texture (`render/surface.ts`, rgba16uint per column) is read by grass, water
-and terrain: r height, g block, b slope mask | grass-neighbour bits << 4, a water level + 1. Slope
-rules live in `World.slopeMask`/`slopeDrop`; the grass shader has a WGSL mirror of `slopeDrop` that
-must stay identical.
+and terrain: r height, g block, b slope mask | grass-neighbour bits << 4 (grassy neighbours within a
+block of height), a water level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass
+shader has a WGSL mirror of `slopeDrop` that must stay identical.
 
 ## Current work
 
@@ -89,12 +98,17 @@ report in `docs/playtests/`, fixes, perf, screenshots).
 ## Testing and debugging
 
 - The T3 preview pane gets the real GPU: open http://localhost:5173 there to watch. The page exposes
-  `__game` (`client`, `call(session, tool, args)`, `camera()`) and `__perf` (`summary()`,
-  `gpuErrors`) for `preview_evaluate`.
+  `__game` (`client`, `call(session, tool, args)`, `camera()`, `setLook(id)`,
+  `capture(width, height, pose?, atMs?)` → PNG data URL rendered offscreen; fix `atMs` to compare
+  shots without drifting clouds) and `__perf` (`summary()` with `gpuMs` and `readyMs`, the
+  first-frame budget; `gpuErrors`) for `preview_evaluate`.
 - `deno task shot` uses a fresh Chromium profile, so its world is empty (no saved agents). Use it
   for looks and perf; use the preview tab or the MCP `screenshot` tool to see agents.
-- Hidden tabs pause `requestAnimationFrame`; the sim worker keeps running and `screenshot` renders a
-  frame directly, so agents work while nobody watches.
+- Hidden tabs pause `requestAnimationFrame`; the sim worker keeps running and `screenshot` renders
+  offscreen (1024×640, name tags burnt in), so agents work while nobody watches.
+- Without a display, drive a headless tab yourself: `launch()` from `tools/browser.ts` adds
+  `headless` and SwiftShader flags; then `__game.capture()` for pictures. A software frame takes
+  seconds.
 - Drive the bridge without an agent:
 
   ```sh
@@ -107,6 +121,12 @@ report in `docs/playtests/`, fixes, perf, screenshots).
 
 - Chromium on Linux needs `--enable-unsafe-webgpu --enable-features=Vulkan` and a real window;
   headless only gets SwiftShader. `tools/browser.ts` handles it (a window briefly appears).
+  SwiftShader can't back a WebGPU canvas (the device is lost on the first frame), which is why
+  headless runs use `?headless` and offscreen captures.
+- Instant tools (look, say, Catalog reads) answer before the next tick message, so the page's mirror
+  (agents, profiles) can lag a result by up to 50 ms.
+- Killing a harness `deno` process can orphan its Chromium; the bridge then has two tabs. A tab the
+  bridge replaced stays off until focused, but stray tabs still hold memory: kill them by PID.
 - Run the dev server in the background with the maximum timeout; a Claude Code restart kills it.
   `.mcp.json` is read at session start; if the server was down then, use `/mcp` to reconnect.
 - WGSL: one declaration per `let`; mixing `*` and `^` needs parentheses. Shader errors surface in

@@ -46,7 +46,7 @@ fn disc(dir: vec3f, d: vec3f, r: f32) -> vec4f {
   color += sunTint * sun.x * 18.0 * frame.sunPos.w * above;
 
   // The moon: lit from the sun's side so its phase follows the sun-moon angle, with soft maria.
-  let moon = disc(dir, frame.moonDir.xyz, 0.016);
+  let moon = disc(dir, frame.moonDir.xyz, 0.0125);
   if (moon.x > 0.0) {
     let lit = smoothstep(-0.05, 0.15, dot(moon.yzw, frame.sunPos.xyz));
     let maria = 0.75 + 0.25 * valueNoise(moon.yz * 9.0 + moon.w * 5.0);
@@ -60,8 +60,14 @@ fn disc(dir: vec3f, d: vec3f, r: f32) -> vec4f {
     let p = frame.cameraPos.xz + dir.xz * t;
     let d = cloudDensity(p);
     let sunSide = max(dot(dir, frame.sunPos.xyz), 0.0);
-    let cloud = (frame.skyHorizon.rgb * 0.6 + frame.sunColor.rgb * frame.sunDir.w * (0.35 + 0.5 * pow(sunSide, 4.0))) * mix(1.0, 0.7, d);
-    color = mix(color, cloud, d * smoothstep(0.01, 0.15, dir.y) * 0.9);
+    // Thin cloud glows in the key light; thick cores are greyer underneath; edges toward the
+    // sun catch a silver lining.
+    let lit = frame.sunColor.rgb * frame.sunDir.w;
+    let ambient = frame.skyZenith.rgb * 1.1 + frame.skyHorizon.rgb * 0.45;
+    let thick = smoothstep(0.35, 1.0, d);
+    var cloud = mix(lit * 0.5 + ambient, lit * 0.16 + ambient * 0.85, thick);
+    cloud += lit * pow(sunSide, 6.0) * (1.0 - thick) * 0.8;
+    color = mix(color, cloud, d * smoothstep(0.01, 0.12, dir.y) * 0.95);
   }
   return vec4f(color, 1.0);
 }

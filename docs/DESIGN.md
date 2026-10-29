@@ -28,27 +28,27 @@ choice.
 
 ## Decisions
 
-| Topic         | Decision                                                                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Audience      | V1: a hosted static site; each visitor points their own agent at their own world. V2: shared worlds and a global Catalog.                 |
-| Platform      | Browser, WebGPU only, Chromium-family for V1. Linux Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.                     |
-| Toolchain     | Deno only (check, bundle, test, fmt, lint, serve). No npm/jsr packages.                                                                   |
-| Language      | TypeScript, data-oriented (typed arrays). Hot kernels move to Zig→WASM only when the profiler says so.                                    |
-| Where it runs | The sim runs in the visitor's tab; a hosted relay pipes MCP to it by pairing code (ADR 0001). Host chosen at M14 (Cloudflare likely).     |
-| Simulation    | Deterministic fixed-tick core (20 Hz, seeded PRNG) in a Web Worker, no DOM. Same code runs headless in Deno for tests (and a V2 server).  |
-| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, sun/moon shadow map, cloud shadows, GPU water, compute-culled grass.                                  |
-| World         | 256×256×64 voxel island in 32×32 chunk columns: rolling hills, river valleys, beaches, sea to the horizon.                                |
-| Catalog       | Append-only store of kinds (Materials, Parts, Designs, Rules, Relations), separate from the World store of things (ADR 0003).             |
-| Behavior      | Rules: validated JSON trees, trigger → conditions → effects through engine operations. No agent code (ADR 0004).                          |
-| Physics       | Today: bodies follow the walkable surface, A* (climb 1, drop 2, wade 1, swim 3). V1: collision, rigid bodies, joints, light/fire/signals. |
-| Making        | Designs combine Blocks (voxel grid: walls, floors, roofs) and Parts (free-form shapes and mechanisms); built Designs become Objects.      |
-| Villagers     | One world, many agents: each MCP session `join`s a named villager; rejoining reattaches it. Bodies are 3D Designs from Parts (ADR 0005).  |
-| Animals       | Sheep, cows, chickens, ducks and fish schools: species in sim code until V2; their products and drops move to the Catalog.                |
-| Village Life  | On by default: Needs (hunger, energy; slow, never kill), village level with Unlocks, Errands. Spectators can switch to Sandbox anytime.   |
-| Spectators    | Watch, follow, pin Wishes on the Notice Board, control time/speed/look/weather/world slots/Village Life. They never move villagers.       |
-| Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                   |
-| Persistence   | IndexedDB in the worker, every 5 s and on tab hide. V1: 3 world slots, export/import, versioned saves (breakable until M14).              |
-| Audio         | WebAudio layer with positional sound and event hooks (M13); soundtrack and voices are authored by Ethan.                                  |
+| Topic         | Decision                                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience      | V1: a hosted static site; each visitor points their own agent at their own world. V2: shared worlds and a global Catalog.                                                            |
+| Platform      | Browser, WebGPU only, Chromium-family for V1. Linux Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.                                                                |
+| Toolchain     | Deno only (check, bundle, test, fmt, lint, serve). No npm/jsr packages.                                                                                                              |
+| Language      | TypeScript, data-oriented (typed arrays). Hot kernels move to Zig→WASM only when the profiler says so.                                                                               |
+| Where it runs | The sim runs in the visitor's tab; a hosted relay pipes MCP to it by pairing code (ADR 0001). Host chosen at M14 (Cloudflare likely).                                                |
+| Simulation    | Deterministic fixed-tick core (20 Hz, seeded PRNG) in a Web Worker, no DOM. Same code runs headless in Deno for tests (and a V2 server).                                             |
+| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, sun/moon shadow map, cloud shadows, GPU water, compute-culled grass and props, PBR Neutral tonemap.                                              |
+| World         | 256×256×64 voxel island in 32×32 chunk columns: rolling hills, river valleys, beaches, sea to the horizon.                                                                           |
+| Catalog       | Append-only store of kinds (Materials, Parts, Designs, Rules, Relations), separate from the World store of things (ADR 0003).                                                        |
+| Behavior      | Rules: validated JSON trees, trigger → conditions → effects through engine operations. No agent code (ADR 0004).                                                                     |
+| Physics       | Today: bodies follow the walkable surface, A* (climb 1, drop 2, wade 1, swim 3; hop down 4 only when there's no other way). V1: collision, rigid bodies, joints, light/fire/signals. |
+| Making        | Designs combine Blocks (voxel grid: walls, floors, roofs) and Parts (free-form shapes and mechanisms); built Designs become Objects.                                                 |
+| Villagers     | One world, many agents: each MCP session `join`s a named villager; rejoining reattaches it. Bodies are 3D Designs from Parts (ADR 0005).                                             |
+| Animals       | Sheep, cows, chickens, ducks and fish schools: species in sim code until V2; their products and drops move to the Catalog.                                                           |
+| Village Life  | On by default: Needs (hunger, energy; slow, never kill), village level with Unlocks, Errands. Spectators can switch to Sandbox anytime.                                              |
+| Spectators    | Watch, follow, pin Wishes on the Notice Board, control time/speed/look/weather/world slots/Village Life. They never move villagers.                                                  |
+| Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                                                              |
+| Persistence   | IndexedDB in the worker, every 5 s and on tab hide. V1: 3 world slots, export/import, versioned saves (breakable until M14).                                                         |
+| Audio         | WebAudio layer with positional sound and event hooks (M13); soundtrack and voices are authored by Ethan.                                                                             |
 
 ## The Catalog
 
@@ -101,6 +101,10 @@ Settled with Ethan while workshopping M1; keep to it unless he asks otherwise.
 
 - **Natural** is the default look (`render/look.ts`): Crisp blocks evolved toward smoother, more
   realistic shading after Ethan asked for it. Crisp, Lush and Storybook remain as alternates.
+- Colors stay true (2026-10-28 overhaul): the Khronos PBR Neutral tonemap keeps a Material's hue, so
+  an agent's "#b08850" planks read as that color, skies and sea stay blue instead of going
+  grey-white, and sunsets keep their warmth. A light contrast-adaptive sharpen keeps edges crisp
+  after the MSAA resolve. Moonlit grading starts only once the sun is down.
 - Hills shade smoothly (per-vertex ground normals) and material edges (grass/sand) are organic
   curves, not block steps. Water is clear and teal over sand, darkening with depth.
 - Grass is dense, tall and fine: 64 blades per block, 0.6 tall, 0.05 wide, generated on the GPU.
@@ -108,6 +112,11 @@ Settled with Ethan while workshopping M1; keep to it unless he asks otherwise.
   and cliff shadows read as soft shade, never black stripes.
 - Terrain mixes single steps with some multi-step cliffs, and one-block rises are smooth slopes
   ("hills"), not stairs. Farmland and placed stone stay square.
+- Every natural ground material meets its neighbours along organic edges (grass by the blade edge;
+  sand, gravel, clay and dirt by a noise-wobbled lookup), never in block squares. Grass blends only
+  with neighbours within a block of height, so it doesn't creep up walls or into pits.
+- Skies: a warm twilight band hugs the horizon toward the sun; clouds are lit, thin edges bright and
+  thick cores grey, with a silver lining toward the sun.
 - Pacing is chill and methodical: ~2 blocks/s walking, 1-2 s per tile of work.
 - Nights are dark and blue but readable; golden hour has long soft shadows.
 
@@ -118,37 +127,44 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 ```
 
 - **Tools** are defined once in `src/sim/tools.ts` (JSON schema + handler). The bridge imports the
-  definitions to list them; the sim runs them. `screenshot` runs in the page, and the page decodes
-  `set_sprite` images to pixels before the sim sees them.
+  definitions to list them; the sim runs them. `screenshot` runs in the page (offscreen, 1024×640,
+  villager name tags burnt in, so it works in a hidden tab), and the page decodes `set_sprite`
+  images to pixels before the sim sees them.
 - **Bridge** (`tools/bridge.ts`, zero deps): a Streamable HTTP MCP server (JSON responses, no SSE,
   Origin-checked). In dev it shares port 5173 with the game; standalone it's `deno task bridge` on
   7777. It is a pipe, not an authority: the tab owns the world. Latest connected tab wins. The V1
   relay is the same pipe, addressed by pairing code.
 - **Sessions → villagers**: each MCP session `join`s with a name; joining an existing name
   reattaches that villager (inventory, journal, look). Session bindings are saved, so a page reload
-  doesn't kick agents. A hidden `_whoami` tool lets the page map a session to its villager.
+  doesn't kick agents. A hidden `_whoami` tool lets the page map a session to its villager; the page
+  asks once per session and caches it, so calls don't wait on it.
+- **Latency**: instant tools (look, say, Catalog reads) answer as soon as the worker runs them,
+  without waiting for the next tick (2–6 ms through the bridge); jobs answer on the tick they end.
+- **One tab drives**: the bridge serves the newest tab; a tab it replaced stays off the bridge until
+  someone looks at it again, so two tabs never split an agent's calls between two worlds.
 - **Tools run as jobs**: each tool call becomes a generator that advances one sim tick per `yield`
   and returns its result text. Area tools cover up to 16 tiles per call so agents spend few calls
   and calls stay under MCP client timeouts (seconds to about a minute).
 
 ### Tools today
 
-| Tool                             | What it does                                                                                                                                                                                                                  |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `join`                           | Enter as a named villager (or reattach). Must come first.                                                                                                                                                                     |
-| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, props, animals, villagers.                                                                                                                                   |
-| `walk_to`                        | A* walk to a tile.                                                                                                                                                                                                            |
-| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Plant a seed, sapling or plant name; ground and growth time come from its habitat and `grows_into` (wheat: ~18 game hours). Harvest gives the ripe crop's drops (wheat: 1 wheat and 2 wheat seeds). |
-| `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather.                                                                                                                                   |
-| `place_block` / `break_block`    | Stack dirt or stone, or dig the top block. Digging gives the block's drops (grass and farmland give dirt), or the block itself; harder blocks take longer.                                                                    |
-| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.                                                                                                                                          |
-| `say`                            | Speech bubble + activity feed line.                                                                                                                                                                                           |
-| `wait`                           | Rest 1-60 real seconds.                                                                                                                                                                                                       |
-| `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                                                                                                                                                      |
-| `screenshot`                     | JPEG centered on the caller, ~20 blocks across.                                                                                                                                                                               |
-| `catalog_find` / `catalog_get`   | Search the Catalog (kind, text, author, property, related_to) or read one entry in full.                                                                                                                                      |
-| `catalog_add` / `catalog_fork`   | Author a Material, Design, Rule or Relation, or fork an entry with changes on top.                                                                                                                                            |
-| `propose` / `vote` / `proposals` | Retire or replace an entry by lazy-consensus vote over one game day.                                                                                                                                                          |
+| Tool                             | What it does                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `join`                           | Enter as a named villager (or reattach). Must come first.                                                                                                                                                                                                                                                                                                                                           |
+| `look`                           | Text map (radius 3-12) with tile types, relative heights, crops, props, animals, villagers.                                                                                                                                                                                                                                                                                                         |
+| `walk_to`                        | A* walk to a tile.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Plant a seed, sapling or plant name; ground and growth time come from its habitat and `grows_into` (wheat: ~18 game hours). Harvest gives the ripe crop's drops (wheat: 1 wheat and 2 wheat seeds).                                                                                                                                                                       |
+| `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather.                                                                                                                                                                                                                                                                                                         |
+| `place_block` / `break_block`    | Lay any held block Material over an area (≤16 columns) stacked `layers` high (≤4; ≤48 blocks a call), or at a height `y` beside something solid; dig areas and layers down from the top, or upward from `y` (doorways). Digging gives the block's drops (grass and farmland give dirt), or the block itself; harder blocks take longer. Diggers work inside-out so they never end in their own pit. |
+| `build`                          | Lay a Design's `blocks` grid at x, z (on the highest ground under it, or `y`), bottom layer first, ≤48 blocks or ~50 s a call; calling again carries on. Never shuts the builder in or strands them on the roof.                                                                                                                                                                                    |
+| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.                                                                                                                                                                                                                                                                                                                |
+| `say`                            | Speech bubble + activity feed line.                                                                                                                                                                                                                                                                                                                                                                 |
+| `wait`                           | Rest 1-60 real seconds.                                                                                                                                                                                                                                                                                                                                                                             |
+| `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                                                                                                                                                                                                                                                                                                                            |
+| `screenshot`                     | JPEG centered on the caller, ~20 blocks across, 1024×640, with villager name tags.                                                                                                                                                                                                                                                                                                                  |
+| `catalog_find` / `catalog_get`   | Search the Catalog (kind, text, author, property, related_to) or read one entry in full.                                                                                                                                                                                                                                                                                                            |
+| `catalog_add` / `catalog_fork`   | Author a Material, Design, Rule or Relation, or fork an entry with changes on top.                                                                                                                                                                                                                                                                                                                  |
+| `propose` / `vote` / `proposals` | Retire or replace an entry by lazy-consensus vote over one game day.                                                                                                                                                                                                                                                                                                                                |
 
 ## Terrain and bodies
 
@@ -167,17 +183,28 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 
 ## Simulation
 
-- Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world by regenerating it
-  from the seed and applying streamed edits, and interpolates villager positions between ticks.
-- Crops grow from the clock, so idle progress is free.
+- Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world, which the worker
+  sends whole once (voxels, heights and the generated props) and then patches with streamed edits,
+  and interpolates villager positions between ticks. Nothing is generated twice.
+- Crops grow from the clock, so idle progress is free; the page draws their growth on the GPU from
+  each crop's planting tick, so fields ripen smoothly and nothing is re-sent while they grow.
+- Worldgen memoizes noise gradients per lattice point (bit-identical output, ~3× faster), and the
+  mesher skips buried blocks (identical meshes, ~2.5× faster), so placing a block remeshes in about
+  a millisecond per chunk instead of hitching the frame.
 - Messages that arrive while the worker is still loading its save are queued, not dropped.
 
 ## Performance budgets
 
 - 60 fps on an integrated-GPU laptop at 1080p (unmeasured so far; measured before V1); 144 fps on
   the dev box.
-- < 2 MB transferred to first frame, < 1 s to first frame. Today: ~185 KB + ~104 KB minified JS.
+- < 2 MB transferred to first frame, < 1 s to first frame. Today: ~207 KB + ~114 KB minified JS;
+  `__perf.summary().readyMs` (navigation to a drawable world) is ~0.5-0.9 s even under software
+  WebGPU on the cloud VM.
 - Sim tick < 2 ms today; < 4 ms with 500 awake rigid bodies once physics lands. No per-frame
   allocations in hot paths.
 - Measured on the RTX 2070 Super: ~2.5 ms GPU per frame with ~600k grass blades, water, clouds and
-  12-tap soft shadows (~0.75 ms of that is MSAA resolve + post at the harness size).
+  12-tap soft shadows (~0.75 ms of that is MSAA resolve + post at the harness size). Before the
+  2026-10-28 overhaul; not yet remeasured on hardware (see `playtests/0003-overhaul.md` for the
+  software before/after).
+- Props are culled on the GPU for the view and the shadow map; terrain shadow chunks against the
+  light. Up close that removed nearly all prop cost (software: ~770 ms → ~8 ms of a frame).

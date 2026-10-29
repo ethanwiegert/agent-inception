@@ -2,12 +2,11 @@
  * Build, load the game in Chromium, report frame timings and save a screenshot.
  * Usage: deno task shot [out.png] [query], e.g. `shot crisp.png "look=crisp&time=0.3"`.
  */
-import { launch } from "./browser.ts";
+import { headless, launch } from "./browser.ts";
 import { serve } from "./serve.ts";
 
 const out = Deno.args[0] ?? "shot.png";
 const query = Deno.args[1] ? `?${Deno.args[1]}` : "";
-const settleMs = 3000;
 
 const build = await new Deno.Command("deno", { args: ["task", "-q", "build"] }).output();
 if (!build.success) {
@@ -19,21 +18,21 @@ const server = serve(0);
 const browser = await launch(`http://127.0.0.1:${server.addr.port}/${query}`);
 let fatal = "";
 try {
-  await new Promise((r) => setTimeout(r, settleMs));
-  const adapter = await browser.evaluate(
+  await browser.waitForFrames(headless ? 8 : 120, headless ? 120_000 : 10_000);
+  const adapter = await browser.evaluate<string>(
     `navigator.gpu?.requestAdapter().then(a => a ? a.info.vendor + "/" + a.info.architecture : "none")`,
   );
   fatal = await browser.evaluate<string>(`document.getElementById("fatal").textContent`) ?? "";
+  // Headless pages draw only when captured, so read the timings after the shot.
+  await Deno.writeFile(out, await browser.screenshot());
   const perf = await browser.evaluate(`globalThis.__perf?.summary()`);
-  const { data } = await browser.send<{ data: string }>("Page.captureScreenshot", {
-    format: "png",
-  });
-  await Deno.writeFile(out, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+  const software = adapter.includes("swiftshader");
   console.log(JSON.stringify(
     {
       adapter,
       fatal: fatal || null,
-      gpuMeasured: !fatal,
+      gpuMeasured: !fatal && !software,
+      ...(software ? { note: "software adapter: timings are CPU emulation, not GPU cost" } : {}),
       perf,
       screenshot: out,
     },

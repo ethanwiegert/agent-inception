@@ -4,14 +4,18 @@ import { Block, CHUNK, World } from "../sim/world.ts";
  * One rgba16uint texel per column, shared by every GPU-generated layer (grass,
  * water, terrain blending):
  *   r: top solid height   g: top block   a: water level + 1 (0 = dry)
- *   b: bits 0-3 slope mask, bits 4-11 which neighbours are grassy
- *      (W, E, N, S, NW, NE, SW, SE) so material edges can blend smoothly.
+ *   b: bits 0-3 slope mask, bits 4-11 which neighbours are grassy and within a block of this
+ *      column's height (W, E, N, S, NW, NE, SW, SE) so material edges blend smoothly across
+ *      level ground and slopes, but grass never creeps up a wall or down into a dug pit.
  * Only the columns around edited chunks are recomputed.
  */
 export class SurfaceTexture {
   readonly texture: GPUTexture;
   readonly view: GPUTextureView;
-  private texels: Uint16Array;
+  /** The CPU copy of every texel (same layout as the texture). */
+  readonly texels: Uint16Array;
+  /** Bumps whenever any texel changes, so layers built from the texels know to rebuild. */
+  version = 0;
   private versions: Uint32Array;
 
   constructor(private device: GPUDevice, private world: World) {
@@ -30,6 +34,7 @@ export class SurfaceTexture {
     for (let i = 0; i < this.versions.length; i++) {
       if (this.versions[i] === world.chunkVersion[i]) continue;
       this.versions[i] = world.chunkVersion[i];
+      this.version++;
       // Slope masks and grass edges depend on neighbours, so refresh a one-column border too.
       const cx = (i % world.chunksX) * CHUNK, cz = Math.floor(i / world.chunksX) * CHUNK;
       const x0 = Math.max(0, cx - 1), z0 = Math.max(0, cz - 1);
@@ -41,7 +46,7 @@ export class SurfaceTexture {
           this.texels[t + 1] = h >= 0 ? world.get(x, h, z) : 0;
           let edges = 0;
           for (let k = 0; k < 8; k++) {
-            if (grassy(world, x + NEIGHBOURS[k * 2], z + NEIGHBOURS[k * 2 + 1])) edges |= 1 << k;
+            if (grassy(world, x + NEIGHBOURS[k * 2], z + NEIGHBOURS[k * 2 + 1], h)) edges |= 1 << k;
           }
           this.texels[t + 2] = world.slopeMask(x, z) | (edges << 4);
           this.texels[t + 3] = world.waterTop[c] + 1;
@@ -59,9 +64,11 @@ export class SurfaceTexture {
 
 const NEIGHBOURS = [-1, 0, 1, 0, 0, -1, 0, 1, -1, -1, 1, -1, -1, 1, 1, 1];
 
-function grassy(world: World, x: number, z: number): boolean {
+/** Grass on dry ground at most a block above or below `level`. */
+function grassy(world: World, x: number, z: number, level: number): boolean {
   const h = world.heightAt(x, z);
-  return h >= 0 && world.get(x, h, z) === Block.Grass && world.waterDepth(x, z) === 0;
+  return h >= 0 && Math.abs(h - level) <= 1 && world.get(x, h, z) === Block.Grass &&
+    world.waterDepth(x, z) === 0;
 }
 
 /**

@@ -104,9 +104,12 @@ export class Props {
   version = 0;
   private generated: Map<number, Prop>;
 
-  /** Generate from a pristine world (before any edits). `catalog` says what each Design is. */
-  constructor(readonly world: World, seed: number, public catalog: Catalog) {
-    this.generated = generateProps(world, seed);
+  /**
+   * Generate from a pristine world (before any edits) and `seed`, or take an already generated set
+   * (the page mirrors the worker's). `catalog` says what each Design is.
+   */
+  constructor(readonly world: World, seed: number | Int32Array, public catalog: Catalog) {
+    this.generated = typeof seed === "number" ? generateProps(world, seed) : unpack(seed);
     this.map = new Map(this.generated);
     for (const [key, p] of this.map) world.propSolid[key] = this.solid(p) ? 1 : 0;
   }
@@ -133,6 +136,16 @@ export class Props {
   growth(p: Prop, tick: number): number {
     if (!p.grow || p.planted === GROWN) return 1;
     return Math.min(1, Math.max(0, (tick - p.planted) / p.grow));
+  }
+
+  /** The generated set as flat [tile key, design, planted, grow] quads, for the page's mirror. */
+  packGenerated(): Int32Array<ArrayBuffer> {
+    const out = new Int32Array(this.generated.size * 4);
+    let i = 0;
+    for (const [key, p] of this.generated) {
+      out[i++] = key, out[i++] = p.design, out[i++] = p.planted, out[i++] = p.grow;
+    }
+    return out;
   }
 
   diff(): PropDiff {
@@ -172,6 +185,14 @@ export class Props {
   private solid(p: Prop): boolean {
     return this.info(p)?.solid ?? false;
   }
+}
+
+function unpack(packed: Int32Array): Map<number, Prop> {
+  const map = new Map<number, Prop>();
+  for (let i = 0; i < packed.length; i += 4) {
+    map.set(packed[i], { design: packed[i + 1], planted: packed[i + 2], grow: packed[i + 3] });
+  }
+  return map;
 }
 
 const smoothstep = (e0: number, e1: number, x: number) => {

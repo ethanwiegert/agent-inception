@@ -63,6 +63,19 @@ Deno.test("a lone block meshes to six quads with full AO", () => {
   assertEquals(meshChunk(w, 0, 0).length, 10 * 4 * 2);
 });
 
+Deno.test("a pocket dug deep inside solid ground still meshes its inner walls", () => {
+  // A solid slab; the mesher skips the buried blocks under its top, so a hollow must count.
+  const w = new World(CHUNK, 12, CHUNK);
+  for (let z = 0; z < CHUNK; z++) {
+    for (let x = 0; x < CHUNK; x++) for (let y = 0; y < 10; y++) w.set(x, y, z, Block.Stone);
+  }
+  const quads = (verts: Uint32Array) => verts.length / 8;
+  const solidSlab = quads(meshChunk(w, 0, 0));
+  w.set(8, 4, 8, Block.Air);
+  // Six faces look into the pocket from the blocks around it.
+  assertEquals(quads(meshChunk(w, 0, 0)), solidSlab + 6);
+});
+
 Deno.test("one-block rises become watertight slopes; cliffs stay square", () => {
   const w = new World(8, 8, 8);
   for (let z = 0; z < 8; z++) {
