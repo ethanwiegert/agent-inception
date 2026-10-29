@@ -60,7 +60,10 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     rules.ts (Rule schema + engine: triggers, budget, effects),
                     catalogtools.ts (catalog_* / propose / vote tools),
                     buildtools.ts (place_block / break_block over areas and layers, build a
-                    Design's blocks across calls, never trapping the builder),
+                    Design's blocks across calls, never trapping the builder, then its parts as
+                    an Object), maketools.ts (craft along made_from, interact: gather, dismantle,
+                    collect from animals), objects.ts (Objects: quarter turns, part cost, parts
+                    rasterized to tiles for walking: stand on low tops, walk around tall ones),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),

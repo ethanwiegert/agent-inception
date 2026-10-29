@@ -39,6 +39,10 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
+- **M6 — built-ins become entries.** Blocks, items, plants, the farmer and animal bodies are Catalog
+  data; growth, drops and food are Relations; spread is a Rule effect; playtest
+  [0002](playtests/0002-m6-built-ins.md). Closed 2026-10-29 with Ethan's OK on software numbers; the
+  hardware remeasure moved to the standing TODO under Known gaps.
 - **Overhaul (2026-10-28, between M6 and M7, asked for by Ethan).** Efficiency, agent fluidity and
   looks across the board; report [0003](playtests/0003-overhaul.md). Worldgen ~3× faster and no
   longer run twice, a ~2.5× faster mesher, GPU-culled props, compact water, crop growth on the GPU;
@@ -100,7 +104,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries (in progress)
+### M6 — built-ins become entries (done)
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -191,14 +195,13 @@ Visual pass (seed 7, daytime), closed without editing `nature.ts`:
 Playtest [0002](playtests/0002-m6-built-ins.md) covers the bridge sessions, the fixes, check, and
 test. Still open:
 
-- **TODO: hardware GPU remeasure.** Run `deno task shot "seed=7&time=0.62&speed=0"` on a machine
-  with a real GPU and record the milliseconds. The gate VM only got SwiftShader, then lost the
-  device, so no GPU time was measured. The older ~2.9 ms figure is not this gate's number. M6 stays
-  open until that shot is in the playtest report.
+- **Hardware GPU remeasure**: not measured in M6's gate (the VM only had SwiftShader). Ethan closed
+  M6 on 2026-10-29 without it; the remeasure is one standing TODO under Known gaps for M6, the
+  overhaul and M7.
 
 ### M7 — building, crafting, physics phase 1
 
-Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in the M7 grill:
+Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, as it stood before the grill:
 
 - Done in the overhaul (`sim/buildtools.ts`; revisit in the grill): `place_block` for any held block
   Material over areas (≤ 16 columns, `layers` ≤ 4, ≤ 48 blocks) or at a `y` with a solid neighbour,
@@ -217,6 +220,26 @@ Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in 
   pick flowers/reeds/lily pads, shear sheep, milk cows, collect eggs when ready.
 - Physics 1: collision shapes for Parts; static Objects that villagers walk around and on.
 - `look` legend for Objects (built Materials are in).
+
+Grill outcome (2026-10-29):
+
+- **Recipes.** `craft` follows `made_from` (`count` of the output from one of the ingredient).
+  Agents' recipes go live at once, but only for Materials an agent authored: nature's Materials
+  (log, stone, wheat…) keep nature's recipes, so nobody crafts logs from dirt. Crafting works
+  anywhere, about a second per batch; workbenches can come later as a `needs` Relation.
+- **Objects are tile-anchored.** A Design's parts become one Object anchored at its first cell and
+  turned in quarter turns. For walking, each part's box is rasterized onto the tiles it covers: a
+  top up to a block over the ground is stood on, anything taller is walked around, parts two blocks
+  up leave room to walk under. Real shapes and free placement wait for rigid bodies (M9).
+- **Part cost by volume.** Each part costs ceil(its volume in blocks) of its Material, at least 1.
+  `build` checks the whole remaining cost (blocks and parts) up front and refuses with the list.
+- **`interact` needs no tool items.** One tool at x, z (or an area ≤ 16): the target decides the
+  verb, yields are `drops` Relations, animal products regrow on the species' timer. Axes and shears
+  as items can come with Village Life.
+- **Dismantling**: `interact` on any tile of an Object takes it apart and returns its full part
+  cost, whoever built it (a shared village).
+- **Playtests** run as cost-effective subagents calling the MCP bridge through a small shell helper,
+  since the cloud session has no MCP connection of its own.
 
 ### M8 — character and land
 
@@ -292,5 +315,6 @@ Pick these up in the gate of whichever milestone touches them.
 - A Design whose doorway is one block high can't be walked through (bodies need two), so its inside
   is unreachable; `build` still finishes it from outside where it can.
 - The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
-- Hardware GPU numbers for the overhaul: run `deno task shot "seed=7&time=0.62&speed=0"` on the dev
-  box and add them to playtest 0003 (only software numbers so far).
+- **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
+  `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
+  0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.
