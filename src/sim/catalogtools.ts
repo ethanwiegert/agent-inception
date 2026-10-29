@@ -189,7 +189,7 @@ export const CATALOG_HANDLERS: Record<string, Handler> = {
       sim.tick,
     );
     authored(sim, agent, `added ${e.kind} "${e.name}"`);
-    return `Added #${e.id} ${e.kind} "${e.name}". ${afterAdd(e)} ${budget(sim, agent)}`;
+    return `Added #${e.id} ${e.kind} "${e.name}". ${afterAdd(sim, e)} ${budget(sim, agent)}`;
   },
 
   catalog_fork(sim, agent, args) {
@@ -202,7 +202,7 @@ export const CATALOG_HANDLERS: Record<string, Handler> = {
       sim.tick,
     );
     authored(sim, agent, `forked "${from.name}" into "${e.name}"`);
-    return `Forked #${from.id} "${from.name}" into #${e.id} "${e.name}". ${afterAdd(e)} ${
+    return `Forked #${from.id} "${from.name}" into #${e.id} "${e.name}". ${afterAdd(sim, e)} ${
       budget(sim, agent)
     }`;
   },
@@ -324,9 +324,14 @@ function authored(sim: Sim, agent: Agent, text: string) {
   sim.events.push({ type: "catalog", agent: agent.id, text });
 }
 
-function afterAdd(e: Entry): string {
+function afterAdd(sim: Sim, e: Entry): string {
   if (e.kind === "rule") return "It's live now; check how it fires with catalog_get.";
-  if (e.kind === "relation") return "";
+  if (e.kind === "relation") {
+    const r = e.content as RelationContent;
+    if (r.type !== "made_from") return "";
+    const made = sim.catalog.get(r.from)!.name, from = sim.catalog.get(r.to)!.name;
+    return `A recipe: craft "${made}" makes ${r.count} from each ${from}.`;
+  }
   return "Anyone can read it with catalog_get.";
 }
 

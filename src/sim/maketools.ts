@@ -18,6 +18,8 @@ const MAX_TIMES = 16;
 const CRAFT_TICKS = TICK_HZ;
 /** How close a villager has to get to an animal to shear, milk or collect from it. */
 const ANIMAL_REACH = 2.2;
+/** How far outside the area an animal may have wandered and still be collected from. */
+const ANIMAL_MARGIN = 2;
 
 const int = (description: string) => ({ type: "integer", description });
 
@@ -50,8 +52,9 @@ export const MAKE_TOOL_DEFS: ToolDef[] = [
     description: "Gather from what's on the tiles: chop a grown tree (logs and a sapling), break " +
       "a rock (stone), pick flowers, reeds or lily pads (to replant elsewhere), pick berries off " +
       "a bush, dig up a young sapling (you get it back), or take apart an Object someone built " +
-      "(you get its Materials back). Also shears sheep, milks cows and collects eggs from " +
-      "animals in the area when theirs is ready; you approach slowly so they stay put. What " +
+      "(you get its parts' Materials back; a Design's blocks stay, for break_block). Also " +
+      "shears sheep, milks cows and collects eggs from animals in or near the area (they " +
+      "wander) when theirs is ready; you approach slowly so they stay put. What " +
       "each gives is its drops Relations in the Catalog. Covers width × depth tiles (at most " +
       `${MAX_AREA}) from (x, z); \`target\` limits it to things with that name.`,
     inputSchema: {
@@ -89,7 +92,10 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         sim.fire("crafted", agent, fx, sim.world.heightAt(fx, fz), fz, recipe.output);
       }
       const short = used < times ? ` You ran out of ${recipe.input} after ${used}.` : "";
-      return `Crafted ${made} ${recipe.output} from ${used} ${recipe.input}.${short} ` +
+      const others = recipe.others.length
+        ? ` (It's also made from ${recipe.others.join(" or ")}: pass from to choose.)`
+        : "";
+      return `Crafted ${made} ${recipe.output} from ${used} ${recipe.input}.${short}${others} ` +
         inventoryText(agent);
     })();
   },
@@ -102,7 +108,18 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     const target = args.target === undefined
       ? null
       : String(args.target).trim().toLowerCase().replace(/_/g, " ");
-    const fits = (name: string) => !target || nameMatches(name, target);
+    /** A thing fits the target by its own name or by what it gives ("berries" finds bushes). */
+    const fits = (name: string, gives: string[] = []) =>
+      !target || nameMatches(name, target) || gives.some((g) => nameMatches(g, target));
+    const givesOf = (e: Entry | null | undefined) => e ? sim.drops(e).map(([item]) => item) : [];
+    const designOf = (id: number) => {
+      const stored = sim.catalog.get(id);
+      return (stored && sim.catalog.current(stored)) || stored;
+    };
+    const bodyOf = (species: number) => {
+      const body = sim.catalog.byName(SPECIES[species].name);
+      return body && sim.catalog.current(body);
+    };
     const w = sim.world;
     const tiles: [number, number][] = [];
     for (let j = 0; j < depth; j++) {
@@ -111,12 +128,13 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     if (tiles.every(([x, z]) => w.heightAt(x, z) < 0)) {
       throw new Error(`(${x0}, ${z0}) is outside the world.`);
     }
-    // Animals standing in (or a step outside) the area now: they wander, so look a tile wider.
-    const near = (a: Animal) =>
-      a.x >= x0 - 1 && a.x < x0 + width + 1 && a.z >= z0 - 1 && a.z < z0 + depth + 1;
-    const animals = sim.animals.filter((a) =>
-      near(a) && SPECIES[a.species].productEvery > 0 && fits(SPECIES[a.species].name)
-    );
+    // Animals standing in (or a couple of steps outside) the area now: they wander, so look wider.
+    const near = (a: Animal, m: number) =>
+      a.x >= x0 - m && a.x < x0 + width + m && a.z >= z0 - m && a.z < z0 + depth + m;
+    const collectable = (a: Animal) =>
+      SPECIES[a.species].productEvery > 0 &&
+      fits(SPECIES[a.species].name, givesOf(bodyOf(a.species)));
+    const animals = sim.animals.filter((a) => near(a, ANIMAL_MARGIN) && collectable(a));
     const seen = new Set<number>();
     const things = tiles.filter(([x, z]) => {
       const o = sim.objects.at(x, z);
@@ -126,15 +144,36 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         return true;
       }
       const p = sim.props.at(x, z);
-      return !!p && fits(sim.props.info(p)?.entry.name ?? "");
+      const e = p && designOf(p.design);
+      return !!e && fits(e.name, givesOf(e));
     });
     if (!things.length && !animals.length) {
+      // Say what is there (or nearest), so a wrong guess at a name is one call to fix.
+      const here = new Set<string>();
+      for (const [x, z] of tiles) {
+        const o = sim.objects.at(x, z), p = sim.props.at(x, z);
+        if (o) here.add(`the ${objectName(sim, o)}`);
+        else if (p) here.add(`${sim.props.info(p)?.entry.name ?? "a plant"}`);
+      }
+      for (const a of sim.animals) {
+        if (near(a, ANIMAL_MARGIN)) here.add(`a ${SPECIES[a.species].name}`);
+      }
       const what = target ? `no ${target}` : "nothing to gather";
-      throw new Error(
-        `There's ${what} ${where(x0, z0, width, depth)}. interact works on trees, rocks, ` +
-          "flowers, reeds, lily pads, bushes, saplings, built Objects, and sheep, cows and " +
-          "chickens (look shows where they are).",
-      );
+      let hint = here.size
+        ? ` There's ${[...here].join(", ")}.`
+        : " interact works on trees, rocks, flowers, reeds, lily pads, bushes, saplings, built " +
+          "Objects, and sheep, cows and chickens.";
+      const species = SPECIES.findIndex((d) => target && nameMatches(d.name, target));
+      if (species >= 0) {
+        const cx = x0 + width / 2, cz = z0 + depth / 2;
+        const nearest = sim.animals.filter((a) => a.species === species)
+          .sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz))[0];
+        if (nearest) {
+          hint += ` The nearest ${SPECIES[species].name} is at x=${Math.floor(nearest.x)} ` +
+            `z=${Math.floor(nearest.z)} now (animals wander; aim an area around it).`;
+        }
+      }
+      throw new Error(`There's ${what} ${where(x0, z0, width, depth)}.${hint}`);
     }
     return (function* () {
       const got = new Map<string, number>();
@@ -325,6 +364,8 @@ interface Recipe {
   output: string;
   input: string;
   count: number;
+  /** Other ingredients it can be made from, when no `from` chose. */
+  others: string[];
 }
 
 /**
@@ -369,7 +410,8 @@ function pickRecipe(sim: Sim, agent: Agent, item: unknown, from: unknown): Recip
       `You need ${pick.input} to craft ${output.name} (${pick.count} from each).${hint}`,
     );
   }
-  return { ...pick, output: output.name };
+  const others = fromName ? [] : recipes.filter((r) => r !== pick).map((r) => r.input);
+  return { ...pick, output: output.name, others };
 }
 
 /** made_from recipes of Material `e`, ingredients under their current names. */
@@ -378,7 +420,7 @@ function recipesFor(sim: Sim, e: Entry): Recipe[] {
   const out: Recipe[] = [];
   for (const { entry, rel } of c.links(e.id, "made_from")) {
     const input = c.current(entry);
-    if (input) out.push({ output: e.name, input: input.name, count: rel.count });
+    if (input) out.push({ output: e.name, input: input.name, count: rel.count, others: [] });
   }
   return out;
 }

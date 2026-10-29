@@ -184,6 +184,8 @@ export const LIMITS = {
   relationCount: 64,
   /** grows_into: at most 30 game days. */
   growHours: 720,
+  /** What one craft of an agent's recipe may yield (nature's planks: 4 from a log). */
+  recipeCount: 4,
 } as const;
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 '_-]*$/;
@@ -800,6 +802,23 @@ function validateRelation(
         `"${from.name}" is nature's, and comes only from nature's recipes. Make your own ` +
           `Material (catalog_fork "${from.name}") and give that a recipe.`,
       );
+    }
+    if (author !== NATURE && out.count > LIMITS.recipeCount) {
+      throw new Error(`A recipe makes at most ${LIMITS.recipeCount} from each ingredient.`);
+    }
+    // No loops: crafting round a cycle would make something from nothing.
+    const seen = new Set<number>(), stack = [to.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (id === from.id) {
+        throw new Error(
+          `"${to.name}" is already made (maybe through other recipes) from "${from.name}"; a ` +
+            "recipe loop would make things out of nothing.",
+        );
+      }
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const { entry } of c.links(id, "made_from")) stack.push(entry.id);
     }
   }
   if (type !== "grows_into" && o.hours !== undefined) {

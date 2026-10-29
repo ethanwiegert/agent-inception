@@ -275,3 +275,93 @@ Deno.test("interact shears sheep when their wool is ready, approaching slowly", 
   }));
   assert(again.includes("has no wool yet"), again);
 });
+
+Deno.test("playtest 0004: targets match what things give, and refusals say what is there", () => {
+  const { sim, fern, x, z } = site();
+  const id = (name: string) => sim.catalog.byName(name)!.id;
+  sim.props.set(x + 1, z, { design: id("bush"), planted: GROWN, grow: 0 });
+  sim.props.set(x + 3, z, { design: id("birch"), planted: GROWN, grow: 0 });
+  assert(
+    ok(run(sim, "a", "interact", { x, z, width: 3, target: "berries" })).includes("3 berries"),
+  );
+  err(run(sim, "a", "interact", { x: x + 3, z, target: "oak" }), "There's birch.");
+  err(
+    run(sim, "a", "interact", { x: x + 4, z: z + 4, target: "sheep" }),
+    "The nearest sheep is at",
+  );
+  // A tall Object's tile can't be stood on, and walk_to says so.
+  add(sim, "design", "statue", { parts: [post(0.5, 0.5, 2, "stone")] });
+  fern.inventory.stone = 1;
+  ok(run(sim, "a", "build", { design: "statue", x: x + 5, z: z + 5 }));
+  err(run(sim, "a", "walk_to", { x: x + 5, z: z + 5 }), "the statue stands there, too tall");
+  // Object marks never reuse a plant's, wherever the plant is.
+  const look = ok(run(sim, "a", "look", { radius: 12 }));
+  const mark = /Objects: (\S) statue/.exec(look)?.[1];
+  assert(mark && !"T A b * | o % W".split(" ").includes(mark), look);
+  // A recipe says which way it runs.
+  ok(run(sim, "a", "catalog_fork", { from: "planks", name: "pine boards" }));
+  const added = ok(run(sim, "a", "catalog_add", {
+    kind: "relation",
+    content: { type: "made_from", from: "pine boards", to: "log", count: 3 },
+  }));
+  assert(added.includes('craft "pine boards" makes 3 from each log'), added);
+});
+
+Deno.test("playtest 0004: no sky Objects, no recipe loops, no 64-fold recipes", () => {
+  const { sim, fern, x, z, h } = site();
+  add(sim, "design", "pebble", {
+    parts: [{ part: "sphere", material: "stone", at: [0.5, 0.1, 0.5], size: [0.2, 0.2, 0.2] }],
+  });
+  fern.inventory.stone = 2;
+  err(run(sim, "a", "build", { design: "pebble", x, z, y: 9999 }), "leave out y");
+  err(run(sim, "a", "build", { design: "stone bench", x, z, y: 9999 }), "out of range");
+  err(run(sim, "a", "build", { design: "stone bench", x, z, y: -5 }), "out of range");
+  ok(run(sim, "a", "build", { design: "pebble", x, z }));
+  assertEquals(sim.objects.list[0].y, h + 1);
+  // Recipes: at most 4 from each ingredient, and no loops.
+  ok(run(sim, "a", "catalog_fork", { from: "planks", name: "zing" }));
+  ok(run(sim, "a", "catalog_fork", { from: "planks", name: "zang" }));
+  const recipe = (from: string, to: string, count = 1) =>
+    run(sim, "a", "catalog_add", {
+      kind: "relation",
+      content: { type: "made_from", from, to, count },
+    });
+  err(recipe("zing", "planks", 64), "at most 4");
+  ok(recipe("zing", "planks", 2));
+  ok(recipe("zang", "zing", 2));
+  err(recipe("zing", "zang"), "loop");
+  ok(recipe("zing", "log"));
+  // Two recipes, both ingredients held: it says which it used and how to choose.
+  fern.inventory.planks = 1;
+  fern.inventory.log = 1;
+  const text = ok(run(sim, "a", "craft", { item: "zing" }));
+  assert(text.includes("from 1 planks") && text.includes("also made from log"), text);
+});
+
+Deno.test("playtest 0004: parts on a tall block grid go up from beside it", () => {
+  const { sim, fern, x, z, h } = site();
+  add(sim, "design", "pillar lamp", {
+    blocks: { palette: { s: "stone" }, layers: [["s"], ["s"], ["s"]] },
+    parts: [{ part: "sphere", material: "stone", at: [0.5, 3.3, 0.5], size: [0.6, 0.6, 0.6] }],
+  });
+  fern.inventory.stone = 4;
+  const text = ok(run(sim, "a", "build", { design: "pillar lamp", x, z }));
+  assert(text.includes("3 of 3 done") && text.includes("stand as one Object"), text);
+  assertEquals(sim.objects.list[0].y, h + 1);
+});
+
+Deno.test("playtest 0004: a resumed build finds its work under a Rule's blocks", () => {
+  const { sim, fern, x, z, h } = site(8, 8);
+  add(sim, "rule", "cobbler", {
+    when: { event: "placed", what: "dirt" },
+    do: [{ set_block: { at: [0, 1, 0], to: "cobble" } }],
+  });
+  add(sim, "design", "dirt pad", {
+    blocks: { palette: { d: "dirt" }, layers: [["dddd", "dddd"]] },
+  });
+  fern.inventory.dirt = 8;
+  ok(run(sim, "a", "build", { design: "dirt pad", x, z }));
+  // Cobble sits on every dirt block; asked again, it still finds the pad at its own height.
+  const again = ok(run(sim, "a", "build", { design: "dirt pad", x, z }));
+  assert(again.includes(`already complete at x=${x} y=${h + 1}`), again);
+});

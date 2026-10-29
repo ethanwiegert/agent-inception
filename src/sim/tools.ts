@@ -287,6 +287,14 @@ const HANDLERS: Record<string, Handler> = {
   walk_to(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
     if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
+    const inWay = solidProp(sim, x, z) ??
+      (sim.world.objSolid[z * sim.world.sizeX + x] ? objectThere(sim, x, z) : undefined);
+    if (inWay) {
+      throw new Error(
+        `You can't stand at (${x}, ${z}): ${inWay}, too tall to stand on. ` +
+          "Walk to a tile beside it.",
+      );
+    }
     return (function* () {
       yield* walk(sim, agent, (cx, cz) => cx === x && cz === z, octile(x, z), `(${x}, ${z})`);
       return `You arrive at x=${x} z=${z}.`;
@@ -520,6 +528,23 @@ function eachTile(
 
 // ---------------------------------------------------------------- helpers
 
+/** Marks of every plant Design in the Catalog (they're the ones look maps), per Catalog version. */
+const plantMarkCache = new WeakMap<Sim, { version: number; marks: string[] }>();
+function plantMarks(sim: Sim): string[] {
+  const hit = plantMarkCache.get(sim);
+  if (hit?.version === sim.catalog.version) return hit.marks;
+  const marks = new Set<string>();
+  for (const e of sim.catalog.entries) {
+    if (e.kind === "design" && (e.content as DesignContent).habitat) {
+      const info = plantInfo(sim.catalog, e.id);
+      if (info) marks.add(info.mark);
+    }
+  }
+  const out = { version: sim.catalog.version, marks: [...marks] };
+  plantMarkCache.set(sim, out);
+  return out.marks;
+}
+
 /** Why an Object on (x, z) stops work there, or nothing. */
 function objectThere(sim: Sim, x: number, z: number): string | undefined {
   const o = sim.objects.at(x, z);
@@ -658,7 +683,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   /** Map marks of the plants in view, and what they are. */
   const marks = new Map<string, Set<string>>();
   // Built blocks (planks, brick, anything agents invent) get a mark no plant or animal uses.
-  const taken = new Set([...FIXED_MARKS, ...SPECIES.map((d) => d.mark)]);
+  // Every plant's mark is reserved, in view or not, so built things never read as plants and keep
+  // the same mark from one look to the next.
+  const taken = new Set([...FIXED_MARKS, ...SPECIES.map((d) => d.mark), ...plantMarks(sim)]);
   for (let z = az - r; z <= az + r; z++) {
     for (let x = ax - r; x <= ax + r; x++) {
       const prop = sim.props.at(x, z);

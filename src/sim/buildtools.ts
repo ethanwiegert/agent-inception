@@ -20,6 +20,7 @@ import {
   turnPoint,
   type WorldObject,
 } from "./objects.ts";
+import { octile } from "./path.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
 import { solid } from "./world.ts";
@@ -244,11 +245,22 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     ) {
       throw new Error(`(${x0}, ${z0}) is outside the world.`);
     }
+    if (args.y !== undefined && !cells.length) {
+      throw new Error(
+        `"${design.name}" is only parts: its Object stands on the ground, so leave out y.`,
+      );
+    }
     const base = args.y !== undefined
       ? num(args.y, "y")
       : cells.length
       ? findBase(sim, cells, x0, z0)
       : groundBase(sim, partTiles);
+    const layers = content.blocks?.layers.length ?? 0;
+    if (base < 1 || base + layers > sim.world.sizeY - 2) {
+      throw new Error(
+        `y=${base} is out of range: 1-${sim.world.sizeY - 2 - layers} for this Design.`,
+      );
+    }
     const at = (c: Cell) => [x0 + c.dx, base + c.dy, z0 + c.dz] as const;
     const left = () => cells.filter((c) => sim.world.get(...at(c)) !== c.id);
     const name = `"${design.name}"`;
@@ -268,9 +280,10 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const short = new Map([...needs].filter(([m, n]) => (agent.inventory[m] ?? 0) < n));
     if (short.size) {
       throw new Error(
-        `${name} still needs ${needText(needs, agent)}. You're short of ` +
-          `${[...short].map(([m, n]) => `${n - (agent.inventory[m] ?? 0)} ${m}`).join(", ")}; ` +
-          "gather it all before you build (craft makes some Materials from others).",
+        `You're short of ` +
+          `${[...short].map(([m, n]) => `${n - (agent.inventory[m] ?? 0)} ${m}`).join(", ")} ` +
+          `for ${name}, which still needs ${needText(needs, agent)}. Gather it all before you ` +
+          "build (craft makes some Materials from others).",
       );
     }
     if (partsLeft) {
@@ -390,10 +403,21 @@ function* raise(
   const mine = new Set(tiles);
   const onIt = (cx: number, cz: number) => mine.has(cz * sizeX + cx);
   const name = sim.catalog.get(design)!.name;
-  try {
-    yield* reach(sim, agent, x, z, undefined, onIt);
-  } catch {
-    return `${name}: out of reach`;
+  // Anywhere beside its tiles will do; its parts go up from the ground or its own blocks.
+  const beside = (cx: number, cz: number) => {
+    if (onIt(cx, cz)) return false;
+    for (const key of tiles) {
+      const tx = key % sizeX, tz = Math.floor(key / sizeX);
+      if (Math.max(Math.abs(tx - cx), Math.abs(tz - cz)) <= 2) return true;
+    }
+    return false;
+  };
+  if (!beside(Math.floor(agent.x), Math.floor(agent.z))) {
+    try {
+      yield* walk(sim, agent, beside, octile(x, z), "its side");
+    } catch {
+      return `${name}: you can't get beside it to put its parts up`;
+    }
   }
   // Step off its tiles so it isn't built around you.
   if (onIt(Math.floor(agent.x), Math.floor(agent.z))) {
@@ -612,6 +636,7 @@ interface Cell {
 function buildable(sim: Sim, value: unknown): Entry {
   const c = sim.catalog;
   const want = String(value ?? "").trim();
+  if (!want) throw new Error('Say which Design to build, e.g. design: "stone bench".');
   const e = /^\d+$/.test(want) ? c.get(Number(want)) : c.byName(want);
   if (!e) throw new Error(`Nothing called "${want}" in the Catalog. Try catalog_find kind design.`);
   if (e.kind !== "design") throw new Error(`"${e.name}" is a ${e.kind}, not a Design.`);
@@ -672,7 +697,8 @@ function findBase(sim: Sim, cells: Cell[], x0: number, z0: number): number {
     height = Math.max(height, c.dy + 1);
   }
   let best = fresh, hits = 0;
-  for (let b = fresh; b >= Math.max(1, fresh - height); b--) {
+  // Look well below fresh ground: earlier work may have been built on since (a Rule's blocks).
+  for (let b = fresh; b >= Math.max(1, fresh - height - 16); b--) {
     let n = 0;
     for (const c of cells) {
       const x = x0 + c.dx, y = b + c.dy, z = z0 + c.dz;
