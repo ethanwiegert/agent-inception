@@ -93,10 +93,11 @@ shader has a WGSL mirror of `slopeDrop` that must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M6 is in progress: the hardware GPU remeasure is
-still open). Each milestone opens with a short clarifying grill with Ethan and closes with the
-playtest gate described there (tests, playtests with cost-effective agents including an adversary, a
-report in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M8 are done; M9, rigid bodies, is next. The
+hardware GPU remeasure is a standing TODO for Ethan's dev box). Each milestone opens with a short
+clarifying grill with Ethan and closes with the playtest gate described there (tests, playtests with
+cost-effective agents including an adversary, a report in `docs/playtests/`, fixes, perf,
+screenshots).
 
 ## Testing and debugging
 
