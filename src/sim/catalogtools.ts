@@ -71,13 +71,16 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       '- design: {"blocks": {"palette": {"s": "stone"}, "layers": [["sss", "s.s"]]}, "parts": ' +
       '[{"part": "cone", "material": "planks", "at": [0.5, 0.5, 0.5], "size": [0.2, 1, 0.2], ' +
       '"turn": 0, "tilt": 10, "role": "head"}], "joints": {"head": [0.5, 0.2, 0.5]}, ' +
-      '"mark": "T", "habitat": {"on": ["grass"], "zones": ["meadow"], "share": 0.25}}. ' +
+      '"mark": "T", "habitat": {"on": ["grass"], "zones": ["meadow"], "share": 0.25}, ' +
+      '"look": "blades"}. ' +
       "layers go bottom up; a layer is rows along z, each row characters along x, " +
       `"." empty. Parts: box, sphere, cylinder, cone. turn is yaw in degrees, tilt leans that ` +
       "way. role and joints make a body move (body, head, eyes, left arm, left leg, front left " +
       "leg, product, …). mark is one look-map character. habitat says the ground it grows on " +
       `and where nature plants it (zones: ${ZONES.join(", ")}); (0.5, 0, 0.5) is the tile ` +
-      "center on the ground. Up to 16×16×16 blocks and 32 parts. build makes a Design: its " +
+      "center on the ground. A crop (habitat on farmland) draws its parts growing, or with " +
+      '"look": "blades" a swaying field like wheat. Up to 16×16×16 blocks and 32 parts. ' +
+      "build makes a Design: its " +
       "blocks are laid as blocks and its parts become one Object (each part costs its volume " +
       "in its Material, at least 1).\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
@@ -93,10 +96,13 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `"cobble"}} ("air" clears), {"say": "text"}, {"weather": {"clouds": 0.8, "hours": 3}}, ` +
       `{"spread": {"what": "poppies", "count": 2}} (≤${RULE_LIMITS.spread}; copies that many ` +
       "fully grown plants onto free neighbouring tiles the habitat allows, and stops where " +
-      `${RULE_LIMITS.crowd} neighbours already hold it). ` +
+      `${RULE_LIMITS.crowd} neighbours already hold it), ` +
+      `{"grow": {"what": "wheat crop", "hours": 2}} (≤${RULE_LIMITS.growHours} hours; brings ` +
+      "growing crops and young plants of that Design forward, within reach of the event or " +
+      "everywhere on a timer). " +
       `"at" is an offset (each -${RULE_LIMITS.reach}..${RULE_LIMITS.reach}) from the event's ` +
-      "block; give, take, has, block and set_block need an event trigger. spread works on a " +
-      "timer. A rule fires at most " +
+      "block; give, take, has, block and set_block need an event trigger. spread and grow " +
+      "work on a timer too. A rule fires at most " +
       `${RULE_LIMITS.firingsPerHour} times per game hour and can't trigger other rules.\n` +
       '- relation: {"type": "grows_into", "from": "wheat seeds", "to": "wheat crop", "count": 1, ' +
       '"hours": 18}. hours is only for grows_into: game hours from planting to grown. ' +

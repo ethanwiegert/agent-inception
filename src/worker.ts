@@ -160,7 +160,10 @@ function send() {
       const [stalk, ripe] = s.cropColors(crop.design);
       // Relative to now, so float32 stays exact however old the world gets.
       const planted = crop.planted - s.tick;
-      crops.set([x, s.world.heightAt(x, z) + 1, z, planted, stalk, ripe, crop.grow], i);
+      // The Design it looks like now (a replaced crop takes its replacement's look).
+      const stored = s.catalog.get(crop.design);
+      const look = (stored && s.catalog.current(stored))?.id ?? crop.design;
+      crops.set([x, s.world.heightAt(x, z) + 1, z, planted, stalk, ripe, crop.grow, look], i);
       i += CROP_STRIDE;
     }
   }

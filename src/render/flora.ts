@@ -1,6 +1,7 @@
 import { identity, mat4, rotateY, scale, translate } from "../math.ts";
 import type { Catalog, DesignContent } from "../sim/catalog.ts";
 import { designSpan, type Objects, turnPoint } from "../sim/objects.ts";
+import { CROP_STRIDE } from "../sim/protocol.ts";
 import type { Props } from "../sim/props.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { World } from "../sim/world.ts";
@@ -56,6 +57,53 @@ export class FloraModels {
 const m = mat4();
 
 /**
+ * Crops split by their Design's look: `"look": "blades"` crops (wheat) go to the GPU blade field,
+ * every other crop is drawn as its own parts, growing, with the props.
+ */
+export class CropLooks {
+  /** Blade crops, packed as the worker sent them. */
+  blades = new Float32Array(0);
+  /** Bumps when `blades` changes. */
+  version = 0;
+  /** Indices (into the worker's crops) of crops drawn as parts. */
+  parts: number[] = [];
+  private seen = -1;
+  private seenCatalog = -1;
+
+  /** Re-split when the crops or the Catalog changed; true if anything did. */
+  update(crops: Float32Array, cropsVersion: number, catalog: Catalog): boolean {
+    if (cropsVersion === this.seen && catalog.version === this.seenCatalog) return false;
+    this.seen = cropsVersion, this.seenCatalog = catalog.version;
+    const n = crops.length / CROP_STRIDE;
+    const blades: number[] = [];
+    this.parts = [];
+    for (let i = 0; i < n; i++) {
+      const e = catalog.get(crops[i * CROP_STRIDE + 7]);
+      const d = e?.kind === "design" ? e.content as DesignContent : null;
+      if (!d || d.look === "blades" || !d.parts.length) blades.push(i);
+      else this.parts.push(i);
+    }
+    this.blades = new Float32Array(blades.length * CROP_STRIDE);
+    blades.forEach((i, j) =>
+      this.blades.set(crops.subarray(i * CROP_STRIDE, (i + 1) * CROP_STRIDE), j * CROP_STRIDE)
+    );
+    this.version++;
+    return true;
+  }
+
+  /** Whether any part-drawn crop is still growing at `age` ticks after the crops were sent. */
+  growing(crops: Float32Array, age: number): boolean {
+    return this.parts.some((i) => cropGrowth(crops, i, age) < 1);
+  }
+}
+
+/** 0-1 growth of crop `i`, `age` ticks after the message its planting tick is relative to. */
+function cropGrowth(crops: Float32Array, i: number, age: number): number {
+  const planted = crops[i * CROP_STRIDE + 3], grow = crops[i * CROP_STRIDE + 6];
+  return grow ? Math.min(1, Math.max(0, (age - planted) / grow)) : 1;
+}
+
+/**
  * Fill the batches with every prop (big ones in `out`, ground cover in `small`): jittered within
  * its tile, turned and sized per tile, grown. Floating plants sit on the water.
  */
@@ -67,9 +115,22 @@ export function buildProps(
   small: InstanceBatch,
   models: FloraModels,
   objects: Objects | null = null,
+  crops?: { data: Float32Array; looks: CropLooks; age: number },
 ) {
   out.clear();
   small.clear();
+  // Crops that aren't blade fields: their own parts, grown like saplings, upright in the row.
+  for (const i of crops?.looks.parts ?? []) {
+    const c = crops!.data, k = i * CROP_STRIDE;
+    const tid = models.template(props.catalog, c[k + 7]);
+    if (tid < 0) continue;
+    const size = 0.15 + 0.85 * cropGrowth(c, i, crops!.age);
+    identity(m);
+    translate(m, c[k] + 0.5, c[k + 1], c[k + 2] + 0.5);
+    rotateY(m, hash2(c[k], c[k + 2], 4) * Math.PI * 2);
+    scale(m, size, size, size);
+    out.add(tid, m, 1, 1, 1, 1);
+  }
   // Built Objects: exactly where and as turned as they were built.
   for (const o of objects?.list ?? []) {
     const d = objects!.design(o);

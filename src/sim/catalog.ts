@@ -104,6 +104,8 @@ export interface DesignContent {
   mark?: string;
   /** For plants: what it grows on and where nature puts it. */
   habitat?: Habitat;
+  /** "blades": a crop drawn as a swaying field of stalks (wheat) instead of its own parts. */
+  look?: "blades";
 }
 
 /** Relations the world will enforce; any other type is a free label that records knowledge. */
@@ -623,7 +625,7 @@ function vec(v: unknown, min: number, max: number, where: string): Vec3 {
 }
 
 function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
-  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat"], "design");
+  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat", "look"], "design");
   const S = LIMITS.designSize;
   let blocks: DesignContent["blocks"] = null;
   if (o.blocks !== undefined && o.blocks !== null) {
@@ -710,6 +712,10 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
     out.mark = mark;
   }
   if (o.habitat !== undefined) out.habitat = habitat(o.habitat, c);
+  if (o.look !== undefined) {
+    if (o.look !== "blades") throw new Error('look is "blades" (a swaying field, like wheat).');
+    out.look = "blades";
+  }
   return out;
 }
 

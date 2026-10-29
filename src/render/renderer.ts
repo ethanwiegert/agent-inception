@@ -10,7 +10,7 @@ import type { AgentView, AnimalView } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels } from "./fauna.ts";
-import { anyGrowing, buildProps, FloraModels } from "./flora.ts";
+import { anyGrowing, buildProps, CropLooks, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
@@ -108,6 +108,8 @@ export class Renderer {
   private objectsVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
+  private cropLooks = new CropLooks();
+  private cropLooksVersion = -1;
   /** MSAA scene targets for the view, and a separate set for captures at their own size. */
   private viewTargets: SceneTargets | null = null;
   private shotTargets: SceneTargets | null = null;
@@ -199,7 +201,8 @@ export class Renderer {
     this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
     this.surface.update();
-    this.crops.update(scene.crops, scene.cropsVersion);
+    this.cropLooks.update(scene.crops, scene.cropsVersion, scene.catalog);
+    this.crops.update(this.cropLooks.blades, this.cropLooks.version);
     this.bodies.instances.clear();
     buildBodies(
       scene.agents,
@@ -317,11 +320,15 @@ export class Renderer {
     const props = scene.props;
     if (!props) return;
     const objectsVersion = scene.objects?.version ?? 0;
+    const looks = this.cropLooks, age = scene.tick - scene.cropsTick;
     const stale = props.version !== this.floraVersion || objectsVersion !== this.objectsVersion ||
-      (time - this.floraBuiltAt > 2 && anyGrowing(props, scene.tick));
+      looks.version !== this.cropLooksVersion ||
+      (time - this.floraBuiltAt > 2 &&
+        (anyGrowing(props, scene.tick) || looks.growing(scene.crops, age)));
     if (!stale) return;
     this.floraVersion = props.version;
     this.objectsVersion = objectsVersion;
+    this.cropLooksVersion = looks.version;
     this.floraBuiltAt = time;
     const { flora, groundCover } = this;
     buildProps(
@@ -332,6 +339,7 @@ export class Renderer {
       groundCover.instances,
       this.floraModels,
       scene.objects,
+      { data: scene.crops, looks, age },
     );
     this.models.upload(flora);
     this.models.upload(groundCover);

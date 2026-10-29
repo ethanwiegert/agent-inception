@@ -423,3 +423,85 @@ Deno.test("terraform flatten digs high ground, fills low ground, and carries on 
   }
   assertEquals(w.heightAt(x + 7, z + 7), h, "the tree's ground is left alone");
 });
+
+// ---------------------------------------------------------------- crops
+
+Deno.test("agents' crops: a Design, grows_into, drops, and Rules that grow them", () => {
+  const { sim, fern, x, z } = site();
+  const crop = (look?: string) => ({
+    habitat: { on: ["farmland"] },
+    parts: [{
+      part: "sphere",
+      material: "red petals",
+      at: [0.5, 0.15, 0.5],
+      size: [0.3, 0.3, 0.3],
+    }],
+    ...(look ? { look } : {}),
+  });
+  err(
+    run(sim, "a", "catalog_add", { kind: "design", name: "odd", content: crop("fancy") }),
+    'look is "blades"',
+  );
+  assert(
+    sim.catalog.byName("wheat crop")!.content &&
+      (sim.catalog.byName("wheat crop")!.content as { look?: string }).look === "blades",
+  );
+  ok(
+    run(sim, "a", "catalog_add", {
+      kind: "material",
+      name: "radish seed",
+      content: { form: "item", color: "#aa3344" },
+    }),
+  );
+  ok(
+    run(sim, "a", "catalog_add", {
+      kind: "material",
+      name: "radish",
+      content: { form: "item", color: "#cc2244" },
+    }),
+  );
+  ok(run(sim, "a", "catalog_add", { kind: "design", name: "radish crop", content: crop() }));
+  ok(
+    run(sim, "a", "catalog_add", {
+      kind: "relation",
+      content: { type: "grows_into", from: "radish seed", to: "radish crop", hours: 12 },
+    }),
+  );
+  ok(
+    run(sim, "a", "catalog_add", {
+      kind: "relation",
+      content: { type: "drops", from: "radish crop", to: "radish", count: 2 },
+    }),
+  );
+  fern.authored.length = 0; // past this hour's authoring limit
+  const rule = (name: string, content: unknown) =>
+    run(sim, "a", "catalog_add", { kind: "rule", name, content });
+  err(
+    rule("bad", { when: { event: "said" }, do: [{ grow: { what: "stone", hours: 1 } }] }),
+    "isn't a plant",
+  );
+  err(
+    rule("bad", { when: { event: "said" }, do: [{ grow: { what: "radish crop", hours: 30 } }] }),
+    "hours must be",
+  );
+  ok(
+    rule("rain dance", {
+      when: { event: "said", what: "rain" },
+      do: [{ grow: { what: "radish crop", hours: 6 } }],
+    }),
+  );
+  fern.inventory["radish seed"] = 2;
+  ok(run(sim, "a", "till", { x, z, width: 2 }));
+  ok(run(sim, "a", "plant", { x, z, width: 2, seed: "radish seed" }));
+  const planted = sim.crops.get(z * sim.world.sizeX + x)!;
+  const before = sim.cropGrowth(planted);
+  ok(run(sim, "a", "say", { text: "come on, rain!" }));
+  assert(
+    sim.cropGrowth(planted) - before > 0.49,
+    `grew from ${before} to ${sim.cropGrowth(planted)}`,
+  );
+  ok(run(sim, "a", "say", { text: "rain again" }));
+  assertEquals(sim.cropGrowth(planted), 1);
+  const got = ok(run(sim, "a", "harvest", { x, z, width: 2 }));
+  assert(got.startsWith("Harvested 2 tiles") && fern.inventory.radish === 4, got);
+});

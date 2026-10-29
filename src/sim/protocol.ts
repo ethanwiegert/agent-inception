@@ -15,7 +15,8 @@ export const SCHOOL_STRIDE = 5;
 /**
  * Floats per crop in `TickMessage.crops`: x, y, z, the tick it was planted (relative to the
  * message's tick), then the stalk color and the ripe color (sRGB 0xRRGGBB, exact in a float), the
- * ticks it takes to ripen (0: always ripe) and one spare. The page works out growth on the GPU.
+ * ticks it takes to ripen (0: always ripe) and the Design it looks like. The page works out growth
+ * (on the GPU for blade fields).
  */
 export const CROP_STRIDE = 8;
 

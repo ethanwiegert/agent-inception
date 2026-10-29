@@ -304,6 +304,7 @@ add("design", "water lily", "Lily pads with a pink flower.", {
 
 add("design", "wheat crop", "Wheat growing on farmland; ripe ears show the wheat's color.", {
   mark: "W",
+  look: "blades",
   habitat: { on: ["farmland"] },
   parts: (() => {
     const r = scatter(13), parts = [];
