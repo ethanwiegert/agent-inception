@@ -22,7 +22,12 @@ export function* walk(
   label: string,
 ): Generator<void, void> {
   const path = route(sim, agent, goal, heuristic);
-  if (!path) throw new Error(`You can't find a way to ${label}.`);
+  if (!path) {
+    throw new Error(
+      `You can't find a way to ${label}: you climb 1 block and drop 2, and trees, rocks and tall ` +
+        "Objects are in the way. A step (place_block, or terraform) gets you up a bigger rise.",
+    );
+  }
   agent.anim = Anim.Walk;
   for (let i = 0; i < path.length; i += 2) {
     const tx = path[i] + 0.5, tz = path[i + 1] + 0.5;
@@ -43,7 +48,9 @@ export function* walk(
 
 /**
  * A path for `agent` to a column `goal` accepts: by ordinary steps, or, when those can't get
- * there, hopping down drops of up to four blocks (off a roof, out of a tree house).
+ * there, hopping down drops of up to four blocks (off a roof, out of a tree house). A hop is only
+ * taken when there's an ordinary way back, or when the villager is stranded where they stand:
+ * never into a pit they couldn't climb out of.
  */
 export function route(
   sim: Sim,
@@ -51,11 +58,37 @@ export function route(
   goal: (x: number, z: number) => boolean,
   heuristic: (x: number, z: number) => number,
 ): number[] | null {
+  const w = sim.world;
   const ax = Math.floor(agent.x), az = Math.floor(agent.z);
-  const floor = levelAt(sim.world, ax, az, agent.y);
-  return findPath(sim.world, ax, az, floor, goal, heuristic) ??
-    findPath(sim.world, ax, az, floor, goal, heuristic, 8000, MAX_HOP_DOWN);
+  const floor = levelAt(w, ax, az, agent.y);
+  const plain = findPath(w, ax, az, floor, goal, heuristic);
+  if (plain) return plain;
+  const hop = findPath(w, ax, az, floor, goal, heuristic, 8000, MAX_HOP_DOWN);
+  if (!hop?.length) return hop;
+  const stranded = !findPath(
+    w,
+    ax,
+    az,
+    floor,
+    (x, z) => Math.max(Math.abs(x - ax), Math.abs(z - az)) >= STRANDED,
+    () => 0,
+    2000,
+  );
+  if (stranded) return hop;
+  const gx = hop[hop.length - 2], gz = hop[hop.length - 1];
+  const back = findPath(
+    w,
+    gx,
+    gz,
+    levelAt(w, gx, gz, w.heightAt(gx, gz) + 1),
+    (x, z) => x === ax && z === az,
+    octile(ax, az),
+  );
+  return back ? hop : null;
 }
+
+/** A villager who can't walk this far by ordinary steps is stranded (on a roof, in a pit). */
+const STRANDED = 6;
 
 /** How far above or below their feet a farmer can place or dig a block. */
 export const MAX_REACH = 3;
@@ -92,6 +125,13 @@ export function* reach(
       return yield* face(agent, x, z);
     }
   }
+  // Nowhere to walk to (shut in, down a shaft): work from where you stand if it's within reach,
+  // so a villager can always dig up or build a step out.
+  const feet = Math.floor(agent.y + 0.5);
+  if (
+    y !== undefined && Math.max(Math.abs(ax - x), Math.abs(az - z)) <= 2 &&
+    Math.abs(y - feet) <= MAX_REACH
+  ) return yield* face(agent, x, z);
   throw new Error(`You can't find a way to (${x}, ${z}).`);
 }
 

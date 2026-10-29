@@ -24,7 +24,11 @@ export function step(
 ): number {
   const to = world.floorBelow(tx, tz, from + MAX_STEP_UP);
   if (to < 0) return -1;
-  if (world.propSolid[tz * world.sizeX + tx]) return -1; // trees and rocks are in the way
+  if (world.blocked(tx, tz)) return -1; // trees, rocks and tall Objects are in the way
+  // A low Object's top more than half a block up is a step of its own.
+  if (world.objLift[tz * world.sizeX + tx] > 0.5 && to === world.top[tz * world.sizeX + tx]) {
+    if (to + 1 - from > MAX_STEP_UP) return -1;
+  }
   const depth = world.waterDepth(tx, tz, to);
   if (depth > MAX_SWIM) return -1;
   const level = depth > MAX_WADE ? world.waterTop[tz * world.sizeX + tx] : to;

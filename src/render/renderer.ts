@@ -1,6 +1,7 @@
 import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import type { BlockRegistry } from "../sim/blocks.ts";
 import type { Catalog } from "../sim/catalog.ts";
+import type { Objects } from "../sim/objects.ts";
 import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
 import { SEA_LEVEL } from "../sim/worldgen.ts";
@@ -9,7 +10,7 @@ import type { AgentView, AnimalView } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels } from "./fauna.ts";
-import { anyGrowing, buildProps, FloraModels } from "./flora.ts";
+import { anyGrowing, buildProps, CropLooks, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
@@ -46,6 +47,7 @@ export interface SceneState {
   /** What everything looks like: Materials and Designs. */
   catalog: Catalog;
   props: Props | null;
+  objects: Objects | null;
   tick: number;
   day: number;
   weather: Weather;
@@ -103,8 +105,11 @@ export class Renderer {
   private flora = new ModelBatch(new InstanceBatch(), 0, 2);
   private groundCover = new ModelBatch(new InstanceBatch(), 70, 1);
   private floraVersion = -1;
+  private objectsVersion = -1;
   private floraBuiltAt = 0;
   private crops: CropRenderer;
+  private cropLooks = new CropLooks();
+  private cropLooksVersion = -1;
   /** MSAA scene targets for the view, and a separate set for captures at their own size. */
   private viewTargets: SceneTargets | null = null;
   private shotTargets: SceneTargets | null = null;
@@ -196,13 +201,13 @@ export class Renderer {
     this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
     this.surface.update();
-    this.crops.update(scene.crops, scene.cropsVersion);
+    this.cropLooks.update(scene.crops, scene.cropsVersion, scene.catalog);
+    this.crops.update(this.cropLooks.blades, this.cropLooks.version);
     this.bodies.instances.clear();
     buildBodies(
       scene.agents,
       time,
       this.bodies.instances,
-      camera.yaw,
       this.bodyModels,
       scene.catalog,
     );
@@ -314,10 +319,16 @@ export class Renderer {
   private updateFlora(scene: SceneState, time: number) {
     const props = scene.props;
     if (!props) return;
-    const stale = props.version !== this.floraVersion ||
-      (time - this.floraBuiltAt > 2 && anyGrowing(props, scene.tick));
+    const objectsVersion = scene.objects?.version ?? 0;
+    const looks = this.cropLooks, age = scene.tick - scene.cropsTick;
+    const stale = props.version !== this.floraVersion || objectsVersion !== this.objectsVersion ||
+      looks.version !== this.cropLooksVersion ||
+      (time - this.floraBuiltAt > 2 &&
+        (anyGrowing(props, scene.tick) || looks.growing(scene.crops, age)));
     if (!stale) return;
     this.floraVersion = props.version;
+    this.objectsVersion = objectsVersion;
+    this.cropLooksVersion = looks.version;
     this.floraBuiltAt = time;
     const { flora, groundCover } = this;
     buildProps(
@@ -327,6 +338,8 @@ export class Renderer {
       flora.instances,
       groundCover.instances,
       this.floraModels,
+      scene.objects,
+      { data: scene.crops, looks, age },
     );
     this.models.upload(flora);
     this.models.upload(groundCover);

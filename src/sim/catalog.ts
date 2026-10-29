@@ -104,6 +104,8 @@ export interface DesignContent {
   mark?: string;
   /** For plants: what it grows on and where nature puts it. */
   habitat?: Habitat;
+  /** "blades": a crop drawn as a swaying field of stalks (wheat) instead of its own parts. */
+  look?: "blades";
 }
 
 /** Relations the world will enforce; any other type is a free label that records knowledge. */
@@ -184,6 +186,8 @@ export const LIMITS = {
   relationCount: 64,
   /** grows_into: at most 30 game days. */
   growHours: 720,
+  /** What one craft of an agent's recipe may yield (nature's planks: 4 from a log). */
+  recipeCount: 4,
 } as const;
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 '_-]*$/;
@@ -557,7 +561,7 @@ export class Catalog {
       case "rule":
         return validateRule(raw, this);
       case "relation":
-        return validateRelation(raw, this);
+        return validateRelation(raw, this, author);
     }
   }
 }
@@ -621,7 +625,7 @@ function vec(v: unknown, min: number, max: number, where: string): Vec3 {
 }
 
 function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
-  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat"], "design");
+  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat", "look"], "design");
   const S = LIMITS.designSize;
   let blocks: DesignContent["blocks"] = null;
   if (o.blocks !== undefined && o.blocks !== null) {
@@ -708,6 +712,10 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
     out.mark = mark;
   }
   if (o.habitat !== undefined) out.habitat = habitat(o.habitat, c);
+  if (o.look !== undefined) {
+    if (o.look !== "blades") throw new Error('look is "blades" (a swaying field, like wheat).');
+    out.look = "blades";
+  }
   return out;
 }
 
@@ -748,7 +756,11 @@ function habitat(v: unknown, c: Catalog): Habitat {
   };
 }
 
-function validateRelation(o: Record<string, unknown>, c: Catalog): RelationContent {
+function validateRelation(
+  o: Record<string, unknown>,
+  c: Catalog,
+  author: string,
+): RelationContent {
   onlyKeys(o, ["type", "from", "to", "count", "hours"], "relation");
   const type = String(o.type ?? "").trim().toLowerCase();
   if (!(ENGINE_RELATIONS as readonly string[]).includes(type) && !FREE_RELATION_RE.test(type)) {
@@ -784,7 +796,38 @@ function validateRelation(o: Record<string, unknown>, c: Catalog): RelationConte
       );
     }
     out.hours = numberIn(o.hours ?? 24, 0.1, LIMITS.growHours, "hours");
-  } else if (o.hours !== undefined) {
+  } else if (type === "made_from") {
+    // A recipe: `count` of `from` crafted out of one `to`. Nature's Materials keep nature's
+    // recipes, so nobody crafts logs out of dirt; agents' recipes make their own Materials.
+    if (from.kind !== "material" || to.kind !== "material") {
+      throw new Error("made_from goes from the Material you craft to the Material it's made of.");
+    }
+    if (from.id === to.id) throw new Error("A Material can't be made from itself.");
+    if (author !== NATURE && from.author === NATURE) {
+      throw new Error(
+        `"${from.name}" is nature's, and comes only from nature's recipes. Make your own ` +
+          `Material (catalog_fork "${from.name}") and give that a recipe.`,
+      );
+    }
+    if (author !== NATURE && out.count > LIMITS.recipeCount) {
+      throw new Error(`A recipe makes at most ${LIMITS.recipeCount} from each ingredient.`);
+    }
+    // No loops: crafting round a cycle would make something from nothing.
+    const seen = new Set<number>(), stack = [to.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (id === from.id) {
+        throw new Error(
+          `"${to.name}" is already made (maybe through other recipes) from "${from.name}"; a ` +
+            "recipe loop would make things out of nothing.",
+        );
+      }
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const { entry } of c.links(id, "made_from")) stack.push(entry.id);
+    }
+  }
+  if (type !== "grows_into" && o.hours !== undefined) {
     throw new Error("hours is only for grows_into.");
   }
   return out;

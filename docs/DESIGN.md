@@ -28,27 +28,27 @@ choice.
 
 ## Decisions
 
-| Topic         | Decision                                                                                                                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Audience      | V1: a hosted static site; each visitor points their own agent at their own world. V2: shared worlds and a global Catalog.                                                            |
-| Platform      | Browser, WebGPU only, Chromium-family for V1. Linux Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.                                                                |
-| Toolchain     | Deno only (check, bundle, test, fmt, lint, serve). No npm/jsr packages.                                                                                                              |
-| Language      | TypeScript, data-oriented (typed arrays). Hot kernels move to Zig→WASM only when the profiler says so.                                                                               |
-| Where it runs | The sim runs in the visitor's tab; a hosted relay pipes MCP to it by pairing code (ADR 0001). Host chosen at M14 (Cloudflare likely).                                                |
-| Simulation    | Deterministic fixed-tick core (20 Hz, seeded PRNG) in a Web Worker, no DOM. Same code runs headless in Deno for tests (and a V2 server).                                             |
-| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, sun/moon shadow map, cloud shadows, GPU water, compute-culled grass and props, PBR Neutral tonemap.                                              |
-| World         | 256×256×64 voxel island in 32×32 chunk columns: rolling hills, river valleys, beaches, sea to the horizon.                                                                           |
-| Catalog       | Append-only store of kinds (Materials, Parts, Designs, Rules, Relations), separate from the World store of things (ADR 0003).                                                        |
-| Behavior      | Rules: validated JSON trees, trigger → conditions → effects through engine operations. No agent code (ADR 0004).                                                                     |
-| Physics       | Today: bodies follow the walkable surface, A* (climb 1, drop 2, wade 1, swim 3; hop down 4 only when there's no other way). V1: collision, rigid bodies, joints, light/fire/signals. |
-| Making        | Designs combine Blocks (voxel grid: walls, floors, roofs) and Parts (free-form shapes and mechanisms); built Designs become Objects.                                                 |
-| Villagers     | One world, many agents: each MCP session `join`s a named villager; rejoining reattaches it. Bodies are 3D Designs from Parts (ADR 0005).                                             |
-| Animals       | Sheep, cows, chickens, ducks and fish schools: species in sim code until V2; their products and drops move to the Catalog.                                                           |
-| Village Life  | On by default: Needs (hunger, energy; slow, never kill), village level with Unlocks, Errands. Spectators can switch to Sandbox anytime.                                              |
-| Spectators    | Watch, follow, pin Wishes on the Notice Board, control time/speed/look/weather/world slots/Village Life. They never move villagers.                                                  |
-| Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                                                              |
-| Persistence   | IndexedDB in the worker, every 5 s and on tab hide. V1: 3 world slots, export/import, versioned saves (breakable until M14).                                                         |
-| Audio         | WebAudio layer with positional sound and event hooks (M13); soundtrack and voices are authored by Ethan.                                                                             |
+| Topic         | Decision                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audience      | V1: a hosted static site; each visitor points their own agent at their own world. V2: shared worlds and a global Catalog.                                                                                                                                           |
+| Platform      | Browser, WebGPU only, Chromium-family for V1. Linux Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.                                                                                                                                               |
+| Toolchain     | Deno only (check, bundle, test, fmt, lint, serve). No npm/jsr packages.                                                                                                                                                                                             |
+| Language      | TypeScript, data-oriented (typed arrays). Hot kernels move to Zig→WASM only when the profiler says so.                                                                                                                                                              |
+| Where it runs | The sim runs in the visitor's tab; a hosted relay pipes MCP to it by pairing code (ADR 0001). Host chosen at M14 (Cloudflare likely).                                                                                                                               |
+| Simulation    | Deterministic fixed-tick core (20 Hz, seeded PRNG) in a Web Worker, no DOM. Same code runs headless in Deno for tests (and a V2 server).                                                                                                                            |
+| Rendering     | Main thread, WebGPU, HDR + 4× MSAA, sun/moon shadow map, cloud shadows, GPU water, compute-culled grass and props, PBR Neutral tonemap.                                                                                                                             |
+| World         | 256×256×64 voxel island in 32×32 chunk columns: rolling hills, river valleys, beaches, sea to the horizon.                                                                                                                                                          |
+| Catalog       | Append-only store of kinds (Materials, Parts, Designs, Rules, Relations), separate from the World store of things (ADR 0003).                                                                                                                                       |
+| Behavior      | Rules: validated JSON trees, trigger → conditions → effects through engine operations. No agent code (ADR 0004).                                                                                                                                                    |
+| Physics       | Bodies follow the walkable surface, A* (climb 1, drop 2, wade 1, swim 3; hop down 4 only when there's no other way). Objects are rasterized to tiles: low tops (≤ 1 block) are stood on, taller ones walked around. Next: rigid bodies, joints, light/fire/signals. |
+| Making        | Designs combine Blocks (voxel grid: walls, floors, roofs) and Parts (free-form shapes and mechanisms); a built Design's parts become one Object, turned in quarter turns, paid for by volume. `craft` follows made_from recipes.                                    |
+| Villagers     | One world, many agents: each MCP session `join`s a named villager; rejoining reattaches it. Bodies are 3D Designs from Parts (ADR 0005).                                                                                                                            |
+| Animals       | Sheep, cows, chickens, ducks and fish schools: species in sim code until V2; their products and drops move to the Catalog.                                                                                                                                          |
+| Village Life  | On by default: Needs (hunger, energy; slow, never kill), village level with Unlocks, Errands. Spectators can switch to Sandbox anytime.                                                                                                                             |
+| Spectators    | Watch, follow, pin Wishes on the Notice Board, control time/speed/look/weather/world slots/Village Life. They never move villagers.                                                                                                                                 |
+| Time          | Day/night cycle, one game day per 10 real minutes at 1×. Offline progress = elapsed ticks (capped at 3 days) on reload.                                                                                                                                             |
+| Persistence   | IndexedDB in the worker, every 5 s and on tab hide. V1: 3 world slots, export/import, versioned saves (breakable until M14).                                                                                                                                        |
+| Audio         | WebAudio layer with positional sound and event hooks (M13); soundtrack and voices are authored by Ethan.                                                                                                                                                            |
 
 ## The Catalog
 
@@ -128,8 +128,7 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 
 - **Tools** are defined once in `src/sim/tools.ts` (JSON schema + handler). The bridge imports the
   definitions to list them; the sim runs them. `screenshot` runs in the page (offscreen, 1024×640,
-  villager name tags burnt in, so it works in a hidden tab), and the page decodes `set_sprite`
-  images to pixels before the sim sees them.
+  villager name tags burnt in, so it works in a hidden tab).
 - **Bridge** (`tools/bridge.ts`, zero deps): a Streamable HTTP MCP server (JSON responses, no SSE,
   Origin-checked). In dev it shares port 5173 with the game; standalone it's `deno task bridge` on
   7777. It is a pipe, not an authority: the tab owns the world. Latest connected tab wins. The V1
@@ -156,8 +155,11 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 | `till` / `plant` / `harvest`     | Area actions (≤16 tiles). Plant a seed, sapling or plant name; ground and growth time come from its habitat and `grows_into` (wheat: ~18 game hours). Harvest gives the ripe crop's drops (wheat: 1 wheat and 2 wheat seeds).                                                                                                                                                                       |
 | `fish`                           | Walk to the bank, cast 1-5 times at a water tile; catches depend on schools, time, weather.                                                                                                                                                                                                                                                                                                         |
 | `place_block` / `break_block`    | Lay any held block Material over an area (≤16 columns) stacked `layers` high (≤4; ≤48 blocks a call), or at a height `y` beside something solid; dig areas and layers down from the top, or upward from `y` (doorways). Digging gives the block's drops (grass and farmland give dirt), or the block itself; harder blocks take longer. Diggers work inside-out so they never end in their own pit. |
-| `build`                          | Lay a Design's `blocks` grid at x, z (on the highest ground under it, or `y`), bottom layer first, ≤48 blocks or ~50 s a call; calling again carries on. Never shuts the builder in or strands them on the roof.                                                                                                                                                                                    |
-| `set_sprite`                     | Pixel-art body (removed in M8 for 3D bodies): `rows` + `palette`, or `image_base64`.                                                                                                                                                                                                                                                                                                                |
+| `build`                          | Build a Design at x, z (on the highest ground under it, or `y`), `turn` 0/90/180/270: its `blocks` bottom layer first, ≤48 blocks or ~50 s a call (calling again carries on), then its `parts` as one Object costing each part's volume in its Material (at least 1). Checks the whole remaining cost up front. Never shuts the builder in or strands them on the roof.                             |
+| `craft`                          | Make a Material from another along a made_from recipe (4 planks from a log), ~1 s a batch, up to 16 batches. Agents' recipes only make agent-authored Materials.                                                                                                                                                                                                                                    |
+| `interact`                       | Gather from an area (≤16 tiles): chop trees, break rocks, pick flowers/reeds/lily pads/berries (they replant), dig up young saplings, take Objects apart for their Materials; shear, milk and collect eggs when the animal's product is ready (approaching slowly). Yields are `drops` Relations.                                                                                                   |
+| `set_body`                       | Look like any Design with a `body` part that fits about 1.2 × 2.4 × 1.2 (roles animate); "farmer" goes back to the default.                                                                                                                                                                                                                                                                         |
+| `terraform`                      | Raise, lower or flatten up to 8 × 8 columns, ≤64 blocks a call (flatten carries on); lowering gives what it digs, raising spends dirt or a named block; grass stays on top.                                                                                                                                                                                                                         |
 | `say`                            | Speech bubble + activity feed line.                                                                                                                                                                                                                                                                                                                                                                 |
 | `wait`                           | Rest 1-60 real seconds.                                                                                                                                                                                                                                                                                                                                                                             |
 | `journal_write` / `journal_read` | Persistent notes per villager (last 50).                                                                                                                                                                                                                                                                                                                                                            |
@@ -177,8 +179,9 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
   their normal from screen-space derivatives.
 - Grass has no per-blade data: the vertex shader generates blades in a grid around the camera from
   the rgba16uint surface texture (height, block, slope mask, water). Editing the world rewrites it.
-- Villagers are procedural farmers by default; until M8, `set_sprite` swaps in pixel art rendered as
-  extruded voxel runs that billboard toward the camera.
+- Villagers wear the "farmer" Design by default, in their own shirt and skin tints; `set_body` puts
+  them in any Design with a `body` part. Its head, arms and legs are posed from the sim (walking,
+  working, idle life); parts with other roles ride on the body (ADR 0005).
 - Spectators click a name tag (or the panel list) to glide over and follow that villager.
 
 ## Simulation
@@ -186,8 +189,10 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
 - Runs in a Web Worker (`src/worker.ts`) at 20 Hz; the page mirrors the world, which the worker
   sends whole once (voxels, heights and the generated props) and then patches with streamed edits,
   and interpolates villager positions between ticks. Nothing is generated twice.
-- Crops grow from the clock, so idle progress is free; the page draws their growth on the GPU from
-  each crop's planting tick, so fields ripen smoothly and nothing is re-sent while they grow.
+- Crops grow from the clock, so idle progress is free; the page draws their growth from each crop's
+  planting tick, so fields ripen smoothly and nothing is re-sent while they grow. A crop Design with
+  `"look": "blades"` (wheat) is a swaying blade field on the GPU; any other crop draws its own
+  parts, scaled up as it grows. A Rule's `grow` effect brings crops and young plants forward.
 - Worldgen memoizes noise gradients per lattice point (bit-identical output, ~3× faster), and the
   mesher skips buried blocks (identical meshes, ~2.5× faster), so placing a block remeshes in about
   a millisecond per chunk instead of hitching the frame.

@@ -39,12 +39,23 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `sim/jobs.ts` and `reach` to a block height (building groundwork).
 - **M5 — Catalog core.** Append-only Catalog with nature's entries, Proposals and Votes, the Rules
   engine, seven Catalog tools, page mirror and feed; playtest [0001](playtests/0001-m5-catalog.md).
+- **M6 — built-ins become entries.** Blocks, items, plants, the farmer and animal bodies are Catalog
+  data; growth, drops and food are Relations; spread is a Rule effect; playtest
+  [0002](playtests/0002-m6-built-ins.md). Closed 2026-10-29 with Ethan's OK on software numbers; the
+  hardware remeasure moved to the standing TODO under Known gaps.
 - **Overhaul (2026-10-28, between M6 and M7, asked for by Ethan).** Efficiency, agent fluidity and
   looks across the board; report [0003](playtests/0003-overhaul.md). Worldgen ~3× faster and no
   longer run twice, a ~2.5× faster mesher, GPU-culled props, compact water, crop growth on the GPU;
   instant tool answers and no `_whoami` round trip; building pulled forward from M7 (below); PBR
   Neutral tonemap, sharpening, warm sunsets, lit clouds, organic ground edges; offscreen
   `screenshot` with name tags; a headless harness for VMs without a display.
+- **M7 — building, crafting, physics phase 1.** `craft` along made_from, `interact` (gather,
+  dismantle, collect from animals), Designs' parts built as Objects in quarter turns and paid by
+  volume, Objects rasterized for walking (stand on low tops, walk around tall ones); playtest
+  [0004](playtests/0004-m7.md).
+- **M8 — character and land.** `set_body` (any Design with a body part; sprites removed),
+  `terraform` (raise, lower, flatten, conserving earth), crops drawn from their Design (wheat opts
+  into blades), a `grow` Rule effect; playtest [0005](playtests/0005-m8.md).
 
 ## V1
 
@@ -100,7 +111,7 @@ Grill outcome (2026-10-27):
   renderer and the tools read them. Retiring or replacing an item already changes what Rules `give`;
   tools keep their coded drops until M6.
 
-### M6 — built-ins become entries (in progress)
+### M6 — built-ins become entries (done)
 
 - Blocks → Materials (looks, patterns, physical properties such as density and hardness).
 - Wheat, saplings, trees, flowers, reeds, rocks, lily pads → Designs + Rules (growth, spreading).
@@ -191,14 +202,13 @@ Visual pass (seed 7, daytime), closed without editing `nature.ts`:
 Playtest [0002](playtests/0002-m6-built-ins.md) covers the bridge sessions, the fixes, check, and
 test. Still open:
 
-- **TODO: hardware GPU remeasure.** Run `deno task shot "seed=7&time=0.62&speed=0"` on a machine
-  with a real GPU and record the milliseconds. The gate VM only got SwiftShader, then lost the
-  device, so no GPU time was measured. The older ~2.9 ms figure is not this gate's number. M6 stays
-  open until that shot is in the playtest report.
+- **Hardware GPU remeasure**: not measured in M6's gate (the VM only had SwiftShader). Ethan closed
+  M6 on 2026-10-29 without it; the remeasure is one standing TODO under Known gaps for M6, the
+  overhaul and M7.
 
-### M7 — building, crafting, physics phase 1
+### M7 — building, crafting, physics phase 1 (done)
 
-Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in the M7 grill:
+Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, as it stood before the grill:
 
 - Done in the overhaul (`sim/buildtools.ts`; revisit in the grill): `place_block` for any held block
   Material over areas (≤ 16 columns, `layers` ≤ 4, ≤ 48 blocks) or at a `y` with a solid neighbour,
@@ -218,12 +228,73 @@ Groundwork is in (`sim/jobs.ts`, `reach` with `y`). Starting plan, to refine in 
 - Physics 1: collision shapes for Parts; static Objects that villagers walk around and on.
 - `look` legend for Objects (built Materials are in).
 
-### M8 — character and land
+Grill outcome (2026-10-29):
+
+- **Recipes.** `craft` follows `made_from` (`count` of the output from one of the ingredient).
+  Agents' recipes go live at once, but only for Materials an agent authored: nature's Materials
+  (log, stone, wheat…) keep nature's recipes, so nobody crafts logs from dirt. Crafting works
+  anywhere, about a second per batch; workbenches can come later as a `needs` Relation.
+- **Objects are tile-anchored.** A Design's parts become one Object anchored at its first cell and
+  turned in quarter turns. For walking, each part's box is rasterized onto the tiles it covers: a
+  top up to a block over the ground is stood on, anything taller is walked around, parts two blocks
+  up leave room to walk under. Real shapes and free placement wait for rigid bodies (M9).
+- **Part cost by volume.** Each part costs ceil(its volume in blocks) of its Material, at least 1.
+  `build` checks the whole remaining cost (blocks and parts) up front and refuses with the list.
+- **`interact` needs no tool items.** One tool at x, z (or an area ≤ 16): the target decides the
+  verb, yields are `drops` Relations, animal products regrow on the species' timer. Axes and shears
+  as items can come with Village Life.
+- **Dismantling**: `interact` on any tile of an Object takes it apart and returns its full part
+  cost, whoever built it (a shared village).
+- **Playtests** run as cost-effective subagents calling the MCP bridge through a small shell helper,
+  since the cloud session has no MCP connection of its own.
+
+Decided in the build and the gate:
+
+- Objects live in their own store (`sim/objects.ts`), saved with the world and mirrored whole to the
+  page on change. Each column keeps the Object over it, whether it's in the way, and how far it
+  lifts a body; paths, animals, `place_block`, `break_block`, `till`, `plant`, spread and
+  `set_block` Rules all respect it. A part's box after its own turn and tilt is what's rasterized.
+- A parts-only Object stands on the highest ground under it (`y` refused); a mixed Design's parts
+  stand on its block base. The builder raises parts from any tile beside the footprint.
+- Agents' recipes yield at most 4 per ingredient and may not loop. Picked plants give items that
+  grow back into the plant (poppy → poppies, reed → reeds, lily leaf → lily pads, berries → bush);
+  berries are chicken food. Rules gain `crafted`, `gathered` and `built`.
+- `interact` targets match names or what a thing gives; animals up to two tiles outside the area
+  count, since they wander.
+
+### M8 — character and land (done)
 
 - Villager bodies are 3D Designs from Parts (ADR 0005); `set_sprite` and sprite dolls are removed.
   The farmer Design is the worked example. Update `farmer.md`'s first-join step.
 - `terraform`: raise, lower, flatten an area.
 - Agent-authored crops: a Design + growth Rules + Relations.
+
+Grill outcome (2026-10-29):
+
+- **`set_body {design}` replaces `set_sprite`**, free (a look, not a build): any live Design with a
+  `body` role that fits in about 1.2 × 2.4 × 1.2 blocks. Its roles animate (head, arms, legs);
+  missing roles just hold still. The default stays the farmer with per-villager shirt and skin
+  tints; a chosen body shows its own Materials.
+- **`terraform` conserves material**: lowering gives what it digs, raising spends dirt (or a named
+  block Material) from the inventory, flatten does both to a target height. Earthwork pace, about
+  three times faster per block than `place_block`; up to 8 × 8 columns and 64 blocks a call, and
+  calling again carries on.
+- **Crop looks are data**: a Design with `"look": "blades"` draws as the GPU blade field (wheat opts
+  in); any other crop draws its own Parts, scaled up as it grows, like a sapling.
+- **A `grow` Rule effect** (`{"grow": {"what": "radish", "hours": 2}}`) advances matching crops near
+  the event, or everywhere on a timer: rain makes radishes grow, compost speeds wheat.
+
+Decided in the build and the gate:
+
+- A body must be centered on its first cell, at least partly above y = 0, and its parts' boxes fit
+  1.2 × 2.4 × 1.2. Only parts make a body (a Design's blocks are ignored). A body whose Design is
+  later replaced by one without a body part is drawn as the farmer.
+- terraform keeps the turf: raising dirt onto grass lifts the grass, lowering grass sinks it. Trees,
+  rocks, crops and Objects are skipped. Lowering never leaves the digger in the pit.
+- Paths never hop down into a place with no ordinary way back unless the villager is already
+  stranded, and a villager with nowhere to walk works from where they stand (dig up, pillar out).
+- `grow` reaches ±4 tiles of the event, up to 24 hours; on a timer everywhere, up to 1 hour a
+  firing. It follows `replaced_by` like spread.
 
 ### M9-M11 — physics phases 2-4
 
@@ -240,6 +311,8 @@ Budget: sim tick < 4 ms with 500 awake bodies.
   death.
 - Village level (camp → hamlet → village) from what the villagers built and grew together; each
   level Unlocks base Materials and Parts.
+- From playtest 0004: recipe chains of agent Materials still amplify (×4 per step, no loops).
+  Scarcity (what a recipe may cost or yield, workbenches as `needs`) belongs here.
 - Errands offered by the world; any villager may take or ignore one.
 - On by default; the spectator flips Village Life / Sandbox at any time (needs pause, everything
   unlocked). Agents learn the mode from `join` and `look`.
@@ -276,6 +349,11 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
   spread rule has to be named or described as one.
 - A plant Design can be replaced by a Design with no habitat. New planting of that seed then fails;
   the proposal itself is allowed.
+- Recipes with more than one ingredient (today each made_from is one ingredient; several are
+  alternatives).
+- From playtest 0005: say in `harvest` (and the crop docs) that a crop gives only its drops, so an
+  invented crop needs a seed drop to be replanted without crafting.
+- terraform shapes beyond rectangles (a circle or an outline), for ponds and paths.
 
 ## Known gaps (polish backlog)
 
@@ -291,6 +369,9 @@ Pick these up in the gate of whichever milestone touches them.
   s of work by design). `build` stops at ~50 s and resumes; area digs and lays don't resume.
 - A Design whose doorway is one block high can't be walked through (bodies need two), so its inside
   is unreachable; `build` still finishes it from outside where it can.
+- Playtests: spawn cheap players as an agent type limited to Bash, so they can't stray into
+  unrelated tools (two did in 0004, harmlessly).
 - The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
-- Hardware GPU numbers for the overhaul: run `deno task shot "seed=7&time=0.62&speed=0"` on the dev
-  box and add them to playtest 0003 (only software numbers so far).
+- **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
+  `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
+  0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

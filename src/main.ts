@@ -5,8 +5,7 @@ import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { LOOKS } from "./render/look.ts";
 import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
-import type { Sprite } from "./sim/sim.ts";
-import { SPRITE_MAX, TOOL_DEFS } from "./sim/tools.ts";
+import { TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
@@ -118,13 +117,6 @@ async function handleTool(
     return { content: [{ type: "text", text: `Unknown tool "${name}".` }], isError: true };
   }
   if (name === "screenshot") return await screenshot(session);
-  if (name === "set_sprite" && typeof args.image_base64 === "string") {
-    try {
-      args = { _pixels: await decodeSprite(args.image_base64) };
-    } catch {
-      return { content: [{ type: "text", text: "Couldn't decode that image." }], isError: true };
-    }
-  }
   const id = name === "join" ? null : await whoIs(session);
   const label = id === null ? String(args.name ?? "someone") : agentName(id);
   if (!QUIET_TOOLS.has(name) && !ANNOUNCED_TOOLS.has(name)) {
@@ -154,24 +146,6 @@ async function whoIs(session: string): Promise<number | null> {
   if (who.isError) return null;
   sessionAgents.set(session, Number(who.text));
   return Number(who.text);
-}
-
-/** Decode an uploaded image into sprite pixels, fitted to SPRITE_MAX with crisp (nearest) scaling. */
-async function decodeSprite(base64: string): Promise<Sprite> {
-  const bytes = Uint8Array.from(atob(base64.replace(/^data:[^,]*,/, "")), (c) => c.charCodeAt(0));
-  const bitmap = await createImageBitmap(new Blob([bytes]));
-  const fit = Math.min(1, SPRITE_MAX / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * fit));
-  const height = Math.max(1, Math.round(bitmap.height * fit));
-  const ctx = new OffscreenCanvas(width, height).getContext("2d")!;
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  const data = ctx.getImageData(0, 0, width, height).data;
-  const pixels: number[] = [];
-  for (let i = 0; i < data.length; i += 4) {
-    pixels.push(data[i + 3] < 128 ? -1 : (data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
-  }
-  return { width, height, pixels };
 }
 
 const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0];
@@ -351,6 +325,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
       blocks: client.blocks,
       catalog: client.catalog,
       props: client.props,
+      objects: client.objects,
       tick: client.tick,
       day: client.day,
       weather: { clouds: client.clouds },

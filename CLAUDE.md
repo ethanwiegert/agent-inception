@@ -44,7 +44,7 @@ frames render only when `__game.capture()` asks; for software WebGPU, which can'
 
 ```
 src/main.ts         page entry: WebGPU init, frame loop, tool routing, offscreen screenshot/capture
-                    (name tags burnt in), session → villager cache, sprite decoding
+                    (name tags burnt in), session → villager cache
 src/worker.ts       sim worker: 20 Hz loop, streams ticks to the page, IndexedDB save/load
 src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation, tool calls
 src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect; a tab another tab replaced waits to be
@@ -59,8 +59,11 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     farmer, animal bodies, drops/growth/food Relations, example Rules),
                     rules.ts (Rule schema + engine: triggers, budget, effects),
                     catalogtools.ts (catalog_* / propose / vote tools),
-                    buildtools.ts (place_block / break_block over areas and layers, build a
-                    Design's blocks across calls, never trapping the builder),
+                    buildtools.ts (place_block / break_block over areas and layers, terraform, build a
+                    Design's blocks across calls, never trapping the builder, then its parts as
+                    an Object), maketools.ts (craft along made_from, interact: gather, dismantle,
+                    collect from animals), objects.ts (Objects: quarter turns, part cost, parts
+                    rasterized to tiles for walking: stand on low tops, walk around tall ones),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),
@@ -74,8 +77,8 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     columns of visible chunks), crops.ts (growth on the GPU from planting ticks),
                     meshes.ts (primitives → templates, instance batches) + models.ts (instanced
                     draws, wind, GPU culling per view) + designs.ts (any Design → mesh: parts in their
-                    Materials' looks, role groups around joints) + body.ts (villager rig from the
-                    "farmer" Design, tools, sprite dolls) + flora.ts (plant templates and
+                    Materials' looks, role groups around joints) + body.ts (villager rigs from any
+                    body Design, the tinted "farmer" by default, tools) + flora.ts (plant templates and
                     instances) + fauna.ts (animal rigs from their Designs; fish schools),
                     sky.ts, post.ts (PBR Neutral tonemap, grading, sharpening), look.ts (presets,
                     sun/moon, weather)
@@ -90,10 +93,11 @@ shader has a WGSL mirror of `slopeDrop` that must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M6 is in progress: the hardware GPU remeasure is
-still open). Each milestone opens with a short clarifying grill with Ethan and closes with the
-playtest gate described there (tests, playtests with cost-effective agents including an adversary, a
-report in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M8 are done; M9, rigid bodies, is next. The
+hardware GPU remeasure is a standing TODO for Ethan's dev box). Each milestone opens with a short
+clarifying grill with Ethan and closes with the playtest gate described there (tests, playtests with
+cost-effective agents including an adversary, a report in `docs/playtests/`, fixes, perf,
+screenshots).
 
 ## Testing and debugging
 

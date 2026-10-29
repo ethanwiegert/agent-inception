@@ -79,25 +79,37 @@ Deno.test("rejoining by name reattaches the same body", () => {
   assert(run(sim, "s2", "journal_read").text.includes("plant by the cliff"));
 });
 
-Deno.test("agents can set, validate, keep and reset a sprite", () => {
+Deno.test("set_body makes any Design with a body part a villager's look", () => {
   const sim = new Sim(1);
   run(sim, "s", "join", { name: "Pip" });
-  const palette = { h: "#e8b23a", f: "#fc0" };
-  assert(run(sim, "s", "set_sprite", { rows: ["hh", "fx"], palette }).isError, "unknown key");
-  assert(run(sim, "s", "set_sprite", { rows: ["..", ".."], palette }).isError, "all transparent");
-  assert(run(sim, "s", "set_sprite", { rows: ["#".repeat(33)], palette: { "#": "#000" } }).isError);
-
-  const ok = run(sim, "s", "set_sprite", { rows: [".h", "fh."], palette });
-  assert(!ok.isError, ok.text);
-  assertEquals(sim.agents[0].sprite, {
-    width: 3,
-    height: 2,
-    pixels: [-1, 0xe8b23a, -1, 0xffcc00, 0xe8b23a, -1],
+  const add = (name: string, parts: unknown[]) =>
+    run(sim, "s", "catalog_add", { kind: "design", name, description: "test", content: { parts } });
+  const box = (role: string | undefined, at: number[], size: number[]) => ({
+    part: "box",
+    material: "planks",
+    at,
+    size,
+    ...(role ? { role } : {}),
   });
-  assertEquals(Sim.load(sim.save(0)).agents[0].sprite, sim.agents[0].sprite);
-
-  run(sim, "s", "set_sprite", { reset: true });
-  assertEquals(sim.agents[0].sprite, null);
+  assert(!add("scarecrow", [box("body", [0.5, 1, 0.5], [0.4, 1.2, 0.3])]).isError);
+  assert(!add("crate", [box(undefined, [0.5, 0.5, 0.5], [1, 1, 1])]).isError);
+  assert(!add("giant", [box("body", [0.5, 1.5, 0.5], [0.5, 3, 0.5])]).isError);
+  assert(!add("offset", [box("body", [3, 0.5, 0.5], [0.5, 1, 0.5])]).isError);
+  const refused = (design: string, why: string) => {
+    const r = run(sim, "s", "set_body", { design });
+    assert(r.isError && r.text.includes(why), r.text);
+  };
+  refused("crate", 'role "body"');
+  refused("giant", "at most 2.4");
+  refused("offset", "isn't centered");
+  refused("stone", "not a Design");
+  refused("nothing at all", "Nothing called");
+  assert(!run(sim, "s", "set_body", { design: "scarecrow" }).isError);
+  assertEquals(sim.agents[0].body, sim.catalog.byName("scarecrow")!.id);
+  assert(!run(sim, "s", "set_body", { design: "chicken" }).isError, "an animal body fits too");
+  assertEquals(Sim.load(sim.save(0)).agents[0].body, sim.agents[0].body);
+  assert(run(sim, "s", "set_body", { design: "farmer" }).text.includes("again"));
+  assertEquals(sim.agents[0].body, null);
 });
 
 Deno.test("props generate per seed: groves, ground cover, a clearing at spawn", () => {

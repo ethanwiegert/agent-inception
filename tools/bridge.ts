@@ -15,7 +15,7 @@ const INSTRUCTIONS = "You are a villager living on a small voxel island that peo
   "and walls, build for a whole Design). Keep notes in your " +
   "journal. The Catalog lists every kind of thing that can exist here; read it with " +
   "catalog_find and catalog_get, and extend it with catalog_add and catalog_fork.";
-/** Largest request body accepted (an uploaded sprite image is the biggest legitimate one). */
+/** Largest request body accepted (a big Design or Rule is the biggest legitimate one). */
 const MAX_BODY = 1 << 20;
 
 interface JsonRpc {

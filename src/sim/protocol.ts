@@ -1,6 +1,7 @@
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
+import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
-import type { CallResult, SimEvent, Sprite } from "./sim.ts";
+import type { CallResult, SimEvent } from "./sim.ts";
 import type { WorldData } from "./world.ts";
 
 /** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
@@ -14,13 +15,15 @@ export const SCHOOL_STRIDE = 5;
 /**
  * Floats per crop in `TickMessage.crops`: x, y, z, the tick it was planted (relative to the
  * message's tick), then the stalk color and the ripe color (sRGB 0xRRGGBB, exact in a float), the
- * ticks it takes to ripen (0: always ripe) and one spare. The page works out growth on the GPU.
+ * ticks it takes to ripen (0: always ripe) and the Design it looks like. The page works out growth
+ * (on the GPU for blade fields).
  */
 export const CROP_STRIDE = 8;
 
 export interface AgentProfile {
   name: string;
-  sprite: Sprite | null;
+  /** The Design they look like; null for the default farmer. */
+  body: number | null;
 }
 
 /** Catalog changes since the last tick message. The Catalog is append-only, so new entries suffice. */
@@ -49,6 +52,7 @@ export interface ReadyMessage {
   caughtUp: number;
   /** Nature's generated props (packed quads, see `Props.packGenerated`) and today's difference. */
   props: { generated: Int32Array<ArrayBuffer>; diff: PropDiff };
+  objects: WorldObject[];
   catalog: CatalogSave;
 }
 
@@ -67,6 +71,8 @@ export interface TickMessage {
   edits: Int32Array<ArrayBuffer>;
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
+  /** Every Object, sent when one is built or taken apart. */
+  objects?: WorldObject[];
   catalog?: CatalogDelta;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;

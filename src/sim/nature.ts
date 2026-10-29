@@ -86,6 +86,14 @@ material("reed", "item", "#94a05a", "plain", 0.4, 0.5, true, "Tall waterside gra
 material("cattail", "item", "#755134", "fleece", 0.4, 0.3, true, "Brown seed heads on reeds.");
 material("lily leaf", "item", "#4c8841", "plain", 0.5, 0.1, true, "Round leaves that float.");
 
+// What villagers gather from plants with interact; each grows back into its plant when planted.
+material("poppy", "item", "#e04741", "plain", 0.3, 0.1, true, "A picked poppy; plant it.");
+material("buttercup", "item", "#f3d941", "plain", 0.3, 0.1, true, "A picked buttercup; plant it.");
+material("daisy", "item", "#f3f1e9", "plain", 0.3, 0.1, true, "A picked daisy; plant it.");
+material("violet", "item", "#a86cd9", "plain", 0.3, 0.1, true, "A picked violet; plant it.");
+material("lily flower", "item", "#f3baca", "plain", 0.3, 0.1, true, "A water lily's bloom.");
+material("berries", "item", "#7a2d4a", "plain", 1, 0.2, false, "Dark berries off a bush.");
+
 // What villagers and animals are made of.
 material("linen", "item", "#e8e2d4", "plain", 1.5, 0.5, true, "Woven cloth for shirts.");
 material("skin", "item", "#e0b79a", "plain", 1.1, 0.5, false, "A villager's skin.");
@@ -296,6 +304,7 @@ add("design", "water lily", "Lily pads with a pink flower.", {
 
 add("design", "wheat crop", "Wheat growing on farmland; ripe ears show the wheat's color.", {
   mark: "W",
+  look: "blades",
   habitat: { on: ["farmland"] },
   parts: (() => {
     const r = scatter(13), parts = [];
@@ -482,6 +491,29 @@ for (const tree of ["oak", "birch", "pine"]) {
   rel(tree, "drops", `${tree} sapling`);
 }
 rel("rock", "drops", "stone", 2);
+// Picked plants give something to replant elsewhere.
+for (
+  const [plant, item] of [
+    ["poppies", "poppy"],
+    ["buttercups", "buttercup"],
+    ["daisies", "daisy"],
+    ["violets", "violet"],
+  ]
+) {
+  rel(plant, "drops", item, 2);
+  rel(item, "grows_into", plant, 1, 6);
+}
+rel("reeds", "drops", "reed", 2);
+rel("reeds", "drops", "cattail");
+rel("reed", "grows_into", "reeds", 1, 6);
+rel("lily pads", "drops", "lily leaf", 2);
+rel("lily leaf", "grows_into", "lily pads", 1, 6);
+rel("water lily", "drops", "lily leaf");
+rel("water lily", "drops", "lily flower");
+rel("lily flower", "grows_into", "water lily", 1, 12);
+rel("bush", "drops", "berries", 3);
+rel("berries", "grows_into", "bush", 1, 24);
+rel("berries", "is_food_for", "chicken");
 rel("sheep", "drops", "wool");
 rel("cow", "drops", "milk");
 rel("chicken", "drops", "egg");

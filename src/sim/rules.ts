@@ -19,6 +19,9 @@ export const RULE_EVENTS = [
   "placed",
   "broken",
   "caught",
+  "crafted",
+  "gathered",
+  "built",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -41,7 +44,8 @@ export type Effect =
   | { set_block: { at: Vec3; to: string } }
   | { say: string }
   | { weather: { clouds: number; hours: number } }
-  | { spread: { what: string; count: number } };
+  | { spread: { what: string; count: number } }
+  | { grow: { what: string; hours: number } };
 
 export interface RuleContent {
   when: Trigger;
@@ -66,6 +70,9 @@ export const RULE_LIMITS = {
    */
   crowd: 3,
   weatherHours: 12,
+  /** Game hours one grow effect may bring plants forward: near an event, and on a timer. */
+  growHours: 24,
+  growHoursEverywhere: 1,
   /** Each Rule fires at most this often per game hour. */
   firingsPerHour: 20,
   /** Condition and effect steps the engine spends on Rules per tick, across all Rules. */
@@ -83,7 +90,7 @@ const CONDITIONS = [
   "any",
   "not",
 ];
-const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread"];
+const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread", "grow"];
 
 // ---------------------------------------------------------------- validation
 
@@ -162,11 +169,14 @@ export function heldMaterial(catalog: Catalog, v: unknown, where: string): Entry
 
 /** A Design with a habitat: the kind of plant `spread` copies. Underscores read as spaces. */
 function plantDesign(catalog: Catalog, v: unknown, where: string): Entry {
-  const raw = String(v ?? "").trim().toLowerCase();
+  if (typeof v !== "string" || !v.trim()) {
+    throw new Error(`${where} names a plant, like "poppies" or "wheat crop".`);
+  }
+  const raw = v.trim().toLowerCase();
   const e = catalog.byName(raw) ?? catalog.byName(raw.replace(/_/g, " "));
   if (!e || e.kind !== "design" || !(e.content as DesignContent).habitat) {
     throw new Error(
-      `${where}: "${v}" isn't a plant. Spread copies a Design with a habitat, like "poppies".`,
+      `${where}: "${v}" isn't a plant: a Design with a habitat, like "poppies" or "wheat crop".`,
     );
   }
   if (e.retired) throw new Error(`${where}: "${e.name}" is retired.`);
@@ -297,6 +307,21 @@ function effect(v: unknown, c: Check, where: string): Effect {
         spread: {
           what: plantDesign(c.catalog, o.what, `${at}.what`).name,
           count: Math.round(num(o.count ?? 1, 1, RULE_LIMITS.spread, `${at}.count`)),
+        },
+      };
+    }
+    case "grow": {
+      const o = fields(val, ["what", "hours"], at);
+      return {
+        grow: {
+          what: plantDesign(c.catalog, o.what, `${at}.what`).name,
+          // On a timer it reaches every plant in the world, so it moves them gently.
+          hours: num(
+            o.hours ?? 1,
+            0.1,
+            c.local ? RULE_LIMITS.growHours : RULE_LIMITS.growHoursEverywhere,
+            `${at}.hours`,
+          ),
         },
       };
     }
@@ -493,6 +518,7 @@ export class Rules {
       return;
     }
     if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);
+    if ("grow" in fx) return this.grow(fx.grow.what, fx.grow.hours, ctx === NO_PLACE ? null : ctx);
     if (!agent) return "no villager to act on";
     if ("give" in fx) {
       const name = sim.produce(fx.give.item);
@@ -521,6 +547,7 @@ export class Rules {
     const here = w.get(x, y, z);
     if (here === Block.Water) return "can't change water";
     if (w.propSolid[z * w.sizeX + x]) return "a tree or rock is in the way";
+    if (w.objectAt[z * w.sizeX + x] && y >= w.heightAt(x, z)) return "an Object is in the way";
     const name = to === "air" ? "air" : sim.produce(to);
     if (!name) return `${to} is retired`;
     const block = name === "air" ? Block.Air : sim.blocks.byName(name)?.id;
@@ -567,6 +594,39 @@ export class Rules {
     if (!placed) return why;
   }
 
+  /**
+   * Bring growing crops and young plants of `what` (following replaced_by) forward by `hours`:
+   * near the event, or everywhere for a timer. Returns why nothing grew.
+   */
+  private grow(what: string, hours: number, near: RuleCtx | null): string | void {
+    const sim = this.sim, c = sim.catalog, size = sim.world.sizeX;
+    const named = c.byName(what);
+    const design = named && c.current(named);
+    if (!design) return `${what} is retired`;
+    const ticks = Math.round((hours / 24) * sim.ticksPerDay);
+    const r = RULE_LIMITS.reach;
+    const close = (key: number) =>
+      !near ||
+      (Math.abs((key % size) - near.x) <= r && Math.abs(Math.floor(key / size) - near.z) <= r);
+    const live = (id: number) => {
+      const e = c.get(id);
+      return e && c.current(e)?.id === design.id;
+    };
+    let n = 0;
+    for (const [key, crop] of sim.crops) {
+      if (!close(key) || !live(crop.design) || sim.cropGrowth(crop) >= 1) continue;
+      crop.planted -= ticks;
+      n++;
+    }
+    if (n) sim.cropsVersion++;
+    for (const [key, p] of sim.props.map) {
+      if (!close(key) || !live(p.design) || sim.props.growth(p, sim.tick) >= 1) continue;
+      sim.props.set(key % size, Math.floor(key / size), { ...p, planted: p.planted - ticks });
+      n++;
+    }
+    if (!n) return `no growing ${design.name} ${near ? "nearby" : "anywhere"}`;
+  }
+
   /** Place one copy beside the plant at `key`. A new tile key, or why this source couldn't. */
   private spreadFrom(
     key: number,
@@ -589,7 +649,7 @@ export class Rules {
       const x = sx + dx, z = sz + dz;
       const y = w.heightAt(x, z);
       if (y < 0) continue;
-      if (sim.props.at(x, z) || sim.crops.has(z * size + x)) continue;
+      if (sim.props.at(x, z) || sim.crops.has(z * size + x) || w.objectAt[z * size + x]) continue;
       const ground = sim.blocks.name(w.get(x, y, z));
       if (habitatRefusal(w, info, x, z, ground)) continue;
       if (info.solid) {

@@ -153,17 +153,20 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
       parts: [],
     },
   }));
-  err(run(sim, "a", "build", { design: "little hut", x, z }), "You have none of what");
+  err(run(sim, "a", "build", { design: "little hut", x, z }), "short of 50 stone, 30 planks");
   ok(run(sim, "a", "walk_to", { x: x - 1, z: z - 1 })); // a build call has about 45 s of work
   fern.inventory.stone = 50;
   fern.inventory.planks = 10;
+  // Everything is checked up front: no half-built hut for want of planks.
+  err(run(sim, "a", "build", { design: "little hut", x, z }), "short of 20 planks");
+  assert(sim.world.get(x, h + 1, z) !== Block.Stone, "nothing laid");
+  fern.inventory.planks = 30;
   const first = ok(run(sim, "a", "build", { design: "little hut", x, z }));
-  // 25 floor + 10 planks, then the planks run out, and the roof waits for its walls.
-  assert(first.startsWith(`Built 35 blocks of "little hut" at x=${x} y=${h + 1} z=${z}`), first);
-  assert(first.includes("Still needed: 20 planks (you have 0)"), first);
+  // At most 48 blocks or ~50 s a call, bottom layer first.
+  assert(first.includes(`blocks of "little hut" at x=${x} y=${h + 1} z=${z}`), first);
+  assert(first.includes("To carry on"), first);
   assert(sim.world.get(x, h + 1, z) === Block.Stone);
   assert(sim.world.get(x + 2, h + 4, z + 2) === Block.Air, "no roof before the walls");
-  fern.inventory.planks = 40;
   // Called again without y, it finds its own floor rather than the new, higher ground.
   const second = buildAll(sim, { design: "little hut", x, z });
   assert(second.includes(`at x=${x} y=${h + 1} z=${z}`), second);
@@ -174,7 +177,7 @@ Deno.test("build lays a Design's blocks over calls, picks up where it stopped, a
   ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
   assert(ok(run(sim, "a", "build", { design: "little hut", x, z })).includes("already complete"));
   err(run(sim, "a", "build", { design: "little hut", x: 500, z: 500 }), "outside the world");
-  err(run(sim, "a", "build", { design: "farmer", x, z }), "has no blocks to build");
+  err(run(sim, "a", "build", { design: "farmer", x, z }), "short of 2 denim");
   err(run(sim, "a", "build", { design: "stone", x, z }), "not a Design");
 });
 

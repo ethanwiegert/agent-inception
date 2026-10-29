@@ -8,8 +8,9 @@ import {
 } from "./sim/protocol.ts";
 import { BlockRegistry } from "./sim/blocks.ts";
 import { Catalog } from "./sim/catalog.ts";
+import { Objects } from "./sim/objects.ts";
 import { Props } from "./sim/props.ts";
-import type { SimEvent, Sprite } from "./sim/sim.ts";
+import type { SimEvent } from "./sim/sim.ts";
 import { World } from "./sim/world.ts";
 
 export interface AgentView {
@@ -22,7 +23,8 @@ export interface AgentView {
   anim: number;
   stride: number;
   color: number;
-  sprite: Sprite | null;
+  /** The Design they look like; null for the default farmer. */
+  body: number | null;
 }
 
 export interface AnimalView {
@@ -57,6 +59,8 @@ export class SimClient {
   private registry = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
+  /** Mirror of the sim's Objects, rasterized on the page's world too. */
+  objects: Objects | null = null;
   /** Mirror of the sim's Catalog. */
   catalog = new Catalog();
   crops: Float32Array<ArrayBuffer> = new Float32Array(0);
@@ -122,11 +126,11 @@ export class SimClient {
         anim: 0,
         stride: 0,
         color: 0,
-        sprite: null,
+        body: null,
       };
       v.id = c[i];
       v.name = this.profiles[j]?.name ?? "?";
-      v.sprite = this.profiles[j]?.sprite ?? null;
+      v.body = this.profiles[j]?.body ?? null;
       v.x = mix(p, c, i + 1, t), v.y = mix(p, c, i + 2, t), v.z = mix(p, c, i + 3, t);
       v.yaw = p[i + 4] + dyaw * t, v.anim = c[i + 5], v.stride = mix(p, c, i + 6, t);
       v.color = c[i + 7];
@@ -171,6 +175,8 @@ export class SimClient {
       const world = World.fromData(msg.world);
       this.props = new Props(world, msg.props.generated, this.catalog);
       this.props.applyDiff(msg.props.diff);
+      this.objects = new Objects(world, this.catalog);
+      this.objects.reset(msg.objects);
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
       this.prevAnimals = this.currAnimals = new Float32Array(0);
@@ -216,6 +222,7 @@ export class SimClient {
       this.cropsVersion++;
     }
     if (this.world) applyEdits(this.world, msg.edits);
+    if (msg.objects && this.objects) this.objects.reset(msg.objects);
     for (const event of msg.events) this.onEvent(event);
     this.resolve(msg.results);
   }
