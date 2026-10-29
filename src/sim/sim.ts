@@ -531,29 +531,12 @@ export class Sim {
       const o = this.carried(a);
       if (o) this.holdUp(a, o), this.posesVersion++;
     }
-    // A villager or animal walking into a sleeping body wakes it, so they can shove it.
-    for (const o of list) {
-      if (!o.asleep || o.held) continue;
-      const shape = this.physics.shape(o.design);
-      if (!shape || shape.fixed) continue;
-      const c = this.physics.center(o);
-      for (const m of movers) {
-        if (Math.abs(m.vx) + Math.abs(m.vz) < 0.2) continue;
-        const reach = shape.radius + m.radius;
-        if (
-          (m.x - c[0]) ** 2 + (m.z - c[2]) ** 2 < reach * reach &&
-          c[1] - shape.radius < m.y + m.top && c[1] + shape.radius > m.y
-        ) {
-          this.physics.wake(o);
-          break;
-        }
-      }
-    }
     const physics = this.physics;
     physics.step(list, movers, 1 / TICK_HZ);
     if (physics.moved.length) this.posesVersion++;
     for (const o of physics.moved) {
-      if (o.asleep || this.tick % 4 === 0) objects.raster(o as WorldObject);
+      // Moving bodies re-mark their tiles now and then (spread over ticks), resting ones at once.
+      if (o.asleep || (this.tick + o.id) % 8 === 0) objects.raster(o as WorldObject);
     }
     for (const hit of physics.hits) this.hit(hit.body as WorldObject, hit);
     for (const { body } of physics.landings) {

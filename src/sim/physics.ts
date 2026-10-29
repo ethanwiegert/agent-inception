@@ -16,10 +16,10 @@ import { slopeDrop, solid, type World } from "./world.ts";
 
 export const GRAVITY = 9.8;
 /** Physics steps per 20 Hz tick, and solver passes per step. */
-const SUBSTEPS = 3;
+const SUBSTEPS = 2;
 const ITERATIONS = 8;
 /** Points are spread over part surfaces at about this spacing (blocks). */
-const SPACING = 0.5;
+const SPACING = 0.7;
 const MAX_POINTS = 200;
 const FRICTION = 0.6;
 /** Penetration left alone, and how fast the rest is corrected. */
@@ -341,7 +341,9 @@ function surfacePoints(kind: number, hx: number, hy: number, hz: number): [
   boolean,
 ][] {
   const out: [number, number, number, boolean][] = [];
-  const segs = (h: number) => Math.min(8, Math.max(1, Math.ceil((2 * h) / SPACING)));
+  // Boxes keep their edge midpoints: a crate turned 45° on another touches it only there.
+  const segs = (h: number) =>
+    Math.min(8, Math.max(kind === Kind.Box ? 2 : 1, Math.ceil((2 * h) / SPACING)));
   if (kind === Kind.Box) {
     const nx = segs(hx), ny = segs(hy), nz = segs(hz);
     for (let i = 0; i <= nx; i++) {
@@ -430,6 +432,8 @@ class Rt {
   dynamic = false;
   /** Fastest approach to the ground or a resting body this tick, for landings. */
   impact = 0;
+  /** Its place in the solver's arrays this step. */
+  index = 0;
   constructor(public o: BodyState) {}
 }
 
@@ -443,7 +447,7 @@ class Contacts {
   b: (Rt | null)[] = [];
   mover = new Int32Array(0);
   f = new Float64Array(0);
-  static readonly F = 32;
+  static readonly F = 64;
   ensure(n: number) {
     if (n <= this.cap) return;
     this.cap = Math.max(n, this.cap * 2, 256);
@@ -455,24 +459,12 @@ class Contacts {
     this.mover = m;
   }
 }
-// Field offsets in Contacts.f.
-const PX = 0,
-  NX = 3,
-  DEPTH = 6,
-  KV = 7,
-  RA = 10,
-  RB = 13,
-  T1 = 16,
-  T2 = 19,
-  MN = 22,
-  MT1 = 23,
-  MT2 = 24,
-  BIAS = 25,
-  LN = 26,
-  LT1 = 27,
-  LT2 = 28,
-  CAP = 29,
-  APPROACH = 30;
+// Field offsets in Contacts.f: the point, normal, depth, a mover's velocity, then per direction
+// (normal, tangent, tangent) a row of d, rA × d, I⁻¹(rA × d), rB × d, I⁻¹(rB × d), mass, impulse.
+const PX = 0, NX = 3, DEPTH = 6, KV = 7, BIAS = 10, CAP = 11, APPROACH = 12, DIR = 13, ROW = 17;
+
+const dist2 = (f: Float64Array, a: number, b: number) =>
+  (f[a] - f[b]) ** 2 + (f[a + 1] - f[b + 1]) ** 2 + (f[a + 2] - f[b + 2]) ** 2;
 
 /** Candidate contacts for one pair before they're reduced to a few per direction. */
 const cand = { n: 0, f: new Float64Array(7 * 512) };
@@ -634,7 +626,8 @@ export class Physics {
     this.landings.length = 0;
     this.moved.length = 0;
     this.movers = movers;
-    if (this.moverHit.length < movers.length) this.moverHit = new Float64Array(movers.length * 2);
+    if (this.moverHit.length < movers.length) this.moverHit = new Float64Array(movers.length);
+    this.moverHit.fill(0);
     const awake = this.awake, all = this.all;
     awake.length = 0, all.length = 0;
     for (const o of list) {
@@ -644,12 +637,32 @@ export class Physics {
       all.push(rt);
       if (rt.dynamic) awake.push(rt);
     }
+    this.wakeByMovers();
     if (!awake.length) return;
     for (const rt of awake) rt.impact = 0;
+    all.sort((a, b) => a.p[0] - a.shape.radius - (b.p[0] - b.shape.radius));
     const h = dt / SUBSTEPS;
     for (let s = 0; s < SUBSTEPS; s++) this.substep(h);
     for (const rt of awake) this.settle(rt, dt);
     for (const o of list) delete o.force;
+  }
+
+  /** A villager or animal walking into a sleeping body wakes it, so they can shove it. */
+  private wakeByMovers() {
+    const movers = this.movers, all = this.all;
+    for (let m = 0; m < movers.length; m++) {
+      const mv = movers[m];
+      if (Math.abs(mv.vx) + Math.abs(mv.vz) < 0.2) continue;
+      for (const rt of all) {
+        if (rt.dynamic || rt.shape.fixed) continue;
+        const r = rt.shape.radius, reach = r + mv.radius, p = rt.p;
+        if ((mv.x - p[0]) ** 2 + (mv.z - p[2]) ** 2 >= reach * reach) continue;
+        if (p[1] - r >= mv.y + mv.top || p[1] + r <= mv.y) continue;
+        this.wake(rt.o);
+        rt.dynamic = true, rt.invMass = rt.shape.invMass;
+        this.awake.push(rt);
+      }
+    }
   }
 
   /** The runtime body for `o`, its pose loaded from the saved state. */
@@ -691,14 +704,14 @@ export class Physics {
       out[i + 1] = p[1] + R[3] * x + R[4] * y + R[5] * z;
       out[i + 2] = p[2] + R[6] * x + R[7] * y + R[8] * z;
     }
-    s.parts.forEach((part, j) => {
-      const c = part.c;
+    for (let j = 0; j < s.parts.length; j++) {
+      const c = s.parts[j].c;
       for (let k = 0; k < 3; k++) {
         rt.partC[j * 3 + k] = p[k] + R[k * 3] * c[0] + R[k * 3 + 1] * c[1] + R[k * 3 + 2] * c[2];
       }
-      mul3(R, part.R, tmp);
+      mul3(R, s.parts[j].R, tmp);
       rt.partR.set(tmp, j * 9);
-    });
+    }
     // R I⁻¹ Rᵀ
     mul3(R, s.invI, tmp);
     for (let i = 0; i < 3; i++) {
@@ -714,19 +727,26 @@ export class Physics {
     for (const rt of this.awake) this.forces(rt, h);
     const c = this.contacts;
     c.n = 0;
-    this.moverHit.fill(0);
     for (const rt of this.awake) {
       this.collideWorld(rt);
       this.collideMovers(rt);
     }
-    // Pairs: each awake body against every body after it, or any non-awake body.
+    // Pairs: sorted along x (nearly sorted from last step, so insertion sort is quick), each body
+    // against the ones whose reach overlaps along x, at least one of them awake.
     const all = this.all;
+    for (let i = 1; i < all.length; i++) {
+      const rt = all[i], lo = rt.p[0] - rt.shape.radius;
+      let j = i - 1;
+      while (j >= 0 && all[j].p[0] - all[j].shape.radius > lo) all[j + 1] = all[j], j--;
+      all[j + 1] = rt;
+    }
     for (let i = 0; i < all.length; i++) {
-      const a = all[i];
+      const a = all[i], ra = a.shape.radius, hi = a.p[0] + ra;
       for (let j = i + 1; j < all.length; j++) {
         const b = all[j];
+        if (b.p[0] - b.shape.radius > hi) break;
         if (!a.dynamic && !b.dynamic) continue;
-        const r = a.shape.radius + b.shape.radius;
+        const r = ra + b.shape.radius;
         const dx = a.p[0] - b.p[0], dy = a.p[1] - b.p[1], dz = a.p[2] - b.p[2];
         if (dx * dx + dy * dy + dz * dz > r * r) continue;
         this.collidePair(a, b);
@@ -734,6 +754,7 @@ export class Physics {
     }
     this.prepare(h);
     for (let it = 0; it < ITERATIONS; it++) this.solve();
+    this.unload();
     this.report();
     for (const rt of this.awake) this.integrate(rt, h);
   }
@@ -809,11 +830,14 @@ export class Physics {
    * deepest, the farthest from it, the farthest from that line, and the one farthest from all.
    */
   private flush(a: Rt, b: Rt | null, mover: number, kvx = 0, kvy = 0, kvz = 0, cap = Infinity) {
-    const n = cand.n, f = cand.f;
+    const n = cand.n, f = cand.f, bucket = this.bucket;
     if (!n) return;
-    const bucketOf = (i: number) => {
+    if (bucket.length < n) this.bucket = new Int8Array(cand.f.length / 7);
+    const bk = this.bucket;
+    let used = 0;
+    for (let i = 0; i < n; i++) {
       const nx = f[i * 7 + 3], ny = f[i * 7 + 4], nz = f[i * 7 + 5];
-      return ny > 0.7
+      bk[i] = ny > 0.7
         ? 0
         : ny < -0.7
         ? 1
@@ -822,49 +846,53 @@ export class Physics {
         : nz > 0
         ? 4
         : 5;
-    };
-    for (let bucket = 0; bucket < 6; bucket++) {
+      used |= 1 << bk[i];
+    }
+    for (let q = 0; q < 6; q++) {
+      if (!(used & (1 << q))) continue;
       let count = 0, deep = -1;
       for (let i = 0; i < n; i++) {
-        if (bucketOf(i) !== bucket) continue;
+        if (bk[i] !== q) continue;
         count++;
         if (deep < 0 || f[i * 7 + 6] > f[deep * 7 + 6]) deep = i;
       }
-      if (!count) continue;
       if (count <= 4) {
-        for (let i = 0; i < n; i++) {
-          if (bucketOf(i) === bucket) this.emit(a, b, i, mover, kvx, kvy, kvz, cap);
-        }
+        for (let i = 0; i < n; i++) if (bk[i] === q) this.emit(a, b, i, mover, kvx, kvy, kvz, cap);
         continue;
       }
-      const pick = [deep, -1, -1, -1];
-      const dist = (i: number, j: number) =>
-        Math.hypot(f[i * 7] - f[j * 7], f[i * 7 + 1] - f[j * 7 + 1], f[i * 7 + 2] - f[j * 7 + 2]);
+      const pick = this.pick;
+      pick[0] = deep, pick[1] = pick[2] = pick[3] = -1;
       for (let slot = 1; slot < 4; slot++) {
         let best = -1, bestScore = -1;
         for (let i = 0; i < n; i++) {
-          if (bucketOf(i) !== bucket || pick.includes(i)) continue;
+          if (bk[i] !== q || i === pick[0] || i === pick[1] || i === pick[2]) continue;
+          const o = i * 7, p0 = pick[0] * 7;
           let score: number;
-          if (slot === 1) score = dist(i, pick[0]);
+          if (slot === 1) score = dist2(f, o, p0);
           else if (slot === 2) {
             // Distance from the line through the first two.
-            const ax = f[pick[1] * 7] - f[pick[0] * 7],
-              ay = f[pick[1] * 7 + 1] - f[pick[0] * 7 + 1],
-              az = f[pick[1] * 7 + 2] - f[pick[0] * 7 + 2];
-            const bx = f[i * 7] - f[pick[0] * 7],
-              by = f[i * 7 + 1] - f[pick[0] * 7 + 1],
-              bz = f[i * 7 + 2] - f[pick[0] * 7 + 2];
-            score = Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
-          } else score = Math.min(dist(i, pick[0]), dist(i, pick[1]), dist(i, pick[2]));
+            const p1 = pick[1] * 7;
+            const ax = f[p1] - f[p0], ay = f[p1 + 1] - f[p0 + 1], az = f[p1 + 2] - f[p0 + 2];
+            const bx = f[o] - f[p0], by = f[o + 1] - f[p0 + 1], bz = f[o + 2] - f[p0 + 2];
+            const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+            score = cx * cx + cy * cy + cz * cz;
+          } else {
+            score = Math.min(dist2(f, o, p0), dist2(f, o, pick[1] * 7), dist2(f, o, pick[2] * 7));
+          }
           if (score > bestScore) bestScore = score, best = i;
         }
         if (best < 0) break;
         pick[slot] = best;
       }
-      for (const i of pick) if (i >= 0) this.emit(a, b, i, mover, kvx, kvy, kvz, cap);
+      for (let i = 0; i < 4; i++) {
+        if (pick[i] >= 0) this.emit(a, b, pick[i], mover, kvx, kvy, kvz, cap);
+      }
     }
     cand.n = 0;
   }
+
+  private bucket = new Int8Array(512);
+  private pick = new Int32Array(4);
 
   private emit(
     a: Rt,
@@ -1090,6 +1118,19 @@ export class Physics {
   }
 
   private collideWorld(rt: Rt) {
+    // Clear of the ground, trees and water's edge all around: nothing to test.
+    const w = this.world, r = rt.shape.radius, p = rt.p;
+    const x0 = Math.floor(p[0] - r), x1 = Math.floor(p[0] + r);
+    const z0 = Math.floor(p[2] - r), z1 = Math.floor(p[2] + r);
+    let top = -1;
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        if (x < 0 || z < 0 || x >= w.sizeX || z >= w.sizeZ) continue;
+        const k = z * w.sizeX + x;
+        top = Math.max(top, w.top[k] + (w.propSolid[k] ? PROP_HEIGHT : 0));
+      }
+    }
+    if (p[1] - r > top + 1.01) return;
     this.beginPair();
     const pts = rt.pts;
     for (let i = 0; i < pts.length; i += 3) {
@@ -1123,48 +1164,62 @@ export class Physics {
         continue;
       }
       this.beginPair();
-      const capsule = (px: number, py: number, pz: number, r: number) => {
-        const cy = Math.min(yb, Math.max(ya, py));
-        const ex = px - mv.x, ey = py - cy, ez = pz - mv.z;
-        const d = Math.hypot(ex, ey, ez), reach = mv.radius + r;
-        if (d >= reach) return;
-        const nx = d > 1e-6 ? ex / d : 1, ny = d > 1e-6 ? ey / d : 0, nz = d > 1e-6 ? ez / d : 0;
-        this.candidate(px - nx * r, py - ny * r, pz - nz * r, nx, ny, nz, reach - d);
-      };
       const pts = rt.pts;
-      for (let i = 0; i < pts.length; i += 3) capsule(pts[i], pts[i + 1], pts[i + 2], 0);
+      for (let i = 0; i < pts.length; i += 3) {
+        this.capsule(mv, ya, yb, pts[i], pts[i + 1], pts[i + 2], 0);
+      }
       const parts = rt.shape.parts;
       for (let j = 0; j < parts.length; j++) {
-        if (parts[j].r) {
-          capsule(rt.partC[j * 3], rt.partC[j * 3 + 1], rt.partC[j * 3 + 2], parts[j].r);
-        }
+        if (!parts[j].r) continue;
+        this.capsule(
+          mv,
+          ya,
+          yb,
+          rt.partC[j * 3],
+          rt.partC[j * 3 + 1],
+          rt.partC[j * 3 + 2],
+          parts[j].r,
+        );
       }
       this.flush(rt, null, m, mv.vx, mv.vy, mv.vz, mv.shove);
     }
   }
 
-  /** Two bodies: each one's points against the other's parts, spheres exactly. */
-  private collidePair(a: Rt, b: Rt) {
-    this.beginPair();
-    this.pointsInto(a, b);
-    this.flushPair(a, b);
-    this.beginPair();
-    this.pointsInto(b, a);
-    this.flushPair(b, a);
+  /** A point (or sphere of radius r) inside a mover's capsule, its axis from ya to yb. */
+  private capsule(
+    mv: Mover,
+    ya: number,
+    yb: number,
+    px: number,
+    py: number,
+    pz: number,
+    r: number,
+  ) {
+    const cy = Math.min(yb, Math.max(ya, py));
+    const ex = px - mv.x, ey = py - cy, ez = pz - mv.z;
+    const d = Math.hypot(ex, ey, ez), reach = mv.radius + r;
+    if (d >= reach) return;
+    const nx = d > 1e-6 ? ex / d : 1, ny = d > 1e-6 ? ey / d : 0, nz = d > 1e-6 ? ez / d : 0;
+    this.candidate(px - nx * r, py - ny * r, pz - nz * r, nx, ny, nz, reach - d);
   }
 
-  private flushPair(a: Rt, b: Rt) {
-    if (!cand.n) return;
-    if (a.dynamic) this.flush(a, b.dynamic ? b : b, -1);
-    else {
-      // Only `b` moves: flip the contacts so the moving body is always first.
-      const f = cand.f;
-      for (let i = 0; i < cand.n; i++) {
-        const o = i * 7;
-        f[o + 3] = -f[o + 3], f[o + 4] = -f[o + 4], f[o + 5] = -f[o + 5];
-      }
-      this.flush(b, a, -1);
+  /**
+   * Two bodies: each one's points against the other's parts, spheres exactly, reduced together
+   * so the moving body comes first and the pair gets a few contacts per direction.
+   */
+  private collidePair(a: Rt, b: Rt) {
+    if (!a.dynamic) [a, b] = [b, a];
+    this.beginPair();
+    this.pointsInto(a, b);
+    const mine = cand.n;
+    this.pointsInto(b, a);
+    // b's points pushed b out of a: the same contacts push a the other way.
+    const f = cand.f;
+    for (let i = mine; i < cand.n; i++) {
+      const o = i * 7;
+      f[o + 3] = -f[o + 3], f[o + 4] = -f[o + 4], f[o + 5] = -f[o + 5];
     }
+    this.flush(a, b, -1);
   }
 
   /** `a`'s points and spheres inside `b`'s parts: contacts pushing `a` out along b's faces. */
@@ -1360,33 +1415,81 @@ export class Physics {
 
   // ---------------------------------------------------------------- solver
 
+  /** Velocities (v, ω) of the awake bodies, inverse masses and world inverse inertias, flat. */
+  private sv = new Float64Array(0);
+  private dirs = new Float64Array(9);
+  private sm = new Float64Array(0);
+  private si = new Float64Array(0);
+  private ia = new Int32Array(0);
+  private ib = new Int32Array(0);
+
+  /**
+   * Per contact and direction (normal, two tangents): the jacobian rows (rA × d, rB × d) and the
+   * angular responses I⁻¹(r × d), so solving is a few dot products on flat arrays.
+   */
   private prepare(h: number) {
-    const c = this.contacts, f = c.f;
+    const c = this.contacts, f = c.f, awake = this.awake, n = awake.length;
+    if (this.sm.length < n) {
+      this.sv = new Float64Array(n * 6),
+        this.sm = new Float64Array(n),
+        this.si = new Float64Array(n * 9);
+    }
+    for (let i = 0; i < n; i++) {
+      const rt = awake[i];
+      rt.index = i;
+      this.sv.set(rt.v, i * 6), this.sv.set(rt.w, i * 6 + 3);
+      this.sm[i] = rt.invMass;
+      this.si.set(rt.invIw, i * 9);
+    }
+    if (this.ia.length < c.n) this.ia = new Int32Array(c.cap), this.ib = new Int32Array(c.cap);
     for (let k = 0; k < c.n; k++) {
       const o = k * Contacts.F, a = c.a[k], b = c.b[k];
+      this.ia[k] = a.index;
+      this.ib[k] = b?.dynamic ? b.index : -1;
       const nx = f[o + NX], ny = f[o + NX + 1], nz = f[o + NX + 2];
-      for (let i = 0; i < 3; i++) {
-        f[o + RA + i] = f[o + PX + i] - a.p[i];
-        f[o + RB + i] = b ? f[o + PX + i] - b.p[i] : 0;
-      }
+      const rax = f[o + PX] - a.p[0], ray = f[o + PX + 1] - a.p[1], raz = f[o + PX + 2] - a.p[2];
+      const rbx = b ? f[o + PX] - b.p[0] : 0, rby = b ? f[o + PX + 1] - b.p[1] : 0;
+      const rbz = b ? f[o + PX + 2] - b.p[2] : 0;
       // Tangents.
       let t1x: number, t1y: number, t1z: number;
       if (Math.abs(nx) < 0.57) t1x = 0, t1y = nz, t1z = -ny;
       else t1x = -nz, t1y = 0, t1z = nx;
       const l = Math.hypot(t1x, t1y, t1z);
       t1x /= l, t1y /= l, t1z /= l;
-      f[o + T1] = t1x, f[o + T1 + 1] = t1y, f[o + T1 + 2] = t1z;
-      f[o + T2] = ny * t1z - nz * t1y, f[o + T2 + 1] = nz * t1x - nx * t1z;
-      f[o + T2 + 2] = nx * t1y - ny * t1x;
-      f[o + MN] = this.mass(a, b, o, NX);
-      f[o + MT1] = this.mass(a, b, o, T1);
-      f[o + MT2] = this.mass(a, b, o, T2);
-      const vn = this.relVel(a, b, o, NX);
-      f[o + APPROACH] = -vn;
+      const t2x = ny * t1z - nz * t1y, t2y = nz * t1x - nx * t1z, t2z = nx * t1y - ny * t1x;
+      const dirs = this.dirs;
+      dirs[0] = nx, dirs[1] = ny, dirs[2] = nz, dirs[3] = t1x, dirs[4] = t1y, dirs[5] = t1z;
+      dirs[6] = t2x, dirs[7] = t2y, dirs[8] = t2z;
+      const bd = this.ib[k] >= 0;
+      for (let d = 0; d < 3; d++) {
+        const dx = dirs[d * 3], dy = dirs[d * 3 + 1], dz = dirs[d * 3 + 2], q = o + DIR + d * ROW;
+        f[q] = dx, f[q + 1] = dy, f[q + 2] = dz;
+        const ax = ray * dz - raz * dy, ay = raz * dx - rax * dz, az = rax * dy - ray * dx;
+        const bx = rby * dz - rbz * dy, by = rbz * dx - rbx * dz, bz = rbx * dy - rby * dx;
+        f[q + 3] = ax, f[q + 4] = ay, f[q + 5] = az;
+        f[q + 9] = bx, f[q + 10] = by, f[q + 11] = bz;
+        const A = a.invIw;
+        const iax = A[0] * ax + A[1] * ay + A[2] * az, iay = A[3] * ax + A[4] * ay + A[5] * az;
+        const iaz = A[6] * ax + A[7] * ay + A[8] * az;
+        f[q + 6] = iax, f[q + 7] = iay, f[q + 8] = iaz;
+        let k2 = a.invMass + ax * iax + ay * iay + az * iaz;
+        if (bd) {
+          const B = b!.invIw;
+          const ibx = B[0] * bx + B[1] * by + B[2] * bz, iby = B[3] * bx + B[4] * by + B[5] * bz;
+          const ibz = B[6] * bx + B[7] * by + B[8] * bz;
+          f[q + 12] = ibx, f[q + 13] = iby, f[q + 14] = ibz;
+          k2 += b!.invMass + bx * ibx + by * iby + bz * ibz;
+        } else f[q + 12] = f[q + 13] = f[q + 14] = 0;
+        f[q + 15] = k2 > 0 ? 1 / k2 : 0;
+        f[q + 16] = 0; // accumulated impulse
+      }
+      const vn = this.rel(this.sv, k, o + DIR);
+      // How fast the body itself comes at it (a villager walking into a crate isn't hit by it).
+      f[o + APPROACH] = -(vn + f[o + KV] * nx + f[o + KV + 1] * ny + f[o + KV + 2] * nz);
+      // Push apart what overlaps, and bounce a little off hard impacts.
       let bias = Math.min(MAX_CORRECTION, (BAUMGARTE / h) * Math.max(0, f[o + DEPTH] - SLOP));
       if (vn < -BOUNCE_SPEED) bias = Math.max(bias, -RESTITUTION * vn);
       f[o + BIAS] = bias;
-      f[o + LN] = 0, f[o + LT1] = 0, f[o + LT2] = 0;
       // A mover shoves with limited strength per step.
       if (c.mover[k] >= 0) f[o + CAP] = this.movers[c.mover[k]].shove * h;
       // Fast enough into something resting: wake it, and note the impact for landings.
@@ -1401,78 +1504,59 @@ export class Physics {
     return Math.hypot(rt.v[0], rt.v[1], rt.v[2]);
   }
 
-  /** Effective mass along direction at offset `d` of contact `o`. */
-  private mass(a: Rt, b: Rt | null, o: number, d: number): number {
-    const f = this.contacts.f;
-    let k = a.invMass + this.angular(a.invIw, f, o + RA, o + d);
-    if (b?.dynamic) k += b.invMass + this.angular(b.invIw, f, o + RB, o + d);
-    return k > 0 ? 1 / k : 0;
-  }
-
-  /** n · ((I⁻¹ (r × n)) × r) */
-  private angular(I: Float64Array, f: Float64Array, ri: number, ni: number): number {
-    const rx = f[ri], ry = f[ri + 1], rz = f[ri + 2], nx = f[ni], ny = f[ni + 1], nz = f[ni + 2];
-    const cx = ry * nz - rz * ny, cy = rz * nx - rx * nz, cz = rx * ny - ry * nx;
-    const ix = I[0] * cx + I[1] * cy + I[2] * cz;
-    const iy = I[3] * cx + I[4] * cy + I[5] * cz;
-    const iz = I[6] * cx + I[7] * cy + I[8] * cz;
-    return nx * (iy * rz - iz * ry) + ny * (iz * rx - ix * rz) + nz * (ix * ry - iy * rx);
-  }
-
-  /** Relative velocity of a over b at the contact, along direction at offset d. */
-  private relVel(a: Rt, b: Rt | null, o: number, d: number): number {
-    const f = this.contacts.f;
-    const ax = f[o + RA], ay = f[o + RA + 1], az = f[o + RA + 2];
-    let vx = a.v[0] + a.w[1] * az - a.w[2] * ay;
-    let vy = a.v[1] + a.w[2] * ax - a.w[0] * az;
-    let vz = a.v[2] + a.w[0] * ay - a.w[1] * ax;
-    if (b?.dynamic) {
-      const bx = f[o + RB], by = f[o + RB + 1], bz = f[o + RB + 2];
-      vx -= b.v[0] + b.w[1] * bz - b.w[2] * by;
-      vy -= b.v[1] + b.w[2] * bx - b.w[0] * bz;
-      vz -= b.v[2] + b.w[0] * by - b.w[1] * bx;
+  /** Relative velocity along row `q` of contact `k` (a over b, less a mover's own motion). */
+  private rel(v: Float64Array, k: number, q: number): number {
+    const f = this.contacts.f, a = this.ia[k] * 6, b = this.ib[k];
+    let r = f[q] * v[a] + f[q + 1] * v[a + 1] + f[q + 2] * v[a + 2] +
+      f[q + 3] * v[a + 3] + f[q + 4] * v[a + 4] + f[q + 5] * v[a + 5];
+    if (b >= 0) {
+      const o = b * 6;
+      r -= f[q] * v[o] + f[q + 1] * v[o + 1] + f[q + 2] * v[o + 2] +
+        f[q + 9] * v[o + 3] + f[q + 10] * v[o + 4] + f[q + 11] * v[o + 5];
     }
-    vx -= f[o + KV], vy -= f[o + KV + 1], vz -= f[o + KV + 2];
-    return vx * f[o + d] + vy * f[o + d + 1] + vz * f[o + d + 2];
+    const o = k * Contacts.F + KV;
+    return r - (f[q] * f[o] + f[q + 1] * f[o + 1] + f[q + 2] * f[o + 2]);
   }
 
-  private apply(a: Rt, b: Rt | null, o: number, d: number, j: number) {
-    const f = this.contacts.f;
-    const px = f[o + d] * j, py = f[o + d + 1] * j, pz = f[o + d + 2] * j;
-    this.impulse(a, f[o + RA], f[o + RA + 1], f[o + RA + 2], px, py, pz);
-    if (b?.dynamic) this.impulse(b, f[o + RB], f[o + RB + 1], f[o + RB + 2], -px, -py, -pz);
-  }
-
-  private impulse(rt: Rt, rx: number, ry: number, rz: number, px: number, py: number, pz: number) {
-    const m = rt.invMass, I = rt.invIw;
-    rt.v[0] += px * m, rt.v[1] += py * m, rt.v[2] += pz * m;
-    const tx = ry * pz - rz * py, ty = rz * px - rx * pz, tz = rx * py - ry * px;
-    rt.w[0] += I[0] * tx + I[1] * ty + I[2] * tz;
-    rt.w[1] += I[3] * tx + I[4] * ty + I[5] * tz;
-    rt.w[2] += I[6] * tx + I[7] * ty + I[8] * tz;
+  /** Apply impulse `j` along row `q` of contact `k`. */
+  private push(v: Float64Array, k: number, q: number, j: number) {
+    const f = this.contacts.f, a = this.ia[k], b = this.ib[k];
+    let m = this.sm[a] * j, o = a * 6;
+    v[o] += f[q] * m, v[o + 1] += f[q + 1] * m, v[o + 2] += f[q + 2] * m;
+    v[o + 3] += f[q + 6] * j, v[o + 4] += f[q + 7] * j, v[o + 5] += f[q + 8] * j;
+    if (b < 0) return;
+    m = this.sm[b] * j, o = b * 6;
+    v[o] -= f[q] * m, v[o + 1] -= f[q + 1] * m, v[o + 2] -= f[q + 2] * m;
+    v[o + 3] -= f[q + 12] * j, v[o + 4] -= f[q + 13] * j, v[o + 5] -= f[q + 14] * j;
   }
 
   private solve() {
-    const c = this.contacts, f = c.f;
+    const c = this.contacts, f = c.f, v = this.sv;
     for (let k = 0; k < c.n; k++) {
-      const o = k * Contacts.F, a = c.a[k], b = c.b[k];
-      const vn = this.relVel(a, b, o, NX);
-      let dl = f[o + MN] * (f[o + BIAS] - vn);
-      const old = f[o + LN];
-      const total = Math.min(f[o + CAP], Math.max(0, old + dl));
-      dl = total - old;
-      f[o + LN] = total;
-      if (dl) this.apply(a, b, o, NX, dl);
+      const o = k * Contacts.F, qn = o + DIR;
+      const vn = this.rel(v, k, qn);
+      const old = f[qn + 16];
+      const total = Math.min(f[o + CAP], Math.max(0, old + f[qn + 15] * (f[o + BIAS] - vn)));
+      f[qn + 16] = total;
+      if (total !== old) this.push(v, k, qn, total - old);
       const limit = FRICTION * total * (c.mover[k] >= 0 ? 0.5 : 1);
-      for (const [T, L, MT] of [[T1, LT1, MT1], [T2, LT2, MT2]]) {
-        const vt = this.relVel(a, b, o, T);
-        let dt = -f[o + MT] * vt;
-        const was = f[o + L];
-        const now = Math.max(-limit, Math.min(limit, was + dt));
-        dt = now - was;
-        f[o + L] = now;
-        if (dt) this.apply(a, b, o, T, dt);
+      for (let d = 1; d < 3; d++) {
+        const q = qn + d * ROW;
+        const was = f[q + 16];
+        const now = Math.max(-limit, Math.min(limit, was - f[q + 15] * this.rel(v, k, q)));
+        f[q + 16] = now;
+        if (now !== was) this.push(v, k, q, now - was);
       }
+    }
+  }
+
+  /** Velocities back from the solver to the bodies. */
+  private unload() {
+    const v = this.sv;
+    for (const rt of this.awake) {
+      const o = rt.index * 6;
+      rt.v[0] = v[o], rt.v[1] = v[o + 1], rt.v[2] = v[o + 2];
+      rt.w[0] = v[o + 3], rt.w[1] = v[o + 4], rt.w[2] = v[o + 5];
     }
   }
 
@@ -1486,13 +1570,12 @@ export class Physics {
       const speed = f[o + APPROACH];
       if (speed <= 0) continue;
       const momentum = speed * a.shape.mass;
-      if (momentum <= this.moverHit[m * 2]) continue;
-      this.moverHit[m * 2] = momentum;
+      if (momentum <= this.moverHit[m]) continue;
+      this.moverHit[m] = momentum;
       const nx = -f[o + NX], nz = -f[o + NX + 2], l = Math.hypot(nx, nz) || 1;
-      const hit = this.hits.find((h) => h.mover === m);
-      const next = { body: a.o, mover: m, speed, momentum, nx: nx / l, nz: nz / l };
-      if (hit) Object.assign(hit, next);
-      else this.hits.push(next);
+      let hit = this.hits.find((h) => h.mover === m);
+      if (!hit) this.hits.push(hit = { body: a.o, mover: m, speed, momentum, nx: 0, nz: 0 });
+      hit.body = a.o, hit.speed = speed, hit.momentum = momentum, hit.nx = nx / l, hit.nz = nz / l;
     }
   }
 

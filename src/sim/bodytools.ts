@@ -87,7 +87,7 @@ export const BODY_TOOL_DEFS: ToolDef[] = [
 const nameOf = (sim: Sim, o: WorldObject) => sim.catalog.get(o.design)?.name ?? "Object";
 
 /** The movable Object on tile (x, z) (the top one of a stack), or why there's none. */
-function movable(sim: Sim, agent: Agent, x: number, z: number): WorldObject {
+function movable(sim: Sim, x: number, z: number): WorldObject {
   if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
   const here = sim.objects.allAt(x, z);
   for (const o of sim.objects.list) {
@@ -129,7 +129,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
     if (!dir) throw new Error("toward is a direction: north, south, east, west, northeast…");
     const tiles = Math.min(MAX_TILES, Math.max(1, num(args.tiles ?? 1, "tiles")));
     if (sim.carried(agent)) throw new Error("Your hands are full: put_down what you carry first.");
-    const o = movable(sim, agent, x, z);
+    const o = movable(sim, x, z);
     const name = nameOf(sim, o), shape = sim.physics.shape(o.design)!;
     if (shape.mass > PUSH_MAX) {
       throw new Error(
@@ -237,7 +237,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
     if (have) {
       throw new Error(`Your hands are full with the ${nameOf(sim, have)}: put_down it first.`);
     }
-    const o = movable(sim, agent, x, z);
+    const o = movable(sim, x, z);
     const name = nameOf(sim, o), shape = sim.physics.shape(o.design)!;
     if (shape.mass > CARRY_MAX) {
       throw new Error(

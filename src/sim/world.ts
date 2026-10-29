@@ -53,6 +53,8 @@ export class World {
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
+  /** slopeMask per column, worked out on first use (-1 until then) and forgotten on edits. */
+  private masks: Int8Array;
 
   constructor(
     readonly sizeX: number,
@@ -70,6 +72,7 @@ export class World {
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);
+    this.masks = new Int8Array(sizeX * sizeZ).fill(-1);
   }
 
   /** A world around `data`'s arrays (taken, not copied), every chunk due for meshing. */
@@ -108,6 +111,15 @@ export class World {
     if (!this.inBounds(x, y, z)) return;
     this.blocks[this.index(x, y, z)] = block;
     this.updateTop(x, z);
+    // A column's slopes depend on the columns around it.
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = x + dx, nz = z + dz;
+        if (nx >= 0 && nz >= 0 && nx < this.sizeX && nz < this.sizeZ) {
+          this.masks[nz * this.sizeX + nx] = -1;
+        }
+      }
+    }
     // Faces, AO and slopes depend on all eight neighbours, which may sit in other chunks.
     const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
     for (let dz = -1; dz <= 1; dz++) {
@@ -125,6 +137,14 @@ export class World {
    * that keeps neighbouring surfaces watertight. Bigger drops stay as cliffs.
    */
   slopeMask(x: number, z: number): number {
+    if (x < 0 || z < 0 || x >= this.sizeX || z >= this.sizeZ) return this.computeMask(x, z);
+    const key = z * this.sizeX + x;
+    let m = this.masks[key];
+    if (m < 0) m = this.masks[key] = this.computeMask(x, z);
+    return m;
+  }
+
+  private computeMask(x: number, z: number): number {
     const h = this.heightAt(x, z);
     if (h < 1 || !slopes(this.get(x, h, z))) return 0;
     let mask = 0;
