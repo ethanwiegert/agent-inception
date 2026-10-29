@@ -305,6 +305,27 @@ Budget: sim tick < 4 ms with 500 awake bodies.
 - **M10 joints**: hinge, axle, slider, motor; doors, carts, windmills become possible Designs.
 - **M11 fields**: light from lamp Parts, then fire (spreads to Materials that burn), then signals.
 
+M9 grill outcome (2026-10-29):
+
+- **Built Objects are rigid bodies.** Every Object built from a parts-only Design is a body made of
+  its parts (a compound shape; mass is each part's volume × its Material's density). It falls,
+  stacks, topples, rolls, floats or sinks, and rests in any pose, no longer snapped to tiles or
+  quarter turns. Props stay static scenery that bodies bump into. A Design marked `"anchored": true`
+  stays put.
+- **Blocks stay static.** Voxels are the world bodies collide with (slopes included). Digging out
+  what an Object stands on makes it fall; blocks themselves never fall.
+- **`push` and `carry` / `put_down`.** `push {x, z, toward, tiles}` shoves a body along by walking
+  behind it (heavier is slower, too heavy won't budge; tall things topple, round things roll on).
+  `carry {x, z}` lifts a light body overhead (carrying slows the walk); `put_down {x, z, turn}` sets
+  it down at any angle, and it settles or falls from there.
+- **Full interaction with villagers and animals.** Walking villagers and animals shove light bodies.
+  A hard enough hit (by momentum) knocks a villager over: a stumble, the current job pauses about 2
+  s and carries on; never damage. After a knockdown a villager can't be knocked over again for about
+  10 s. The feed and the victim's next tool result name who pushed or dropped the body. Animals
+  bolt.
+- **Rules see physics.** Triggers `pushed`, `carried`, `landed` (with `what`), and an `impulse`
+  effect that nudges bodies within ±4 of the event (capped), for wind gusts and bouncy mushrooms.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no

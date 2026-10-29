@@ -619,7 +619,20 @@ function* raise(
     const tx = key % sizeX, tz = Math.floor(key / sizeX);
     if (sim.props.at(tx, tz)) sim.props.set(tx, tz, null);
   }
-  const o: WorldObject = { id: sim.objects.nextId(), design, x, y, z, turn, by: agent.name };
+  const o: WorldObject = {
+    id: sim.objects.nextId(),
+    design,
+    x,
+    y,
+    z,
+    turn,
+    by: agent.name,
+    ...Objects.buildPose(content, x, y, z, turn),
+    vel: [0, 0, 0],
+    spin: [0, 0, 0],
+    asleep: false,
+    mover: agent.name,
+  };
   sim.objects.add(o);
   sim.fire("built", agent, x, y, z, name);
   return o;

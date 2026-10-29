@@ -16,6 +16,7 @@ import {
 } from "./jobs.ts";
 import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
 import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
+import { BODY_HANDLERS, BODY_TOOL_DEFS } from "./bodytools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
@@ -120,6 +121,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   ...BUILD_TOOL_DEFS,
   ...MAKE_TOOL_DEFS,
+  ...BODY_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -258,6 +260,7 @@ const HANDLERS: Record<string, Handler> = {
   ...CATALOG_HANDLERS,
   ...BUILD_HANDLERS,
   ...MAKE_HANDLERS,
+  ...BODY_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 

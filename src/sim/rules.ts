@@ -22,6 +22,9 @@ export const RULE_EVENTS = [
   "crafted",
   "gathered",
   "built",
+  "pushed",
+  "carried",
+  "landed",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -45,7 +48,29 @@ export type Effect =
   | { say: string }
   | { weather: { clouds: number; hours: number } }
   | { spread: { what: string; count: number } }
-  | { grow: { what: string; hours: number } };
+  | { grow: { what: string; hours: number } }
+  | { impulse: Impulse };
+
+/** A nudge to bodies: up and sideways speeds (blocks/s), optionally only those named `what`. */
+export interface Impulse {
+  what?: string;
+  up: number;
+  speed: number;
+  /** A compass direction, or "away" from the event (the default when there is one). */
+  toward?: string;
+}
+
+/** Compass directions: x grows east, z grows south. */
+export const COMPASS: Record<string, [number, number]> = {
+  north: [0, -1],
+  south: [0, 1],
+  east: [1, 0],
+  west: [-1, 0],
+  northeast: [Math.SQRT1_2, -Math.SQRT1_2],
+  northwest: [-Math.SQRT1_2, -Math.SQRT1_2],
+  southeast: [Math.SQRT1_2, Math.SQRT1_2],
+  southwest: [-Math.SQRT1_2, Math.SQRT1_2],
+};
 
 export interface RuleContent {
   when: Trigger;
@@ -73,6 +98,11 @@ export const RULE_LIMITS = {
   /** Game hours one grow effect may bring plants forward: near an event, and on a timer. */
   growHours: 24,
   growHoursEverywhere: 1,
+  /** Fastest an impulse may set bodies moving (blocks/s): near an event, and on a timer. */
+  impulse: 8,
+  impulseEverywhere: 3,
+  /** Bodies one impulse may move. */
+  impulseBodies: 16,
   /** Each Rule fires at most this often per game hour. */
   firingsPerHour: 20,
   /** Condition and effect steps the engine spends on Rules per tick, across all Rules. */
@@ -90,7 +120,7 @@ const CONDITIONS = [
   "any",
   "not",
 ];
-const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread", "grow"];
+const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread", "grow", "impulse"];
 
 // ---------------------------------------------------------------- validation
 
@@ -325,6 +355,35 @@ function effect(v: unknown, c: Check, where: string): Effect {
         },
       };
     }
+    case "impulse": {
+      const o = fields(val, ["what", "up", "speed", "toward"], at);
+      const max = c.local ? RULE_LIMITS.impulse : RULE_LIMITS.impulseEverywhere;
+      const out: Impulse = {
+        up: num(o.up ?? 0, 0, max, `${at}.up`),
+        speed: num(o.speed ?? 0, 0, max, `${at}.speed`),
+      };
+      if (!out.up && !out.speed) throw new Error(`${at} needs up or speed above 0.`);
+      if (o.what !== undefined) {
+        if (typeof o.what !== "string" || !o.what.trim() || o.what.length > 40) {
+          throw new Error(`${at}.what is a name to match (1-40 characters), e.g. "ball".`);
+        }
+        out.what = o.what.trim().toLowerCase();
+      }
+      if (o.toward !== undefined) {
+        const t = String(o.toward).toLowerCase();
+        if (t !== "away" && !(t in COMPASS)) {
+          throw new Error(`${at}.toward is "away" or a compass direction like "east".`);
+        }
+        if (t === "away" && !c.local) {
+          throw new Error(`${at}.toward "away" needs an event trigger.`);
+        }
+        out.toward = t;
+      }
+      if (out.speed && !out.toward && !c.local) {
+        throw new Error(`${at} on a timer needs toward (a compass direction) for its speed.`);
+      }
+      return { impulse: out };
+    }
     default: {
       const o = fields(val, ["clouds", "hours"], at);
       return {
@@ -519,6 +578,7 @@ export class Rules {
     }
     if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);
     if ("grow" in fx) return this.grow(fx.grow.what, fx.grow.hours, ctx === NO_PLACE ? null : ctx);
+    if ("impulse" in fx) return this.impulse(fx.impulse, ctx === NO_PLACE ? null : ctx);
     if (!agent) return "no villager to act on";
     if ("give" in fx) {
       const name = sim.produce(fx.give.item);
@@ -537,6 +597,37 @@ export class Rules {
     const [dx, dy, dz] = fx.set_block.at;
     const x = ctx.x + dx, y = ctx.y + dy, z = ctx.z + dz;
     return this.setBlock(x, y, z, fx.set_block.to);
+  }
+
+  /**
+   * Nudge the movable Objects near the event (±4, or every one on a timer, at most 16): up, and
+   * sideways away from the event or toward a compass direction. They know a Rule moved them, so
+   * their landing doesn't fire Rules again.
+   */
+  private impulse(fx: Impulse, near: RuleCtx | null): string | void {
+    const sim = this.sim, reach = RULE_LIMITS.reach + 0.5;
+    let n = 0;
+    for (const o of sim.objects.list) {
+      if (n >= RULE_LIMITS.impulseBodies) break;
+      if (o.held) continue;
+      const shape = sim.physics.shape(o.design);
+      if (!shape || shape.fixed) continue;
+      if (fx.what && !saysWords(sim.catalog.get(o.design)?.name ?? "", fx.what)) continue;
+      const c = sim.physics.center(o);
+      let dx = 0, dz = 0;
+      if (near) {
+        const ex = c[0] - (near.x + 0.5), ey = c[1] - (near.y + 0.5), ez = c[2] - (near.z + 0.5);
+        if (Math.abs(ex) > reach || Math.abs(ey) > reach || Math.abs(ez) > reach) continue;
+        const l = Math.hypot(ex, ez);
+        if (l > 0.05) dx = ex / l, dz = ez / l;
+      }
+      if (fx.toward && fx.toward !== "away") [dx, dz] = COMPASS[fx.toward];
+      sim.physics.wake(o);
+      o.vel = [o.vel[0] + dx * fx.speed, o.vel[1] + fx.up, o.vel[2] + dz * fx.speed];
+      o.byRule = true;
+      n++;
+    }
+    if (!n) return `no ${fx.what ?? "movable Object"} ${near ? "nearby" : "anywhere"}`;
   }
 
   private setBlock(x: number, y: number, z: number, to: string): string | void {
