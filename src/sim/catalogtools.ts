@@ -4,6 +4,7 @@ import {
   ENGINE_RELATIONS,
   type Entry,
   KINDS,
+  LIMITS,
   type MaterialContent,
   type Proposal,
   type RelationContent,
@@ -72,7 +73,7 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       '[{"part": "cone", "material": "planks", "at": [0.5, 0.5, 0.5], "size": [0.2, 1, 0.2], ' +
       '"turn": 0, "tilt": 10, "role": "head"}], "joints": {"head": [0.5, 0.2, 0.5]}, ' +
       '"mark": "T", "habitat": {"on": ["grass"], "zones": ["meadow"], "share": 0.25}, ' +
-      '"look": "blades"}. ' +
+      '"look": "blades", "anchored": true}. ' +
       "layers go bottom up; a layer is rows along z, each row characters along x, " +
       `"." empty. Parts: box, sphere, cylinder, cone. turn is yaw in degrees, tilt leans that ` +
       "way. role and joints make a body move (body, head, eyes, left arm, left leg, front left " +
@@ -80,6 +81,17 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `and where nature plants it (zones: ${ZONES.join(", ")}); (0.5, 0, 0.5) is the tile ` +
       "center on the ground. A crop (habitat on farmland) draws its parts growing, or with " +
       '"look": "blades" a swaying field like wheat. Up to 16×16×16 blocks and 32 parts. ' +
+      "Objects from parts fall, roll and float; anchored ones stay where they're built. " +
+      'Joints: give parts a "piece" name ("door"; parts without one, and the blocks, are ' +
+      '"main") and join pieces with a hinge, axle, slider or motor part: {"part": "hinge", ' +
+      '"material": "planks", "at": [0.03, 1, 0.06], "size": [0.05, 1.9, 0.05], "joins": ' +
+      '["main", "door"], "limits": [0, 90]}. Its long side is the axis (upright; tilt 90 ' +
+      "points it north-south, turn 90 too east-west). hinge: swings, limits in degrees from " +
+      "as built (a door held where use puts it); axle: spins freely (wheels); slider: slides " +
+      'along its length, limits in blocks; motor: an axle that turns itself at "speed" ' +
+      `degrees/s (default 30, ≤${LIMITS.motorSpeed}) while switched on. Pieces hang off ` +
+      `main like a tree, ≤${LIMITS.joints} joints. Hang a door on its doorway's edge so it ` +
+      "swings clear; use works it. See the garden gate, hand cart and windmill. " +
       "build makes a Design: its " +
       "blocks are laid as blocks and its parts become one Object (each part costs its volume " +
       "in its Material, at least 1).\n" +
@@ -99,7 +111,12 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `${RULE_LIMITS.crowd} neighbours already hold it), ` +
       `{"grow": {"what": "wheat crop", "hours": 2}} (≤${RULE_LIMITS.growHours} hours; brings ` +
       "growing crops and young plants of that Design forward, within reach of the event or " +
-      "everywhere on a timer). " +
+      "everywhere on a timer), " +
+      `{"impulse": {"what": "ball", "up": 4, "speed": 2, "toward": "east"}} (≤` +
+      `${RULE_LIMITS.impulse} blocks/s near the event, ≤${RULE_LIMITS.impulseEverywhere} and a ` +
+      "compass direction on a timer; nudges Objects that move), " +
+      '{"switch": {"what": "windmill", "on": true}} (starts or stops the motors of Objects ' +
+      "with that name, near the event or everywhere on a timer). " +
       `"at" is an offset (each -${RULE_LIMITS.reach}..${RULE_LIMITS.reach}) from the event's ` +
       "block; give, take, has, block and set_block need an event trigger. spread and grow " +
       "work on a timer too. A rule fires at most " +

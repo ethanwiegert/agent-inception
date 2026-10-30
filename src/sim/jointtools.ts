@@ -48,6 +48,10 @@ export const JOINT_TOOL_DEFS: ToolDef[] = [
 ];
 
 const nameOf = (sim: Sim, o: WorldObject) => sim.catalog.get(o.design)?.name ?? "Object";
+/** "the windmill's sails", or "the garden gate" when the piece is in the name already. */
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+const whose = (name: string, piece: string) =>
+  saysWords(name, piece) ? `the ${name}` : `the ${name}'s ${piece}`;
 
 /** Whether `use` does anything with a joint: motors switch, limited hinges and sliders swing. */
 const usable = (j: JointDef) => j.kind === "motor" || !!j.limits;
@@ -202,9 +206,11 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
     if (!usable(j)) {
       throw new Error(
         j.kind === "axle"
-          ? `The ${name}'s ${j.piece} spins freely on its axle; there's nothing to switch. push ` +
+          ? `${
+            cap(whose(name, j.piece))
+          } spins freely on its axle; there's nothing to switch. push ` +
             `the ${name} to roll it.`
-          : `The ${name}'s ${j.piece} swings freely on its hinge: it has no limits to swing ` +
+          : `${cap(whose(name, j.piece))} swings freely on its hinge: it has no limits to swing ` +
             "between. A hinge with limits (a door) can be used.",
       );
     }
@@ -268,15 +274,17 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
           : who
           ? `${who.name} is in its way`
           : `something is in the way, or it's too heavy for its ${j.kind}`;
-        return `The ${name}'s ${j.piece} stuck at ${show(at)} on its way to ${show(to)}: ${why}. ` +
+        return `${cap(whose(name, j.piece))} stuck at ${show(at)} on its way to ${
+          show(to)
+        }: ${why}. ` +
           "use again sends it back.";
       }
       if (Math.abs(to) < there) {
-        return `You ${slider ? "slide" : "shut"} the ${name}'s ${j.piece} back as it was built.`;
+        return `You ${slider ? "slide" : "shut"} ${whose(name, j.piece)} back as it was built.`;
       }
       return slider
-        ? `You slide the ${name}'s ${j.piece} ${show(to)} along its rail.`
-        : `You open the ${name}'s ${j.piece}: it swung ${show(Math.abs(to))} on its hinge.`;
+        ? `You slide ${whose(name, j.piece)} ${show(to)} along its rail.`
+        : `You open ${whose(name, j.piece)}: it swung ${show(Math.abs(to))} on its hinge.`;
     })();
   },
 };

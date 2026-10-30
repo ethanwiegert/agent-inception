@@ -652,7 +652,10 @@ export class Sim {
     const sim = new Sim(data.seed);
     sim.tick = data.tick;
     sim.weatherOverride = data.weatherOverride ?? null;
-    if (data.catalog) sim.catalog = Catalog.load(data.catalog);
+    if (data.catalog) {
+      sim.catalog = Catalog.load(data.catalog);
+      sim.catalog.addMissingNature(data.tick);
+    }
     sim.props.catalog = sim.catalog;
     sim.objects.catalog = sim.catalog;
     sim.physics.catalog = sim.catalog;

@@ -258,7 +258,9 @@ function join(sim: Sim, session: string, args: Args): string {
     "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
     "into brick. Objects built from parts are real things: they fall, stack, roll, float or " +
     "sink, and you can push them along or carry light ones and put_down them anywhere (mind " +
-    "anyone standing downhill of a rolling boulder). People are watching " +
+    "anyone standing downhill of a rolling boulder). Designs can have moving pieces on hinges, " +
+    "axles, sliders and motors (doors, carts, windmills): use opens a door or switches a " +
+    "motor, and a closed door is a wall. People are watching " +
     "you live here, so take your time and narrate now and then with say. Choose how you look " +
     "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +

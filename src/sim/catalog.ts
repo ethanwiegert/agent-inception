@@ -561,6 +561,25 @@ export class Catalog {
     return closed;
   }
 
+  /**
+   * Add nature's entries a world was saved without (Parts and examples added since), so an older
+   * world gains what a new one starts with. Relations are left out: they name entries by id.
+   */
+  addMissingNature(tick: number) {
+    for (const e of natureCatalog().entries) {
+      if (!e.name || e.kind === "relation" || this.byName(e.name)) continue;
+      try {
+        this.add(
+          { kind: e.kind, name: e.name, description: e.description, content: e.content },
+          NATURE,
+          tick,
+        );
+      } catch {
+        // Something it builds on was retired or renamed in this world: it stays out.
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- save
 
   save(): CatalogSave {

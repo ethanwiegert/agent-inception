@@ -675,6 +675,12 @@ const dist2 = (f: Float64Array, a: number, b: number) =>
 /** Candidate contacts for one pair before they're reduced to a few per direction. */
 const cand = { n: 0, f: new Float64Array(7 * 512) };
 
+const NO_JOINTS: JointState[] = [];
+/** A joint's pull back toward lined up: Baumgarte, capped. */
+const fix = (k: number, e: number) => Math.max(-MAX_CORRECTION, Math.min(MAX_CORRECTION, -k * e));
+/** A limit's row target: past it, push back; short of it, come no closer than reaching it. */
+const stop = (gap: number, h: number) => gap < 0 ? -gap * JOINT_BAUMGARTE / h : -gap / h;
+
 export class Physics {
   private rts = new Map<number, Rt>();
   private assemblies = new Map<number, Assembly>();
@@ -889,7 +895,14 @@ export class Physics {
         if (rt.dynamic) awake.push(rt);
       }
       group!.length = asm.shapes.length;
-      if (asm.joints.length && group!.some((rt) => rt.dynamic)) jointed.push(group![0]);
+      if (asm.joints.length) {
+        for (const rt of group!) {
+          if (rt.dynamic) {
+            jointed.push(group![0]);
+            break;
+          }
+        }
+      }
     }
     this.wakeByMovers();
     if (!awake.length) return;
@@ -1796,24 +1809,25 @@ export class Physics {
 
   /** The rows that hold one joint together and drive it this step. */
   private joint(A: Rt, B: Rt, j: JointDef, st: JointState, h: number) {
-    const RA = A.R, RB = B.R, ca = A.shape.com, cb = B.shape.com, an = j.anchor;
+    const RA = A.R, RB = B.R, ca = A.shape.com, cb = B.shape.com, an = j.anchor, g = this.jg;
     // Lever arms from each center of mass to the pin, as each piece has it.
     const ax = an[0] - ca[0], ay = an[1] - ca[1], az = an[2] - ca[2];
-    const rax = RA[0] * ax + RA[1] * ay + RA[2] * az;
-    const ray = RA[3] * ax + RA[4] * ay + RA[5] * az;
-    const raz = RA[6] * ax + RA[7] * ay + RA[8] * az;
+    const rax = g[0] = RA[0] * ax + RA[1] * ay + RA[2] * az;
+    const ray = g[1] = RA[3] * ax + RA[4] * ay + RA[5] * az;
+    const raz = g[2] = RA[6] * ax + RA[7] * ay + RA[8] * az;
     const bx = an[0] - cb[0], by = an[1] - cb[1], bz = an[2] - cb[2];
-    const rbx = RB[0] * bx + RB[1] * by + RB[2] * bz;
-    const rby = RB[3] * bx + RB[4] * by + RB[5] * bz;
-    const rbz = RB[6] * bx + RB[7] * by + RB[8] * bz;
+    const rbx = g[3] = RB[0] * bx + RB[1] * by + RB[2] * bz;
+    const rby = g[4] = RB[3] * bx + RB[4] * by + RB[5] * bz;
+    const rbz = g[5] = RB[6] * bx + RB[7] * by + RB[8] * bz;
     // How far the pin has pulled apart (a's minus b's).
-    const ex = A.p[0] + rax - B.p[0] - rbx, ey = A.p[1] + ray - B.p[1] - rby;
-    const ez = A.p[2] + raz - B.p[2] - rbz;
-    // The axis as a has it, and as b has it.
+    const ex = g[6] = A.p[0] + rax - B.p[0] - rbx;
+    const ey = g[7] = A.p[1] + ray - B.p[1] - rby;
+    const ez = g[8] = A.p[2] + raz - B.p[2] - rbz;
+    // The axis as a has it.
     const d = j.axis;
-    const ux = RA[0] * d[0] + RA[1] * d[1] + RA[2] * d[2];
-    const uy = RA[3] * d[0] + RA[4] * d[1] + RA[5] * d[2];
-    const uz = RA[6] * d[0] + RA[7] * d[1] + RA[8] * d[2];
+    const ux = g[9] = RA[0] * d[0] + RA[1] * d[1] + RA[2] * d[2];
+    const uy = g[10] = RA[3] * d[0] + RA[4] * d[1] + RA[5] * d[2];
+    const uz = g[11] = RA[6] * d[0] + RA[7] * d[1] + RA[8] * d[2];
     // b's turn relative to a: qb · qa⁻¹ (both are as built at first).
     const qa = A.q, qb = B.q;
     const pw = qb[3], px = qb[0], py = qb[1], pz = qb[2];
@@ -1830,96 +1844,109 @@ export class Physics {
     const l = Math.hypot(t1x, t1y, t1z);
     t1x /= l, t1y /= l, t1z /= l;
     const t2x = uy * t1z - uz * t1y, t2y = uz * t1x - ux * t1z, t2z = ux * t1y - uy * t1x;
-    const k = JOINT_BAUMGARTE / h, inf = Infinity;
-    const fix = (e: number) => Math.max(-MAX_CORRECTION, Math.min(MAX_CORRECTION, -k * e));
-    const point = (dx: number, dy: number, dz: number) =>
-      this.row(
-        A,
-        B,
-        dx,
-        dy,
-        dz,
-        ray * dz - raz * dy,
-        raz * dx - rax * dz,
-        rax * dy - ray * dx,
-        -(rby * dz - rbz * dy),
-        -(rbz * dx - rbx * dz),
-        -(rbx * dy - rby * dx),
-        fix(ex * dx + ey * dy + ez * dz),
-        -inf,
-        inf,
-      );
-    /** An angular row: relative spin (a's less b's) along (dx, dy, dz) driven to `bias`. */
-    const turn = (dx: number, dy: number, dz: number, bias: number, lo = -inf, hi = inf) =>
-      this.row(A, B, 0, 0, 0, dx, dy, dz, -dx, -dy, -dz, bias, lo, hi);
+    const k = JOINT_BAUMGARTE / h, inf = Infinity, slide = j.kind === "slider";
     let at: number;
-    if (j.kind === "slider") {
-      point(t1x, t1y, t1z), point(t2x, t2y, t2z);
+    if (slide) {
+      this.pointRow(A, B, k, t1x, t1y, t1z), this.pointRow(A, B, k, t2x, t2y, t2z);
       // No turning at all: b's turn relative to a goes back to none.
-      const kx = 2 * qx, ky = 2 * qy, kz = 2 * qz, c = (e: number) => -fix(e);
-      turn(1, 0, 0, c(kx)), turn(0, 1, 0, c(ky)), turn(0, 0, 1, c(kz));
+      this.turnRow(A, B, 1, 0, 0, -fix(k, 2 * qx), -inf, inf);
+      this.turnRow(A, B, 0, 1, 0, -fix(k, 2 * qy), -inf, inf);
+      this.turnRow(A, B, 0, 0, 1, -fix(k, 2 * qz), -inf, inf);
       at = -(ux * ex + uy * ey + uz * ez);
     } else {
-      point(1, 0, 0), point(0, 1, 0), point(0, 0, 1);
+      this.pointRow(A, B, k, 1, 0, 0), this.pointRow(A, B, k, 0, 1, 0);
+      this.pointRow(A, B, k, 0, 0, 1);
       // Keep b's axis on a's: b turns toward a about b × a.
       const ubx = RB[0] * d[0] + RB[1] * d[1] + RB[2] * d[2];
       const uby = RB[3] * d[0] + RB[4] * d[1] + RB[5] * d[2];
       const ubz = RB[6] * d[0] + RB[7] * d[1] + RB[8] * d[2];
       const cx = uby * uz - ubz * uy, cy = ubz * ux - ubx * uz, cz = ubx * uy - uby * ux;
-      turn(t1x, t1y, t1z, fix(t1x * cx + t1y * cy + t1z * cz));
-      turn(t2x, t2y, t2z, fix(t2x * cx + t2y * cy + t2z * cz));
+      this.turnRow(A, B, t1x, t1y, t1z, fix(k, t1x * cx + t1y * cy + t1z * cz), -inf, inf);
+      this.turnRow(A, B, t2x, t2y, t2z, fix(k, t2x * cx + t2y * cy + t2z * cz), -inf, inf);
       at = 2 * Math.atan2(qx * ux + qy * uy + qz * uz, qw);
       if (at > Math.PI) at -= 2 * Math.PI;
     }
     st.at = at;
-    // Along the axis, rows see how fast it moves the way `at` grows (b's turn or slide over a's).
-    const slide = j.kind === "slider";
-    const along = (sign: number, bias: number, lo: number, hi: number) =>
-      slide
-        ? this.row(
-          A,
-          B,
-          -ux * sign,
-          -uy * sign,
-          -uz * sign,
-          -(ray * uz - raz * uy) * sign,
-          -(raz * ux - rax * uz) * sign,
-          -(rax * uy - ray * ux) * sign,
-          (rby * uz - rbz * uy) * sign,
-          (rbz * ux - rbx * uz) * sign,
-          (rbx * uy - rby * ux) * sign,
-          bias,
-          lo,
-          hi,
-        )
-        : this.row(
-          A,
-          B,
-          0,
-          0,
-          0,
-          -ux * sign,
-          -uy * sign,
-          -uz * sign,
-          ux * sign,
-          uy * sign,
-          uz * sign,
-          bias,
-          lo,
-          hi,
-        );
     const lim = j.limits;
     if (lim) {
       // Stops: past one, push back; near one, come no closer than reaching it this step.
-      const stop = (gap: number) => gap < 0 ? -gap * JOINT_BAUMGARTE / h : -gap / h;
-      if (at < lim[0] + LIMIT_MARGIN) along(1, stop(at - lim[0]), 0, inf);
-      if (at > lim[1] - LIMIT_MARGIN) along(-1, stop(lim[1] - at), 0, inf);
+      if (at < lim[0] + LIMIT_MARGIN) this.alongRow(A, B, slide, 1, stop(at - lim[0], h), 0, inf);
+      if (at > lim[1] - LIMIT_MARGIN) this.alongRow(A, B, slide, -1, stop(lim[1] - at, h), 0, inf);
       const to = Math.max(lim[0], Math.min(lim[1], st.target ?? 0));
       const v = Math.max(-SERVO_SPEED, Math.min(SERVO_SPEED, SERVO_GAIN * (to - at)));
-      along(1, v, -SERVO_TORQUE * h, SERVO_TORQUE * h);
+      this.alongRow(A, B, slide, 1, v, -SERVO_TORQUE * h, SERVO_TORQUE * h);
     } else if (j.kind === "motor" && st.on) {
-      along(1, j.speed, -MOTOR_TORQUE * h, MOTOR_TORQUE * h);
-    } else if (!slide) along(1, 0, -JOINT_FRICTION * h, JOINT_FRICTION * h);
+      this.alongRow(A, B, false, 1, j.speed, -MOTOR_TORQUE * h, MOTOR_TORQUE * h);
+    } else if (!slide) this.alongRow(A, B, false, 1, 0, -JOINT_FRICTION * h, JOINT_FRICTION * h);
+  }
+
+  /** The joint being prepared: lever arms, how far its pin pulled apart, and its axis. */
+  private jg = new Float64Array(12);
+
+  /** Keep the pin together along (dx, dy, dz). */
+  private pointRow(A: Rt, B: Rt, k: number, dx: number, dy: number, dz: number) {
+    const g = this.jg, rax = g[0], ray = g[1], raz = g[2], rbx = g[3], rby = g[4], rbz = g[5];
+    this.row(
+      A,
+      B,
+      dx,
+      dy,
+      dz,
+      ray * dz - raz * dy,
+      raz * dx - rax * dz,
+      rax * dy - ray * dx,
+      -(rby * dz - rbz * dy),
+      -(rbz * dx - rbx * dz),
+      -(rbx * dy - rby * dx),
+      fix(k, g[6] * dx + g[7] * dy + g[8] * dz),
+      -Infinity,
+      Infinity,
+    );
+  }
+
+  /** Relative spin (a's less b's) along (dx, dy, dz), driven to `bias`. */
+  private turnRow(
+    A: Rt,
+    B: Rt,
+    dx: number,
+    dy: number,
+    dz: number,
+    bias: number,
+    lo: number,
+    hi: number,
+  ) {
+    this.row(A, B, 0, 0, 0, dx, dy, dz, -dx, -dy, -dz, bias, lo, hi);
+  }
+
+  /** Along the axis: how fast it moves the way its angle (or slide) grows, times `sign`. */
+  private alongRow(
+    A: Rt,
+    B: Rt,
+    slide: boolean,
+    sign: number,
+    bias: number,
+    lo: number,
+    hi: number,
+  ) {
+    const g = this.jg, ux = g[9] * sign, uy = g[10] * sign, uz = g[11] * sign;
+    if (!slide) return this.row(A, B, 0, 0, 0, -ux, -uy, -uz, ux, uy, uz, bias, lo, hi);
+    const rax = g[0], ray = g[1], raz = g[2], rbx = g[3], rby = g[4], rbz = g[5];
+    this.row(
+      A,
+      B,
+      -ux,
+      -uy,
+      -uz,
+      -(ray * uz - raz * uy),
+      -(raz * ux - rax * uz),
+      -(rax * uy - ray * ux),
+      rby * uz - rbz * uy,
+      rbz * ux - rbx * uz,
+      rbx * uy - rby * ux,
+      bias,
+      lo,
+      hi,
+    );
   }
 
   /** One joint row between a and b: Jacobian, target velocity and impulse bounds. */
@@ -2132,7 +2159,7 @@ export class Physics {
       }
     }
     // A running motor keeps it awake.
-    if (o.joints?.some((j) => j.on)) still = false;
+    for (const j of o.joints ?? NO_JOINTS) if (j.on) still = false;
     const air = o.air ?? 0;
     if (impact > LAND_SPEED && air > 2) this.landings.push({ body: o, speed: impact });
     o.air = impact > 0 ? 0 : air + 1;

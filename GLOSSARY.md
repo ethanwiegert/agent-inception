@@ -32,6 +32,13 @@ cell
 stacks, rolls, floats or sinks, and can be pushed or carried, unless its Design is anchored or built
 into blocks. _Avoid_: item, entity, model
 
+**Piece**: One rigid part of an Object that moves against the rest on a joint: a door, a wheel, a
+windmill's sails. An Object without joints is one piece. _Avoid_: link, segment, sub-object
+
+**Joint**: A hinge, axle, slider or motor Part that joins two pieces of a Design and lets them
+swing, spin or slide about its axis. `use` works hinges and sliders with limits, and switches
+motors. _Avoid_: connector, constraint, link
+
 **Knockdown**: A villager bowled over by a hard enough hit from a moving Object: down for a moment,
 then their job carries on. Never damage. _Avoid_: damage, hit points, stun
 

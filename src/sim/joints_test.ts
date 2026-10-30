@@ -1,5 +1,5 @@
 import { ok as assert } from "node:assert/strict";
-import type { Vec3 } from "./catalog.ts";
+import type { RelationContent, Vec3 } from "./catalog.ts";
 import { pinAt } from "./jointtools.ts";
 import type { WorldObject } from "./objects.ts";
 import { type BodyState, lean, type Quat, quatMatrix, yawQuat } from "./physics.ts";
@@ -499,4 +499,27 @@ Deno.test("a house's door is a wall until it's opened, and then the way in is cl
   steps(sim, 2);
   const blocked = ok(run(sim, "a", "use", door));
   assert(blocked.includes("in its way") || blocked.includes("shut"), blocked);
+});
+
+Deno.test("a world saved before joints existed gains nature's joint Parts and examples on load", () => {
+  const sim = new Sim(5);
+  const save = sim.save(0);
+  const added = ["hinge", "axle", "slider", "motor", "garden gate", "hand cart", "windmill"];
+  // An older save: the same entries without the new ones, numbered without gaps.
+  const keep = save.catalog!.entries.filter((e) => !added.includes(e.name));
+  const ids = new Map(keep.map((e, i) => [e.id, i + 1]));
+  save.catalog!.entries = keep.map((e) => {
+    const out = { ...e, id: ids.get(e.id)! };
+    if (e.kind === "relation") {
+      const r = e.content as RelationContent;
+      out.content = { ...r, from: ids.get(r.from)!, to: ids.get(r.to)! };
+    }
+    return out;
+  });
+  const old = Sim.load(save);
+  for (const name of added) assert(old.catalog.byName(name)?.author === "nature", `${name} added`);
+  assert(old.catalog.entries.length === keep.length + added.length);
+  // And it can be built with at once.
+  const gate = old.catalog.byName("garden gate")!.content as { parts: { part: string }[] };
+  assert(gate.parts.some((p) => p.part === "hinge"));
 });
