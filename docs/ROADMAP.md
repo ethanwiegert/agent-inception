@@ -63,6 +63,11 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `use` swings doors and sliders and switches motors; a closed door is a wall; `used` and `switch`
   for Rules; a garden gate, hand cart and windmill as worked examples; playtest
   [0007](playtests/0007-m10.md).
+- **M11 — fields.** Light as a field over the cells (lamps, flames, fire, glowing Materials; walls
+  stop it) that `look` and Rules read; wild fire that spreads to what burns, capped, with `ignite`
+  and `douse`; signals on named channels from levers and pressure plates to lamps, flames, motors
+  and doors; lantern post, torch, campfire, signal lever and pressure plate as worked examples;
+  playtest [0008](playtests/0008-m11.md).
 
 ## V1
 
@@ -407,7 +412,7 @@ Decided in the build and the gate (M10):
   Objects (±4 of the event, or everywhere on a timer).
 - Worlds saved before M10 gain nature's new entries on load.
 
-M11 grill outcome (2026-10-30):
+M11 is done (playtest [0008](playtests/0008-m11.md)). Grill outcome (2026-10-30):
 
 - **Light is a field the sim knows.** A new `lamp` Part, and any block or part whose Material
   `glows`, casts light in its Material's color onto terrain, grass, Objects and villagers. Walls
@@ -544,6 +549,11 @@ Pick these up in the gate of whichever milestone touches them.
   hand cart"). Riding a cart or boat (`ride`/`get_off`) was left out of M10 by the grill.
 - 100 hand carts dropped at once (500 bodies, 400 axles) cost 5-6 ms a tick while they settle;
   measure with the pile budget below.
+- From M11: only blocks stop light, not Objects' parts (a lamp in a plank-part hut lights the
+  meadow); lamps and flames on a villager's body don't light anything, and flames on bodies aren't
+  drawn; the page relights moving lamps once a tick. Light, fire and sparks were only seen in
+  software; check them on the dev box with the hardware remeasure.
+- From playtest 0008: `interact` walks to its targets without saying where you ended up.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

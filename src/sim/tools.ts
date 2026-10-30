@@ -809,7 +809,8 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       : []),
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
-  // Ground worth digging (the map draws sand, gravel and clay alike) and water: the nearest of each.
+  // Ground worth digging (the map draws sand, gravel and clay alike), a rock to break for stone,
+  // and water: the nearest of each.
   const beyond: string[] = [];
   const want = new Map<number, string>([
     [Block.Sand, "sand"],
@@ -817,24 +818,38 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     [Block.Gravel, "gravel"],
     [Block.Stone, "stone"],
   ]);
-  for (let d = 1; d <= 40 && (want.size || !beyond.some((b) => b.startsWith("water"))); d++) {
-    for (let i = -d; i <= d; i++) {
-      for (
-        const [x, z] of [[ax + i, az - d], [ax + i, az + d], [ax - d, az + i], [ax + d, az + i]]
-      ) {
-        const h = w.heightAt(x, z);
-        if (h < 0) continue;
-        if (w.waterTop[z * w.sizeX + x] >= 0) {
-          if (!beyond.some((b) => b.startsWith("water"))) {
-            beyond.push(`water at x=${x} z=${z} (${d} tile${d === 1 ? "" : "s"})`);
-          }
-          continue;
-        }
-        const name = want.get(w.get(x, h, z));
-        if (!name) continue;
-        want.delete(w.get(x, h, z));
-        beyond.push(`${name} at x=${x} z=${z} (${d} tile${d === 1 ? "" : "s"})`);
+  const stony = new Map<number, boolean>();
+  let water = false, rock = false;
+  const away = (d: number) => `${d} tile${d === 1 ? "" : "s"}`;
+  const visit = (x: number, z: number, d: number) => {
+    const h = w.heightAt(x, z);
+    if (h < 0) return;
+    const prop = rock ? undefined : sim.props.at(x, z);
+    if (prop) {
+      let gives = stony.get(prop.design);
+      if (gives === undefined) {
+        const e = sim.catalog.get(prop.design);
+        stony.set(prop.design, gives = !!e && sim.drops(e).some(([m]) => m === "stone"));
       }
+      if (gives) {
+        rock = true;
+        const name = sim.catalog.get(prop.design)!.name;
+        beyond.push(`a ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
+      }
+    }
+    if (w.waterTop[z * w.sizeX + x] >= 0) {
+      if (!water) water = true, beyond.push(`water at x=${x} z=${z} (${away(d)})`);
+      return;
+    }
+    const b = w.get(x, h, z), name = want.get(b);
+    if (!name) return;
+    want.delete(b);
+    beyond.push(`${name} at x=${x} z=${z} (${away(d)})`);
+  };
+  for (let d = 1; d <= 40 && (want.size || !water || !rock); d++) {
+    for (let i = -d; i <= d; i++) {
+      visit(ax + i, az - d, d), visit(ax + i, az + d, d);
+      if (i > -d && i < d) visit(ax - d, az + i, d), visit(ax + d, az + i, d);
     }
   }
   if (beyond.length) lines.push("", `Nearest within 40 tiles: ${beyond.join(", ")}.`);
