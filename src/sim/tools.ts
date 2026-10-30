@@ -837,6 +837,25 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);
   }
+  // Things of yours that rolled, slid or floated out of view, so they're never simply lost.
+  const yours = sim.objects.list
+    .filter((o) => (o.mover ?? o.by) === agent.name && sim.physics.shape(o.design)?.fixed === false)
+    .map((o) => ({ o, c: sim.physics.center(o) }))
+    .map((t) => ({ ...t, d: Math.hypot(t.c[0] - agent.x, t.c[2] - agent.z) }))
+    .filter((t) => t.d > r * 1.5)
+    .sort((a, b) => a.d - b.d);
+  if (yours.length) {
+    lines.push(
+      "",
+      `Yours out of view: ${
+        yours.slice(0, 5).map(({ o, c, d }) =>
+          `${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
+            Math.floor(c[2])
+          } (${Math.round(d)} tiles${!o.asleep && !o.held ? ", moving" : ""})`
+        ).join(", ")
+      }${yours.length > 5 ? ` and ${yours.length - 5} more` : ""}.`,
+    );
+  }
   const schools = sim.schools
     .map((f) => ({ f, d: Math.hypot(f.x - agent.x, f.z - agent.z) }))
     .filter(({ f, d }) => f.count > 0 && d <= r * 1.5)

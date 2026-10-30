@@ -56,6 +56,9 @@ Saves may break freely until M14; save versioning and migrations come last befor
 - **M8 — character and land.** `set_body` (any Design with a body part; sprites removed),
   `terraform` (raise, lower, flatten, conserving earth), crops drawn from their Design (wheat opts
   into blades), a `grow` Rule effect; playtest [0005](playtests/0005-m8.md).
+- **M9 — rigid bodies.** Built Objects fall, stack, topple, roll, float or sink by Material density;
+  `push`, `carry`, `put_down`; knockdowns with grace and blame; `pushed`/`carried`/`landed` triggers
+  and an `impulse` effect; playtest [0006](playtests/0006-m9.md).
 
 ## V1
 
@@ -305,7 +308,7 @@ Budget: sim tick < 4 ms with 500 awake bodies.
 - **M10 joints**: hinge, axle, slider, motor; doors, carts, windmills become possible Designs.
 - **M11 fields**: light from lamp Parts, then fire (spreads to Materials that burn), then signals.
 
-M9 grill outcome (2026-10-29):
+M9 is done (playtest [0006](playtests/0006-m9.md)). Grill outcome (2026-10-29):
 
 - **Built Objects are rigid bodies.** Every Object built from a parts-only Design is a body made of
   its parts (a compound shape; mass is each part's volume × its Material's density). It falls,
@@ -420,6 +423,11 @@ Pick these up in the gate of whichever milestone touches them.
 - Playtests: spawn cheap players as an agent type limited to Bash, so they can't stray into
   unrelated tools (two did in 0004, harmlessly).
 - The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
+- **500 piled bodies** cost 6-9 ms a sim tick on the cloud VM (budget 4 ms; 500 spread out cost ~3.7
+  ms). Measure on the dev box first; if still over, warm-started contacts or islands that sleep
+  together (both tried in M9 without enough gain to keep), or Zig→WASM for the solver.
+- From playtest 0006: an Object covering two tiles shows as two marks on the look map; the look map
+  stops at radius 12.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

@@ -474,3 +474,20 @@ Deno.test("playtest 0006: arguments, fresh builds, posts and sunken balls", () =
   steps(sim, 40);
   assert(!sim.events.some((e) => e.type === "rule" && e.text === "thud"), "no landing on build");
 });
+
+Deno.test("look still finds your Objects after they roll out of view", () => {
+  const { sim, x, z, g } = site();
+  const ball = design(sim, "ball", [{
+    part: "sphere",
+    material: "planks",
+    at: [0.5, 0.4, 0.5],
+    size: [0.8, 0.8, 0.8],
+  }]);
+  const b = spawn(sim, ball, [x + 1, g, z + 1]);
+  b.mover = "Fern";
+  b.vel = [12, 0, 0];
+  steps(sim, 80);
+  const c = sim.physics.center(b);
+  const text = ok(run(sim, "a", "look", { radius: 3 }));
+  assert(text.includes(`Yours out of view: ball at x=${Math.floor(c[0])}`), text);
+});
