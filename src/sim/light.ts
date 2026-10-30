@@ -42,8 +42,10 @@ export interface LightSource {
 
 const C = LIGHT_CHUNK, C3 = C * C * C;
 
-/** Step offsets to the 26 neighbours, their lengths (tenths of a block) and the cells they pass. */
-const STEPS: { d: [number, number, number]; cost: number; via: [number, number, number][] }[] = [];
+/** The 26 neighbour steps: offsets, lengths (tenths of a block), and the cells each passes. */
+const STEP_D: [number, number, number][] = [];
+const STEP_COST: number[] = [];
+const STEP_VIA: [number, number, number][][] = [];
 for (let dz = -1; dz <= 1; dz++) {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -58,9 +60,39 @@ for (let dz = -1; dz <= 1; dz++) {
           via.push(v);
         }
       }
-      STEPS.push({ d: [dx, dy, dz], cost: [0, 10, 14, 17][n], via });
+      STEP_D.push([dx, dy, dz]);
+      STEP_COST.push([0, 10, 14, 17][n]);
+      STEP_VIA.push(via);
     }
   }
+}
+
+/** The steps as index offsets in a box `P` cells wide: [offset, cost, via count, ...via]. */
+interface StepTable {
+  offset: Int32Array;
+  cost: Int32Array;
+  viaStart: Int32Array;
+  via: Int32Array;
+}
+const stepTables = new Map<number, StepTable>();
+function stepTable(P: number): StepTable {
+  let t = stepTables.get(P);
+  if (t) return t;
+  const at = ([x, y, z]: [number, number, number]) => (z * P + y) * P + x;
+  const via: number[] = [], viaStart = new Int32Array(27);
+  STEP_VIA.forEach((vs, i) => {
+    viaStart[i] = via.length;
+    for (const v of vs) via.push(at(v));
+  });
+  viaStart[26] = via.length;
+  t = {
+    offset: Int32Array.from(STEP_D.map(at)),
+    cost: Int32Array.from(STEP_COST),
+    viaStart,
+    via: Int32Array.from(via),
+  };
+  stepTables.set(P, t);
+  return t;
 }
 
 export class LightField {
@@ -78,6 +110,7 @@ export class LightField {
   // Flood scratch, reused.
   private dist = new Uint16Array(0);
   private stamp = new Uint32Array(0);
+  private open = new Uint8Array(0);
   private gen = 0;
   private buckets: number[][] = [];
 
@@ -198,63 +231,73 @@ export class LightField {
     return false;
   }
 
-  /** Spread one source's light through open cells (Dijkstra in tenths), into the dirty chunks. */
+  /**
+   * Spread one source's light through open cells (Dijkstra in tenths), into the dirty chunks. The
+   * box around it has a closed border a cell wide, beyond its reach, so steps need no bounds checks.
+   */
   private flood(s: LightSource, dirty: Set<number>) {
-    const w = this.world, R = Math.ceil(s.reach), S = 2 * R + 1, n = S * S * S;
+    const w = this.world, R = Math.ceil(s.reach), P = 2 * R + 3, P2 = P * P, n = P2 * P;
     if (this.dist.length < n) {
       this.dist = new Uint16Array(n);
       this.stamp = new Uint32Array(n);
+      this.open = new Uint8Array(n);
       this.gen = 0;
     }
-    const gen = ++this.gen, dist = this.dist, stamp = this.stamp;
+    const gen = ++this.gen, dist = this.dist, stamp = this.stamp, open = this.open;
     const sx = Math.floor(s.x), sy = Math.floor(s.y), sz = Math.floor(s.z);
-    const ox = sx - R, oy = sy - R, oz = sz - R;
+    const ox = sx - R - 1, oy = sy - R - 1, oz = sz - R - 1;
+    // Which cells of the box light passes through (outside the world and the border: none).
+    for (let lz = 0; lz < P; lz++) {
+      for (let ly = 0; ly < P; ly++) {
+        for (let lx = 0, i = (lz * P + ly) * P; lx < P; lx++, i++) {
+          const x = ox + lx, y = oy + ly, z = oz + lz;
+          const edge = lx === 0 || ly === 0 || lz === 0 || lx === P - 1 || ly === P - 1 ||
+            lz === P - 1;
+          open[i] = !edge && w.inBounds(x, y, z) && !solid(w.blocks[w.index(x, y, z)]) ? 1 : 0;
+        }
+      }
+    }
+    // The source's own block lets its light out.
+    const start = ((R + 1) * P + R + 1) * P + R + 1;
+    open[start] = 1;
     const max = Math.floor(s.reach * 10);
     const buckets = this.buckets;
     for (let i = 0; i <= max; i++) (buckets[i] ??= []).length = 0;
-    const open = (x: number, y: number, z: number) =>
-      (x === sx && y === sy && z === sz) ||
-      (w.inBounds(x, y, z) && !solid(w.blocks[w.index(x, y, z)]));
-    const start = (R * S + R) * S + R;
     stamp[start] = gen, dist[start] = 0;
     buckets[0].push(start);
+    const { offset, cost, viaStart, via } = stepTable(P);
     let lastChunk = -1, data: Uint8Array<ArrayBuffer> | null = null;
     for (let d = 0; d <= max; d++) {
       const bucket = buckets[d];
-      for (let b = 0; b < bucket.length; b++) {
-        const cell = bucket[b];
+      const f = Math.pow(Math.max(0, 1 - d / 10 / s.reach), FALLOFF);
+      const r = s.r * f, g = s.g * f, b = s.b * f, a = s.flicker * f;
+      for (let q = 0; q < bucket.length; q++) {
+        const cell = bucket[q];
         if (dist[cell] !== d) continue;
-        const lx = cell % S, ly = Math.floor(cell / S) % S, lz = Math.floor(cell / (S * S));
+        const lx = cell % P, ly = Math.floor(cell / P) % P, lz = Math.floor(cell / P2);
         const x = ox + lx, y = oy + ly, z = oz + lz;
         if (!w.inBounds(x, y, z)) continue;
         // Light this cell, if it's in a chunk being redone.
         const c = this.chunkOf(x, y, z);
-        if (dirty.has(c)) {
-          if (c !== lastChunk) {
-            data = this.chunks.get(c) ?? null;
-            if (!data) this.chunks.set(c, data = new Uint8Array(C3 * 4));
-            lastChunk = c;
-          }
-          const f = Math.pow(Math.max(0, 1 - d / 10 / s.reach), FALLOFF);
-          const i = this.cellOf(x, y, z) * 4;
-          const put = (k: number, v: number) => {
-            const byte = Math.round(Math.sqrt(Math.min(1, v * f)) * 255);
-            if (byte > data![i + k]) data![i + k] = byte;
-          };
-          put(0, s.r), put(1, s.g), put(2, s.b), put(3, s.flicker);
+        if (c !== lastChunk) {
+          data = dirty.has(c) ? this.chunks.get(c) ?? null : null;
+          if (!data && dirty.has(c)) this.chunks.set(c, data = new Uint8Array(C3 * 4));
+          lastChunk = c;
         }
-        // Walls stop the light (the source's own block lets it out).
-        if (d > 0 && !open(x, y, z)) continue;
-        for (const step of STEPS) {
-          const nd = d + step.cost;
+        if (data) {
+          const i = this.cellOf(x, y, z) * 4;
+          put(data, i, r), put(data, i + 1, g), put(data, i + 2, b), put(data, i + 3, a);
+        }
+        // Walls stop the light (they're lit on their faces, but nothing passes).
+        if (!open[cell]) continue;
+        for (let k = 0; k < 26; k++) {
+          const nd = d + cost[k];
           if (nd > max) continue;
-          const nx = lx + step.d[0], ny = ly + step.d[1], nz = lz + step.d[2];
-          if (nx < 0 || ny < 0 || nz < 0 || nx >= S || ny >= S || nz >= S) continue;
-          const next = (nz * S + ny) * S + nx;
+          const next = cell + offset[k];
           if (stamp[next] === gen && dist[next] <= nd) continue;
           let squeezed = false;
-          for (const v of step.via) {
-            if (!open(x + v[0], y + v[1], z + v[2])) {
+          for (let v = viaStart[k]; v < viaStart[k + 1]; v++) {
+            if (!open[cell + via[v]]) {
               squeezed = true;
               break;
             }
@@ -266,6 +309,12 @@ export class LightField {
       }
     }
   }
+}
+
+/** Keep the brighter of a cell's light and `v` (0-1, stored as its square root). */
+function put(data: Uint8Array, i: number, v: number) {
+  const byte = Math.round(Math.sqrt(Math.min(1, v)) * 255);
+  if (byte > data[i]) data[i] = byte;
 }
 
 // ---------------------------------------------------------------- sources
@@ -335,27 +384,42 @@ export function lightSources(inp: LightInputs): LightSource[] {
       }
     });
   }
+  // Glowing blocks light in groups of 2 × 2 × 2 cells (a glowing wall isn't a hundred lamps):
+  // from the middle of a group's blocks that aren't buried, at the brightest of them.
   const w = inp.world;
+  const groups = new Map<
+    number,
+    { n: number; x: number; y: number; z: number; r: number; g: number; b: number; glows: number }
+  >();
   for (const index of inp.glowing) {
     const x = index % w.sizeX, z = Math.floor(index / w.sizeX) % w.sizeZ;
     const y = Math.floor(index / (w.sizeX * w.sizeZ));
     const def = inp.blocks.get(w.blocks[index]);
     if (!def?.glows) continue;
-    // A block buried on every side lights nothing.
     const buried = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].every(
       ([dx, dy, dz]) => solid(w.get(x + dx, y + dy, z + dz)),
     );
     if (buried) continue;
+    const key = ((z >> 1) * (w.sizeY >> 1) + (y >> 1)) * (w.sizeX >> 1) + (x >> 1);
+    let gr = groups.get(key);
+    if (!gr) groups.set(key, gr = { n: 0, x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, glows: 0 });
     const c = def.color, g = def.glows;
+    gr.n++, gr.x += x, gr.y += y, gr.z += z;
+    gr.r = Math.max(gr.r, srgbToLinear(c >> 16) * g);
+    gr.g = Math.max(gr.g, srgbToLinear((c >> 8) & 255) * g);
+    gr.b = Math.max(gr.b, srgbToLinear(c & 255) * g);
+    gr.glows = Math.max(gr.glows, g);
+  }
+  for (const [key, gr] of groups) {
     out.push({
-      key: `b${index}`,
-      x: x + 0.5,
-      y: y + 0.5,
-      z: z + 0.5,
-      r: srgbToLinear(c >> 16) * g,
-      g: srgbToLinear((c >> 8) & 255) * g,
-      b: srgbToLinear(c & 255) * g,
-      reach: 2 + GLOW_REACH * g,
+      key: `b${key}`,
+      x: Math.round(gr.x / gr.n) + 0.5,
+      y: Math.round(gr.y / gr.n) + 0.5,
+      z: Math.round(gr.z / gr.n) + 0.5,
+      r: gr.r,
+      g: gr.g,
+      b: gr.b,
+      reach: 2 + GLOW_REACH * gr.glows,
       flicker: 0,
     });
   }
