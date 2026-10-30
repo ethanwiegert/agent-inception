@@ -356,6 +356,24 @@ Decided in the build (M9):
 - **Page**: the worker streams every Object's pose (8 floats) whenever one moved; the page
   interpolates and draws Objects per frame instead of in the GPU-culled prop batch.
 
+M10 grill outcome (2026-10-30):
+
+- **Joints are Parts.** Nature adds four engine Parts: `hinge`, `axle`, `slider` and `motor`. Any
+  part of a Design may name the `piece` it belongs to (parts without one are the `main` piece, and
+  so are a Design's blocks); a joint part `joins` two pieces, and its own turn and tilt are its axis
+  (upright by default, like a door's hinge; tilted 90° for a cart's axle). A joint is drawn as a pin
+  and costs its volume like any part. Each piece is its own rigid body; joints hold them together.
+- **Hinges and sliders** may have `limits` (degrees, or blocks along a slider); an **axle** spins
+  freely; a **motor** is an axle that turns itself at its `speed` while it's on.
+- **Motors are switched.** A new `use` tool works a joint: it switches a motor on or off, swings a
+  hinge (a door, a gate, a drawbridge) to its other limit, or slides a slider to its other end.
+  Rules get a `switch` effect for motors, so a timer can run a windmill by day; M11's signals wire
+  into the same switch later.
+- **A closed door is a wall.** Pieces are rasterized for walking by their pose like any Object, so a
+  closed door blocks the doorway and paths go around it; `use` opens it and the doorway is free.
+- **Cargo only.** Carts, wagons and boats carry Objects put down on them; villagers walk beside.
+  Riding is on the roadmap (below), not in M10.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no

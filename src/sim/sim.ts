@@ -18,7 +18,7 @@ import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
 import { Objects, type WorldObject } from "./objects.ts";
 import { levelAt, standY, step as stepTo } from "./path.ts";
-import { type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "./physics.ts";
+import { foldPieces, type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "./physics.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
@@ -186,8 +186,8 @@ export class Sim {
     this.objects = new Objects(this.world, this.catalog);
     this.physics = new Physics(this.world, this.catalog);
     this.objects.steady = (o) => {
-      const shape = this.physics.shape(o.design);
-      return !shape || shape.fixed || shape.mass >= STEADY_MASS;
+      const a = this.physics.assembly(o.design);
+      return !a || a.shapes[0].fixed || a.mass >= STEADY_MASS;
     };
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
@@ -469,6 +469,7 @@ export class Sim {
     // Its lowest point just over the head (and hat), centered over the villager.
     o.pos = [agent.x - c[0], agent.y + 2.2 - low - c[1], agent.z - c[2]];
     o.vel = [0, 0, 0], o.spin = [0, 0, 0];
+    foldPieces(o);
   }
 
   /** Let go of a carried Object where it is, moving as the villager was. */

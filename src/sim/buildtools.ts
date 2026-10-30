@@ -21,6 +21,7 @@ import {
   type WorldObject,
 } from "./objects.ts";
 import { octile } from "./path.ts";
+import { ensurePieces } from "./physics.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
 import { Block, solid } from "./world.ts";
@@ -637,6 +638,8 @@ function* raise(
     mover: agent.name,
     quiet: true,
   };
+  const asm = sim.physics.assembly(design);
+  if (asm) ensurePieces(o, asm);
   sim.objects.add(o);
   sim.fire("built", agent, x, y, z, name);
   return o;

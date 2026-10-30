@@ -18,6 +18,7 @@ import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
 import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
 import { BODY_HANDLERS, BODY_TOOL_DEFS, CARRY_MAX, kg, PUSH_MAX } from "./bodytools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
+import { JOINT_HANDLERS, JOINT_TOOL_DEFS, mechanismsText } from "./jointtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
 import { partBounds } from "./objects.ts";
@@ -122,6 +123,7 @@ export const TOOL_DEFS: ToolDef[] = [
   ...BUILD_TOOL_DEFS,
   ...MAKE_TOOL_DEFS,
   ...BODY_TOOL_DEFS,
+  ...JOINT_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -274,6 +276,7 @@ const HANDLERS: Record<string, Handler> = {
   ...BUILD_HANDLERS,
   ...MAKE_HANDLERS,
   ...BODY_HANDLERS,
+  ...JOINT_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -818,7 +821,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   if (things.length) {
     lines.push("", "Things that move:");
     for (const { o, c, d } of things.slice(0, 8)) {
-      const mass = sim.physics.shape(o.design)!.mass;
+      const mass = sim.physics.mass(o.design);
       const how = o.held === agent.id
         ? "you carry it"
         : o.held
@@ -836,6 +839,16 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       );
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);
+  }
+  // Doors, gates, wheels and windmills: what each joint is doing and where to use it.
+  const mechanisms = mechanismsText(sim, agent.x, agent.z, r * 1.5);
+  if (mechanisms.length) {
+    lines.push(
+      "",
+      "Mechanisms (joints):",
+      ...mechanisms,
+      "  (use swings a hinge with limits or a slider to its other end, and switches motors.)",
+    );
   }
   // Things of yours that rolled, slid or floated out of view, so they're never simply lost.
   const yours = sim.objects.list

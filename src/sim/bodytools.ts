@@ -1,7 +1,7 @@
 import { type Handler, num, reach, walk, work } from "./jobs.ts";
 import type { WorldObject } from "./objects.ts";
 import { octile } from "./path.ts";
-import { Kind, lean, type Quat, quatConj, quatMul, yawQuat } from "./physics.ts";
+import { foldPieces, Kind, lean, type Quat, quatConj, quatMul, yawQuat } from "./physics.ts";
 import { COMPASS } from "./rules.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -112,10 +112,12 @@ function movable(sim: Sim, x: number, z: number): WorldObject {
     if (s && !s.fixed) return o;
   }
   const o = here[0], d = sim.objects.design(o);
+  const joint = sim.physics.assembly(o.design)?.joints[0];
+  const works = joint ? ` Its ${joint.piece} moves on a ${joint.kind}: use x=${x} z=${z}.` : "";
   throw new Error(
-    d?.blocks
+    (d?.blocks
       ? `The ${nameOf(sim, o)} is built into its blocks; it doesn't move.`
-      : `The ${nameOf(sim, o)} is anchored (its Design says so); it doesn't move.`,
+      : `The ${nameOf(sim, o)} is anchored (its Design says so); it doesn't move.`) + works,
   );
 }
 
@@ -131,10 +133,11 @@ export const BODY_HANDLERS: Record<string, Handler> = {
     if (tiles < 1 || tiles > MAX_TILES) throw new Error(`tiles is 1-${MAX_TILES}.`);
     if (sim.carried(agent)) throw new Error("Your hands are full: put_down what you carry first.");
     const o = movable(sim, x, z);
-    const name = nameOf(sim, o), shape = sim.physics.shape(o.design)!;
-    if (shape.mass > PUSH_MAX) {
+    const name = nameOf(sim, o), mass = sim.physics.mass(o.design);
+    const asm = sim.physics.assembly(o.design)!;
+    if (mass > PUSH_MAX) {
       throw new Error(
-        `The ${name} weighs about ${kg(shape.mass)}, far too heavy to push (a villager shoves up ` +
+        `The ${name} weighs about ${kg(mass)}, far too heavy to push (a villager shoves up ` +
           "to about 1.5 t, more if it rolls).",
       );
     }
@@ -179,9 +182,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
           if (moved > best + 0.02) best = moved, stall = 0;
           else if (++stall > TICK_HZ * 1.5) {
             why = best < 0.1
-              ? shape.mass > 1
-                ? "it won't budge, it's too heavy"
-                : "it won't budge, something holds it"
+              ? mass > 1 ? "it won't budge, it's too heavy" : "it won't budge, something holds it"
               : "it stuck fast";
             break;
           }
@@ -192,7 +193,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
           const stepLen = Math.min(d, (PUSH_SPEED * 1.4) / TICK_HZ);
           if (d > 1e-3) {
             const nx = agent.x + (ex / d) * stepLen, nz = agent.z + (ez / d) * stepLen;
-            if (standable(sim, agent, nx, nz)) {
+            if (standable(sim, agent, nx, nz, o)) {
               agent.x = nx, agent.z = nz, agent.stride += stepLen;
             }
           }
@@ -210,7 +211,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
           apart = 0;
           // Push toward walking pace, as hard as a villager can.
           const along = o.vel[0] * dx + o.vel[2] * dz;
-          const f = Math.min(PUSH_FORCE, Math.max(0, shape.mass * (PUSH_SPEED - along) * TICK_HZ));
+          const f = Math.min(PUSH_FORCE, Math.max(0, mass * (PUSH_SPEED - along) * TICK_HZ));
           if (f > 0) {
             // Low on it, or chest height if that's lower: crates slide, tall narrow things topple.
             const low = c[1] + sim.physics.lowest(o.design, o.rot);
@@ -231,7 +232,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
         : `You pushed the ${name} ${moved.toFixed(1)} tiles ${toward}`;
       if (why) text += ` (${why})`;
       const after: string[] = [];
-      const round = shape.parts.some((p) => p.r || p.kind === Kind.Cylinder);
+      const round = asm.shapes.some((s) => s.parts.some((p) => p.r || p.kind === Kind.Cylinder));
       const speed = Math.hypot(o.vel[0], o.vel[2]);
       if (round) {
         if (speed > 0.3) after.push("it rolls on");
@@ -239,7 +240,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       else if (speed > 0.6) after.push("it slides on");
       if (after.length) text += `; ${after.join(", ")}`;
       return `${text}. It's at x=${Math.floor(c[0])} z=${Math.floor(c[2])} and weighs about ${
-        kg(shape.mass)
+        kg(mass)
       }; you followed it to x=${Math.floor(agent.x)} z=${Math.floor(agent.z)}.`;
     })();
   },
@@ -251,10 +252,10 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       throw new Error(`Your hands are full with the ${nameOf(sim, have)}: put_down it first.`);
     }
     const o = movable(sim, x, z);
-    const name = nameOf(sim, o), shape = sim.physics.shape(o.design)!;
-    if (shape.mass > CARRY_MAX) {
+    const name = nameOf(sim, o), mass = sim.physics.mass(o.design);
+    if (mass > CARRY_MAX) {
       throw new Error(
-        `The ${name} weighs about ${kg(shape.mass)}; you can lift up to ${kg(CARRY_MAX)}. ` +
+        `The ${name} weighs about ${kg(mass)}; you can lift up to ${kg(CARRY_MAX)}. ` +
           "push moves heavier things.",
       );
     }
@@ -275,10 +276,12 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       o.heldTurn = quatMul(quatConj(yawQuat(agent.yaw)), o.rot);
       o.mover = agent.name;
       o.asleep = false;
+      // Jointed things fold back as they were built while they're carried.
+      foldPieces(o);
       sim.objects.raster(o);
       sim.objects.version++;
       sim.fire("carried", agent, Math.floor(c[0]), Math.floor(c[1]), Math.floor(c[2]), name);
-      return `You lift the ${name} (about ${kg(shape.mass)}) over your head. walk_to where it ` +
+      return `You lift the ${name} (about ${kg(mass)}) over your head. walk_to where it ` +
         "should go, then put_down.";
     })();
   },
@@ -311,7 +314,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       // Over the tile, its lowest point just above the ground or what's stacked there.
       const low = sim.physics.lowest(o.design, rot);
       const c = sim.physics.center({ ...o, pos: [0, 0, 0], rot });
-      const span = Math.max(0.5, sim.physics.reach({ ...o, rot }, 1, 0));
+      const span = Math.max(0.5, sim.physics.reach({ ...o, rot, pieces: undefined }, 1, 0));
       let top = -Infinity;
       for (let tz = Math.floor(z + 0.5 - span); tz <= Math.floor(z + 0.5 + span); tz++) {
         for (let tx = Math.floor(x + 0.5 - span); tx <= Math.floor(x + 0.5 + span); tx++) {
@@ -323,6 +326,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       }
       o.rot = rot;
       o.pos = [x + 0.5 - c[0], top + 0.03 - low - c[1], z + 0.5 - c[2]];
+      foldPieces(o);
       sim.release(agent, o);
       sim.posesVersion++;
       return `You set the ${name} down at x=${x} z=${z}` +
@@ -339,13 +343,17 @@ function unturned(q: Quat): Quat {
   return quatMul(quatConj(yawQuat(Math.atan2(-az, ax))), q);
 }
 
-/** Whether `agent` can stand at (x, z) from where they are: the same tile, or one step away. */
-function standable(sim: Sim, agent: Agent, x: number, z: number): boolean {
+/**
+ * Whether `agent` can stand at (x, z) from where they are: the same tile, or one step away. A
+ * tile only the Object they push is in the way on is fine: they're right behind it.
+ */
+function standable(sim: Sim, agent: Agent, x: number, z: number, pushing: WorldObject): boolean {
   const ax = Math.floor(agent.x), az = Math.floor(agent.z), tx = Math.floor(x), tz = Math.floor(z);
   if (ax === tx && az === tz) return true;
-  const w = sim.world;
+  const w = sim.world, key = tz * w.sizeX + tx;
   const from = w.floorBelow(ax, az, Math.floor(agent.y + 0.5));
-  if (from < 0 || w.blocked(tx, tz)) return false;
+  if (from < 0 || w.propSolid[key]) return false;
+  if (w.objSolid[key] && sim.objects.allAt(tx, tz).some((o) => o !== pushing)) return false;
   const to = w.floorBelow(tx, tz, from + 1);
   return to >= 0 && from - to <= 2 && w.waterDepth(tx, tz, to) <= 1;
 }
