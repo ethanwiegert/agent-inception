@@ -326,6 +326,33 @@ M9 grill outcome (2026-10-29):
 - **Rules see physics.** Triggers `pushed`, `carried`, `landed` (with `what`), and an `impulse`
   effect that nudges bodies within ±4 of the event (capped), for wind gusts and bouncy mushrooms.
 
+Decided in the build (M9):
+
+- **Engine** (`sim/physics.ts`): each part carries sample points over its surface (corners, edge
+  midpoints, faces, rims; true spheres are exact), tested against voxels (slopes follow
+  `slopeDrop`), solid props (a post 0.6 wide and 2.5 tall), villager and animal capsules and other
+  bodies; box pairs push apart along their separating axis. Sequential impulses, 2 steps × 8 passes
+  per tick, at most four contacts per direction per pair, friction 0.6 between bodies and 1.1 on the
+  ground (a box stays on a 45° slope; balls still roll down). Buoyancy per part by how deep it sits
+  (water's density is 1). A body still for 15 ticks sleeps; edits nearby, hits, pushes, Rules and
+  walkers wake it. Mass is tonnes: a block is a cubic meter.
+- **Designs with blocks keep their parts fixed** (a house's door doesn't fall off); parts-only
+  Designs are bodies unless `"anchored": true`. Objects remember where `build` put them up, so
+  building again there knows it's done unless the Object was moved away.
+- **Light Objects are walked around** (under 0.6 t): stepping onto a light crate only kicked it
+  away. Heavier low ones are stood on, as in M7. Walking villagers shove with 4 t·m/s², the `push`
+  tool with 10 (a crate slides up to about 0.9 t on grass; round things roll far heavier); `carry`
+  lifts up to 300 kg and slows the walk to 75%; refusals over 8 t.
+- **Knockdowns**: a body coming at a villager at 1.5 blocks/s with 0.12 t·m/s or more knocks them
+  over for 2 s (their job waits, they slide back half a block), then 10 s of grace. Your own push
+  and what you dropped never knock you over. The victim's next result and the feed name who moved it
+  last. Animals hit half as hard bolt.
+- **Rules**: `landed` fires at 2.5 blocks/s or more after a few ticks in the air; a body a Rule
+  nudged doesn't fire `landed` again until it sleeps (Rules don't chain). `impulse` is a change of
+  speed (≤ 8 near an event, ≤ 3 and a compass direction on a timer), up to 16 bodies.
+- **Page**: the worker streams every Object's pose (8 floats) whenever one moved; the page
+  interpolates and draws Objects per frame instead of in the GPU-culled prop batch.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no

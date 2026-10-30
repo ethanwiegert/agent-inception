@@ -635,6 +635,7 @@ function* raise(
     spin: [0, 0, 0],
     asleep: false,
     mover: agent.name,
+    quiet: true,
   };
   sim.objects.add(o);
   sim.fire("built", agent, x, y, z, name);

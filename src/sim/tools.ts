@@ -216,6 +216,17 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
     const handler = HANDLERS[name];
     if (!handler) return done(`Unknown tool "${name}".`, true);
     if (name !== "_whoami") agent.lastActive = sim.tick;
+    // An argument the tool doesn't take is a mistake to point out, not to ignore quietly.
+    const known = TOOL_DEFS.find((t) => t.name === name)?.inputSchema.properties;
+    const unknown = known && Object.keys(args ?? {}).filter((k) => !(k in known));
+    if (unknown?.length) {
+      const takes = Object.keys(known!);
+      return done(
+        `${name} doesn't take ${unknown.map((k) => `"${k}"`).join(", ")}. ` +
+          (takes.length ? `It takes ${takes.join(", ")}.` : "It takes no arguments."),
+        true,
+      );
+    }
     const out = handler(sim, agent, args ?? {});
     if (typeof out === "string") done(out);
     else sim.enqueue(agent, callId, out);
@@ -799,7 +810,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   }
   // Objects that move: where they are now and what it takes to move them.
   const things = sim.objects.list
-    .filter((o) => !sim.physics.shape(o.design)?.fixed)
+    .filter((o) => sim.physics.shape(o.design)?.fixed === false)
     .map((o) => ({ o, c: sim.physics.center(o) }))
     .map((t) => ({ ...t, d: Math.hypot(t.c[0] - agent.x, t.c[2] - agent.z) }))
     .filter((t) => t.d <= r * 1.5)

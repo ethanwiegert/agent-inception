@@ -11,7 +11,8 @@ export type Args = Record<string, unknown>;
 export type Handler = (sim: Sim, agent: Agent, args: Args) => string | Job;
 
 export const num = (v: unknown, name: string): number => {
-  const n = Number(v);
+  // Number(null), Number("") and Number(true) are numbers too; none of them is meant as one.
+  const n = typeof v === "number" || (typeof v === "string" && v.trim()) ? Number(v) : NaN;
   if (!Number.isFinite(n)) throw new Error(`"${name}" must be a number.`);
   return Math.floor(n);
 };

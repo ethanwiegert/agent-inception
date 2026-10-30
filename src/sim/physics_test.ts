@@ -236,7 +236,11 @@ Deno.test("push walks an Object along; too heavy won't budge, round things roll 
   const rolled = ok(run(sim, "a", "push", { x: x + 1, z: z + 1, toward: "east", tiles: 2 }));
   assert(rolled.includes("rolls on"), rolled);
   steps(sim, 20);
-  assert(sim.physics.center(b)[0] > x + 4, "rolled past where it was pushed");
+  const rolledTo = sim.physics.center(b)[0] - x;
+  assert(
+    rolledTo > 3.8 && rolledTo < 7,
+    `rolled past where it was pushed, then stopped: ${rolledTo}`,
+  );
 });
 
 Deno.test("carry lifts a light Object overhead and put_down sets it anywhere, at any angle", () => {
@@ -421,4 +425,52 @@ Deno.test("villagers walk around light Objects instead of kicking them, and stan
     Math.abs(s.pos[0] - (x + 5)) < 0.05 && Math.abs(s.pos[2] - (z + 6)) < 0.05,
     "it stayed put",
   );
+});
+
+Deno.test("playtest 0006: arguments, fresh builds, posts and sunken balls", () => {
+  const { sim, fern, x, z, g } = site();
+  // Unknown argument names are refused with the right ones (craft count, catalog_get name).
+  err(
+    run(sim, "a", "craft", { item: "planks", count: 3 }),
+    'craft doesn\'t take "count". It takes',
+  );
+  err(run(sim, "a", "catalog_get", { name: "stone bench" }), "It takes entry");
+  // tiles outside 1-8 and null coordinates are refused, not clamped or read as 0.
+  const crate = design(sim, "crate", [box("planks", [0.7, 0.7, 0.7], [0.5, 0.35, 0.5])]);
+  spawn(sim, crate, [x + 2, g, z + 2]);
+  steps(sim, 30);
+  err(run(sim, "a", "push", { x: x + 2, z: z + 2, toward: "east", tiles: 99 }), "tiles is 1-8");
+  err(run(sim, "a", "push", { x: null, z: z + 2, toward: "east" }), '"x" must be a number');
+  // A tall post pushed from a tile away: you step up to it and over it goes.
+  const post = design(sim, "post", [box("planks", [0.2, 2.6, 0.2], [0.5, 1.3, 0.5])]);
+  spawn(sim, post, [x + 5, g, z + 5]);
+  steps(sim, 30);
+  ok(run(sim, "a", "walk_to", { x: x + 5, z: z + 7 }));
+  const over = ok(run(sim, "a", "push", { x: x + 5, z: z + 5, toward: "north" }));
+  assert(over.includes("toppled over"), over);
+  // A ball that sank into the ground comes back up through the open top, not deeper.
+  const ball = design(sim, "ball", [{
+    part: "sphere",
+    material: "planks",
+    at: [0.5, 0.4, 0.5],
+    size: [0.8, 0.8, 0.8],
+  }]);
+  const b = spawn(sim, ball, [x + 1, g - 0.7, z + 6]);
+  steps(sim, 40);
+  assert(sim.physics.center(b)[1] > g + 0.3, `climbed out: ${sim.physics.center(b)[1] - g}`);
+  // Building something doesn't count as it landing.
+  sim.catalog.add(
+    {
+      kind: "rule",
+      name: "thud",
+      description: "test",
+      content: { when: { event: "landed", what: "ball" }, if: null, do: [{ say: "thud" }] },
+    },
+    "test",
+    sim.tick,
+  );
+  fern.inventory.planks = 5;
+  ok(run(sim, "a", "build", { design: "ball", x: x + 3, z: z + 7 }));
+  steps(sim, 40);
+  assert(!sim.events.some((e) => e.type === "rule" && e.text === "thud"), "no landing on build");
 });

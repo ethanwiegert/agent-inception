@@ -44,6 +44,8 @@ const AIR_DRAG = 0.02;
 const AIR_SPIN_DRAG = 0.2;
 const WATER_DRAG = 1.6;
 const WATER_SPIN_DRAG = 2;
+/** Per-second spin lost to the grass while touching the ground: a pushed ball rolls a few tiles. */
+const ROLL_DRAG = 1.2;
 /** Water surfaces sit this far below the top of their water block (as drawn). */
 const SURFACE_DROP = 0.12;
 /** Trees and rocks stop bodies like a post this wide (half) and tall. */
@@ -109,8 +111,11 @@ export interface BodyState {
   held?: number;
   /** Who set it moving last (pushed, dropped, put down), so a hit can name them. */
   mover?: string;
-  /** Moving because a Rule nudged it: its landing doesn't fire Rules (Rules don't chain). */
-  byRule?: boolean;
+  /**
+   * Its landing doesn't fire Rules until it next sleeps: a Rule nudged it (Rules don't chain), or
+   * it's settling where it was just built.
+   */
+  quiet?: boolean;
   /** A steady push this tick: force (tonne · blocks/s²) and torque about its center. */
   force?: number[];
   /** Ticks it has been still (it sleeps at SLEEP_TICKS), and ticks since it touched anything. */
@@ -811,7 +816,8 @@ export class Physics {
     }
     const share = total ? wet / total : 0;
     const lin = Math.max(0, 1 - (AIR_DRAG + WATER_DRAG * share) * h);
-    const ang = Math.max(0, 1 - (AIR_SPIN_DRAG + WATER_SPIN_DRAG * share) * h);
+    const grounded = (rt.o.air ?? 0) === 0 ? ROLL_DRAG : 0;
+    const ang = Math.max(0, 1 - (AIR_SPIN_DRAG + WATER_SPIN_DRAG * share + grounded) * h);
     for (let k = 0; k < 3; k++) v[k] *= lin, w[k] *= ang;
   }
 
@@ -1107,6 +1113,14 @@ export class Physics {
     const qx = Math.min(x1, Math.max(x0, cx)), qy = Math.min(y1, Math.max(y0, cy));
     const qz = Math.min(z1, Math.max(z0, cz));
     let dx = cx - qx, dy = cy - qy, dz = cz - qz;
+    if (!dx && !dy && !dz && grid) {
+      // The center sank into a voxel: out through its nearest open face, never deeper.
+      const ix = Math.floor(x0), iy = Math.floor(y0), iz = Math.floor(z0);
+      this.cubeExit(cx, cy, cz, ix, iy, iz);
+      const n = this.hn;
+      this.candidate(cx - n[0] * r, cy - n[1] * r, cz - n[2] * r, n[0], n[1], n[2], n[3] + r);
+      return;
+    }
     if (!dx && !dy && !dz) {
       // The center is inside: out through the nearest face.
       const faces = [cx - x0, x1 - cx, cy - y0, y1 - cy, cz - z0, z1 - cz];
@@ -1632,7 +1646,7 @@ export class Physics {
     if (o.still >= SLEEP_TICKS * Math.max(1, Math.round(0.05 / dt))) {
       o.asleep = true;
       o.vel.fill(0), o.spin.fill(0);
-      delete o.mover, delete o.byRule, delete o.still, delete o.air;
+      delete o.mover, delete o.quiet, delete o.still, delete o.air;
       rt.v.fill(0), rt.w.fill(0);
     }
   }

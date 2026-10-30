@@ -547,7 +547,7 @@ export class Sim {
     for (const hit of physics.hits) this.hit(hit.body as WorldObject, hit);
     for (const { body } of physics.landings) {
       const o = body as WorldObject;
-      if (o.byRule) continue; // Rules don't trigger Rules
+      if (o.quiet) continue; // Rules don't trigger Rules
       const c = physics.center(o);
       const by = agents.find((a) => a.name === o.mover) ?? null;
       const name = this.catalog.get(o.design)?.name ?? "Object";

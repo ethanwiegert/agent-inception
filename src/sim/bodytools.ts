@@ -127,7 +127,8 @@ export const BODY_HANDLERS: Record<string, Handler> = {
     const toward = String(args.toward ?? "").trim().toLowerCase().replace(/[\s_-]/g, "");
     const dir = COMPASS[toward];
     if (!dir) throw new Error("toward is a direction: north, south, east, west, northeast…");
-    const tiles = Math.min(MAX_TILES, Math.max(1, num(args.tiles ?? 1, "tiles")));
+    const tiles = num(args.tiles ?? 1, "tiles");
+    if (tiles < 1 || tiles > MAX_TILES) throw new Error(`tiles is 1-${MAX_TILES}.`);
     if (sim.carried(agent)) throw new Error("Your hands are full: put_down what you carry first.");
     const o = movable(sim, x, z);
     const name = nameOf(sim, o), shape = sim.physics.shape(o.design)!;
@@ -163,7 +164,7 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       o.mover = agent.name;
       const start = sim.physics.center(o);
       const leaned = lean(o.rot);
-      let best = 0, stall = 0, why = "";
+      let best = 0, stall = 0, apart = 0, why = "";
       const limit = Math.ceil((tiles / PUSH_SPEED + 4) * TICK_HZ);
       agent.anim = Anim.Walk;
       try {
@@ -195,18 +196,25 @@ export const BODY_HANDLERS: Record<string, Handler> = {
               agent.x = nx, agent.z = nz, agent.stride += stepLen;
             }
           }
-          if (Math.hypot(agent.x - tx, agent.z - tz) > 1.2) {
-            why = "you couldn't keep up with it";
-            break;
-          }
           agent.yaw = Math.atan2(dx, dz);
+          // Hands on it only within reach; it may roll or topple away faster than you walk.
+          const gap = Math.hypot(agent.x - tx, agent.z - tz);
+          if (gap > 0.3) {
+            if (++apart > TICK_HZ * 1.5) {
+              why = moved > 0.1 ? "it got away from you" : "you couldn't get to it";
+              break;
+            }
+            yield;
+            continue;
+          }
+          apart = 0;
           // Push toward walking pace, as hard as a villager can.
           const along = o.vel[0] * dx + o.vel[2] * dz;
           const f = Math.min(PUSH_FORCE, Math.max(0, shape.mass * (PUSH_SPEED - along) * TICK_HZ));
           if (f > 0) {
             // Low on it, or chest height if that's lower: crates slide, tall narrow things topple.
             const low = c[1] + sim.physics.lowest(o.design, o.rot);
-            const py = Math.min(agent.y + 1.1, low + 0.6 * (c[1] - low));
+            const py = Math.min(agent.y + 1.1, low + 0.3 * (c[1] - low));
             sim.physics.applyForce(o, c[0] - dx * ext, py, c[2] - dz * ext, dx * f, 0, dz * f);
           }
           yield;
@@ -224,14 +232,15 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       if (why) text += ` (${why})`;
       const after: string[] = [];
       const round = shape.parts.some((p) => p.r || p.kind === Kind.Cylinder);
-      const going = Math.hypot(o.vel[0], o.vel[2]) > 0.6;
-      if (going && round) after.push("it rolls on");
-      else if (lean(o.rot) > leaned + 0.6) after.push("it toppled over");
-      else if (going) after.push("it slides on");
+      const speed = Math.hypot(o.vel[0], o.vel[2]);
+      if (round) {
+        if (speed > 0.3) after.push("it rolls on");
+      } else if (lean(o.rot) > leaned + 0.6) after.push("it toppled over");
+      else if (speed > 0.6) after.push("it slides on");
       if (after.length) text += `; ${after.join(", ")}`;
       return `${text}. It's at x=${Math.floor(c[0])} z=${Math.floor(c[2])} and weighs about ${
         kg(shape.mass)
-      }.`;
+      }; you followed it to x=${Math.floor(agent.x)} z=${Math.floor(agent.z)}.`;
     })();
   },
 
@@ -316,7 +325,8 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       o.pos = [x + 0.5 - c[0], top + 0.03 - low - c[1], z + 0.5 - c[2]];
       sim.release(agent, o);
       sim.posesVersion++;
-      return `You set the ${name} down at x=${x} z=${z}.`;
+      return `You set the ${name} down at x=${x} z=${z}` +
+        (turn === undefined ? "." : `, turned ${Math.round(turn)}° from how it was built.`);
     })();
   },
 };

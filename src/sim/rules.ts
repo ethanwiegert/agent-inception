@@ -624,7 +624,7 @@ export class Rules {
       if (fx.toward && fx.toward !== "away") [dx, dz] = COMPASS[fx.toward];
       sim.physics.wake(o);
       o.vel = [o.vel[0] + dx * fx.speed, o.vel[1] + fx.up, o.vel[2] + dz * fx.speed];
-      o.byRule = true;
+      o.quiet = true;
       n++;
     }
     if (!n) return `no ${fx.what ?? "movable Object"} ${near ? "nearby" : "anywhere"}`;
