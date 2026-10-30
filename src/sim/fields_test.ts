@@ -427,3 +427,16 @@ Deno.test("channels and devices are checked in Designs", () => {
   );
   assert((fine.content as { parts: { channel: string }[] }).parts[0].channel === "street lamps");
 });
+
+Deno.test("a world saved before M11 gains its Parts, examples, Rules and recipe on load", () => {
+  const save = new Sim(1).save(0);
+  const first = save.catalog!.entries.findIndex((e) => e.name === "lantern glass");
+  assert(first > 0, "M11's entries come after everything older");
+  save.catalog!.entries = save.catalog!.entries.slice(0, first);
+  const sim = Sim.load(save);
+  for (const name of ["lamp", "flame", "lever", "plate", "lantern post", "lanterns at dusk"]) {
+    assert(sim.catalog.byName(name), `${name} is back`);
+  }
+  assert(sim.catalog.byName("lantern glass made_from sand"), "the recipe, matched by name");
+  assert(sim.blocks.byName("lantern glass")?.glows, "lantern glass glows as a block");
+});

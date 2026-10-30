@@ -301,9 +301,12 @@ export class Fire {
     if (tick % 10 === 0) {
       this.markColumns();
       this.flee();
-    }
-    for (const id of this.lines.keys()) {
-      if (![...this.burning.values()].some((b) => b.fire === id)) this.lines.delete(id);
+      // A fire with nothing left burning is over.
+      for (const id of this.lines.keys()) {
+        let live = false;
+        for (const b of this.burning.values()) if (b.fire === id) live = true;
+        if (!live) this.lines.delete(id);
+      }
     }
   }
 
@@ -373,9 +376,11 @@ export class Fire {
       near.push({ kind: "object", ref: o.id, name: sim.catalog.get(o.design)?.name ?? "Object" });
     }
     const cloud = 1 - sim.clouds();
+    // Start the round at a different neighbour each time, so fire spreads every way alike.
+    const first = Math.floor(hash2(sim.tick, b.ref, 5) * near.length);
     let caught = 0;
-    for (let i = 0; i < near.length && caught < 2; i++) {
-      const t = near[i];
+    for (let j = 0; j < near.length && caught < 2; j++) {
+      const i = (first + j) % near.length, t = near[i];
       if (this.burning.size >= FIRE_LIMITS.burning || line.lit >= FIRE_LIMITS.perFire) return;
       if (this.burning.has(key(t.kind, t.ref))) continue;
       const chance = FIRE_LIMITS.spreadChance * cloud;

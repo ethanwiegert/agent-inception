@@ -37,7 +37,7 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
 `time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
 `storybook`), `bridge` (WebSocket URL override), `debug` (comma list of passes to skip for
-profiling: `shadow,terrain,grass,water,sky,bodies,props`), `headless` (never touch the canvas;
+profiling: `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas;
 frames render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
 
 ## Code map
@@ -69,8 +69,12 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     physics.ts (rigid bodies: shapes from Designs, voxel/slope/capsule/body
                     contacts, sequential impulses, buoyancy, sleeping; a jointed Design's pieces
                     as bodies with hinge/axle/slider/motor rows), bodytools.ts (push, carry,
-                    put_down), jointtools.ts (use: swing hinges and sliders, switch motors;
-                    Mechanisms in look),
+                    put_down), jointtools.ts (use: swing hinges and sliders, switch motors,
+                    lamps and flames, flip levers, tune channels; Mechanisms in look),
+                    light.ts (light field in 16³ chunks: lamps, flames, fire, glowing blocks;
+                    daylight), fire.ts (wild fire: what burns, spread, caps, burn-out),
+                    firetools.ts (ignite, douse), signals.ts (levers, plates, channels,
+                    receivers),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),
@@ -88,19 +92,22 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     body Design, the tinted "farmer" by default, tools) + flora.ts (plant templates and
                     instances) + fauna.ts (animal rigs from their Designs; fish schools),
                     sky.ts, post.ts (PBR Neutral tonemap, grading, sharpening), look.ts (presets,
-                    sun/moon, weather)
+                    sun/moon, weather), lighttex.ts (the light field as a 3D texture),
+                    particles.ts (flames, smoke, lamp halos, signal sparks)
 tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
 ```
 
 Uniform layout lives in `render/frame.ts`: the `F` offsets and the WGSL `Frame` struct must change
-together. The surface texture (`render/surface.ts`, rgba16uint per column) is read by grass, water
-and terrain: r height, g block, b slope mask | grass-neighbour bits << 4 (grassy neighbours within a
-block of height), a water level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass
-shader has a WGSL mirror of `slopeDrop` that must stay identical.
+together. Lit passes bind group 0: frame uniforms, shadow map and sampler, and the light field (3D
+texture and sampler); `frame.extra.w` is 1 when anything casts lamplight. The surface texture
+(`render/surface.ts`, rgba16uint per column) is read by grass, water and terrain: r height, g block,
+b slope mask | grass-neighbour bits << 4 (grassy neighbours within a block of height), a water
+level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader has a WGSL mirror of
+`slopeDrop` that must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M10 are done; M11, fields, is next. The
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M11 are done; M12, Village Life, is next. The
 hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report

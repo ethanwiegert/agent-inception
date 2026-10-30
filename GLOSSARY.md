@@ -39,6 +39,26 @@ windmill's sails. An Object without joints is one piece. _Avoid_: link, segment,
 swing, spin or slide about its axis. `use` works hinges and sliders with limits, and switches
 motors. _Avoid_: connector, constraint, link
 
+**Light**: How lit a place is, 0 to 1: daylight, or the light of lamps, flames, fire and glowing
+Materials, whichever is brighter. Walls stop it. _Avoid_: brightness, illumination
+
+**Lamp**: A Part that shines in its Material's color while it's on. _Avoid_: light (for the thing),
+lantern (that's a Design)
+
+**Fire**: Wild fire: something that burns spreads to touching things that burn and burns them away,
+capped per world and per fire. `ignite` starts it, `douse` and heavy cloud put it out. _Avoid_:
+blaze, burning (as a noun)
+
+**Flame**: A Part that is tame fire (a torch, a campfire): it glows warm and never spreads. _Avoid_:
+fire (for the Part)
+
+**Signal**: On or off, sent on a channel by a lever, a pressure plate or a Rule; lamps, flames,
+motors, and hinges and sliders with limits on that channel nearby follow it. _Avoid_: power,
+current, redstone
+
+**Channel**: The name a signal travels on ("gate", "lanterns"). A part gets one from its Design or
+from `use` with `channel`. _Avoid_: wire, frequency, network
+
 **Knockdown**: A villager bowled over by a hard enough hit from a moving Object: down for a moment,
 then their job carries on. Never damage. _Avoid_: damage, hit points, stun
 

@@ -427,6 +427,44 @@ M11 grill outcome (2026-10-30):
   slider with limits, lamp and flame on that channel within 16 tiles follows it (on: run, open,
   shine). Spectators see a spark run from sender to receivers.
 
+Decided in the build (M11):
+
+- **The light field** floods from each source through open cells (Dijkstra over the 26 neighbours in
+  tenths of a block, never through diagonal cracks) and fades as (1 - way / reach)^1.6; lamps reach
+  8 blocks, flames 7, fire 6, glowing Materials 2 + 5 × `glows`. Sources combine by the brightest
+  per color channel. It lives in 16³ chunks recomputed only where a source or a block near one
+  changed; glowing blocks light in 2 × 2 × 2 groups. Light for Rules and `look` is the brighter of
+  the field and daylight (the renderer's sun arc, dimmed by clouds and to 0.3 under a roof; 0.03 at
+  night).
+- A lamp shines in its Material's color whatever the Material's own glow, and is dark when off
+  (lantern glass included). Flames are drawn as fire, not as their Material, and cost their volume
+  like any part. `use` switches all of an Object's lamps and flames together, like its motors;
+  signals reach each part on its channel.
+- `grow` gained `light_above`; nature's "lamplit fields" grows lamplit wheat half an hour every half
+  hour at night, and "lanterns at dusk" / "at dawn" switch the "lanterns" channel.
+- **What catches**: a block whose Material burns with air beside it; a plant, crop or Object mostly
+  (by volume) of Materials that burn; never in water, never while carried. Blocks burn 20 × (6 + 4 ×
+  hardness) ticks, trees 24 s, small plants and crops 6 s, Objects 8-20 s by mass, then are gone
+  (blocks become air). Each burning thing tries once a second to set alight up to two touching
+  things (chance 0.3 × (1 - clouds), starting at a random neighbour). At most 64 burn at once and
+  one fire burns 48 things; cloud cover 0.85 or more puts each fire out with a 25% chance a second.
+  Fires lit by a Rule fire no Rules. Villagers in a burning column step to the nearest safe tile
+  within 3; animals within 4 tiles bolt; paths treat burning columns as blocked.
+- **Signals**: when a lever or plate changes, every receiver on its channel within 16 tiles (on all
+  three axes) follows the OR of the senders on that channel within 16 of it. On sends a hinge or
+  slider to its farther limit (where `use` first sends it), off back as built. A Rule's `signal`
+  reaches at most 32 receivers, within 16 of the event or everywhere on a timer. The `signal`
+  trigger's `what` is "<channel> on" or "<channel> off", from levers and plates only. Plates are
+  checked every 4 ticks for villagers, animals and other Objects resting on them. `use` with
+  `channel` sets a per-Object override (motors together, lamps and flames together); "" or "none"
+  takes it off a channel; a tuned lever that's on sends at once.
+- **Page**: the light field is computed from the mirror once a tick and uploaded per changed chunk
+  to a 3D texture; lamplight and things that shine by themselves are compensated for the night
+  exposure, and the moonlit grading fades out on lamp- and firelit pixels so they keep their color.
+  Flames, smoke, lamp halos and signal sparks are procedural particles. Levers lean ±34°, pressed
+  plates sink 3 cm.
+- Worlds saved before M11 gain nature's new entries, and Relations matched by name, on load.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no
