@@ -523,3 +523,77 @@ Deno.test("a world saved before joints existed gains nature's joint Parts and ex
   const gate = old.catalog.byName("garden gate")!.content as { parts: { part: string }[] };
   assert(gate.parts.some((p) => p.part === "hinge"));
 });
+
+Deno.test("playtest 0007: a one-room hut's door doesn't trap its builder, and shut is shut both ways", () => {
+  const { sim, fern, x, z } = site();
+  fern.inventory.planks = 60;
+  // Bramble's hut: 3 × 3, walls two high, no roof, the door mid-doorway and hinged at its jamb.
+  design(sim, "bramble hut", [
+    { part: "box", material: "planks", at: [1.5, 1, 2.5], size: [0.9, 1.9, 0.06], piece: "door" },
+    {
+      part: "hinge",
+      material: "planks",
+      at: [1.02, 1, 2.5],
+      size: [0.05, 1.9, 0.05],
+      joins: ["main", "door"],
+      limits: [0, 95],
+    },
+  ], {
+    anchored: true,
+    blocks: { palette: { w: "planks" }, layers: [["www", "w.w", "w.w"], ["www", "w.w", "w.w"]] },
+  });
+  const hx = x + 2, hz = z + 2;
+  let built = "";
+  for (let i = 0; i < 4 && !sim.objects.list.length; i++) {
+    built = ok(run(sim, "a", "build", { design: "bramble hut", x: hx, z: hz }));
+  }
+  const o = sim.objects.list[0];
+  assert(o, built);
+  const inHut = (ax: number, az: number) =>
+    Math.floor(ax) === hx + 1 && (Math.floor(az) === hz + 1 || Math.floor(az) === hz + 2);
+  assert(!inHut(fern.x, fern.z), `outside: ${fern.x - hx}, ${fern.z - hz}: ${built}`);
+  steps(sim, 30);
+  // Shut: no way in from any side, and the result says why.
+  fern.x = hx - 1.5, fern.z = hz + 1.5;
+  const r = run(sim, "a", "walk_to", { x: hx + 1, z: hz + 1 });
+  err(r, "can't find a way");
+  assert(r.text.includes("use x="), `names the shut door: ${r.text}`);
+  // Opened from outside, in through the doorway, shut from inside, and no way out.
+  ok(run(sim, "a", "use", { x: hx + 1, z: hz + 2 }));
+  steps(sim, 20);
+  ok(run(sim, "a", "walk_to", { x: hx + 1, z: hz + 1 }));
+  const shut = ok(run(sim, "a", "use", { x: hx + 1, z: hz + 2 }));
+  steps(sim, 20);
+  // In a one-room hut the door swings through where you stand: it stops, and nobody falls over.
+  assert(fern.downUntil === undefined, "a door never knocks anyone over");
+  if (shut.includes("in its way")) {
+    assert(shut.includes("limits [-95, 0]"), shut);
+  } else {
+    err(run(sim, "a", "walk_to", { x: hx + 1, z: hz + 4 }), "can't find a way");
+  }
+});
+
+Deno.test("playtest 0007: a door too heavy to lift says so; look keeps angles within limits", () => {
+  const { sim, x, z, g } = site();
+  // A stone drawbridge on a horizontal hinge: far too heavy for a hinge to raise.
+  const bridge = design(sim, "stone drawbridge", [
+    { part: "box", material: "planks", at: [0.5, 0.5, 0.1], size: [1, 1, 0.2] },
+    { part: "box", material: "stone", at: [0.5, 0.1, 1.6], size: [1, 0.2, 3], piece: "deck" },
+    {
+      part: "hinge",
+      material: "planks",
+      at: [0.5, 0.1, 0.1],
+      size: [0.05, 1, 0.05],
+      tilt: 90,
+      turn: 90,
+      joins: ["main", "deck"],
+      limits: [-90, 0],
+    },
+  ], { anchored: true });
+  spawn(sim, bridge, [x + 2, g, z + 2]);
+  steps(sim, 30);
+  const text = ok(run(sim, "a", "use", { x: x + 2, z: z + 3 }));
+  assert(text.includes("too heavy for its hinge"), text);
+  const look = ok(run(sim, "a", "look", {}));
+  assert(look.includes("stuck short of -90°"), look);
+});

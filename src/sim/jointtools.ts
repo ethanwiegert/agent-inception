@@ -1,7 +1,15 @@
-import type { Vec3 } from "./catalog.ts";
-import { type Handler, num, reach, work } from "./jobs.ts";
+import { type DesignContent, rigOf, type Vec3 } from "./catalog.ts";
+import { face, type Handler, MAX_REACH, num, reach, work } from "./jobs.ts";
 import type { WorldObject } from "./objects.ts";
-import { type Assembly, type JointDef, type JointState, quatMatrix } from "./physics.ts";
+import {
+  type Assembly,
+  GRAVITY,
+  type JointDef,
+  type JointState,
+  poseBoxes,
+  quatMatrix,
+  SERVO_TORQUE,
+} from "./physics.ts";
 import { saysWords } from "./rules.ts";
 import { Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -93,6 +101,33 @@ function sweep(asm: Assembly, j: JointDef): number {
   return r + (slide ? Math.max(-j.limits![0], j.limits![1]) : 0);
 }
 
+/**
+ * How hard the moving piece's weight pulls against its joint now: torque about a hinge's axis, or
+ * force along a slider (tonne · blocks² / s², or tonne · blocks / s²).
+ */
+function load(o: WorldObject, asm: Assembly, j: JointDef): number {
+  const s = asm.shapes[j.b], at = j.b ? o.pieces?.[j.b - 1] ?? o : o;
+  const R = quatMatrix(at.rot, new Float64Array(9)), u = j.axis, w = s.mass * GRAVITY;
+  const ux = R[0] * u[0] + R[1] * u[1] + R[2] * u[2];
+  const uy = R[3] * u[0] + R[4] * u[1] + R[5] * u[2];
+  const uz = R[6] * u[0] + R[7] * u[1] + R[8] * u[2];
+  if (j.kind === "slider") return Math.abs(uy) * w;
+  // (com − pin) × (0, −w, 0), along the axis.
+  const c = pieceAt(o, asm, j.b), p = pinAt(o, j);
+  return Math.abs(((c[2] - p[2]) * ux - (c[0] - p[0]) * uz) * w);
+}
+
+/** Whether a villager standing at (x, y, z) is up against the piece a joint moves. */
+function touching(sim: Sim, o: WorldObject, j: JointDef, x: number, y: number, z: number) {
+  const d: DesignContent | null = sim.objects.design(o);
+  if (!d) return false;
+  const of = rigOf(d).pieceOf, r = 0.45;
+  return poseBoxes(d, o.pos, o.rot, o.pieces).some((b, i) =>
+    of[i] === j.b && x > b[0] - r && x < b[1] + r && z > b[4] - r && z < b[5] + r &&
+    y < b[3] && y + 1.75 > b[2]
+  );
+}
+
 interface Found {
   o: WorldObject;
   asm: Assembly;
@@ -123,9 +158,15 @@ function jointsNear(sim: Sim, x: number, z: number, piece: string | null, within
   return out.sort((a, b) => +usable(b.j) - +usable(a.j) || a.d - b.d);
 }
 
-/** How a joint stands now, in a few words: "gate shut", "sails on a motor, turning". */
+/** How a joint stands now, in a few words: "gate shut", "sails on a motor, on (45°/s)". */
 export function jointText(o: WorldObject, j: JointDef, i: number): string {
-  const st = o.joints?.[i] ?? {}, at = st.at ?? 0;
+  const st = o.joints?.[i] ?? {}, lim = j.limits, slide = j.kind === "slider";
+  // A joint gives a little under load; say where it is within its limits.
+  const at = lim ? Math.max(lim[0], Math.min(lim[1], st.at ?? 0)) : st.at ?? 0;
+  const to = lim ? Math.max(lim[0], Math.min(lim[1], st.target ?? 0)) : 0;
+  const short = lim && Math.abs(at - to) > THERE[slide ? "slider" : "hinge"] * 2
+    ? ` (stuck short of ${slide ? `${to.toFixed(2)} blocks` : `${Math.round(to * DEG)}°`})`
+    : "";
   switch (j.kind) {
     case "motor":
       return `${j.piece} on a motor, ${
@@ -134,14 +175,14 @@ export function jointText(o: WorldObject, j: JointDef, i: number): string {
     case "axle":
       return `${j.piece} spins on an axle`;
     case "slider":
-      return Math.abs(at) < THERE.slider * 2
-        ? `${j.piece} in (slides ${j.limits![0]}-${j.limits![1]})`
-        : `${j.piece} slid ${at.toFixed(2)} blocks`;
+      return (Math.abs(at) < THERE.slider * 2
+        ? `${j.piece} in (slides ${lim![0]}-${lim![1]})`
+        : `${j.piece} slid ${at.toFixed(2)} blocks`) + short;
     default:
-      if (!j.limits) return `${j.piece} swings free on a hinge`;
-      return Math.abs(at) < THERE.hinge * 2
+      if (!lim) return `${j.piece} swings free on a hinge`;
+      return (Math.abs(at) < THERE.hinge * 2
         ? `${j.piece} shut`
-        : `${j.piece} open ${Math.round(Math.abs(at * DEG))}°`;
+        : `${j.piece} open ${Math.round(Math.abs(at * DEG))}°`) + short;
   }
 }
 
@@ -215,17 +256,25 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
       );
     }
     return (function* () {
-      // Stand clear of where it swings, if anywhere within reach is.
+      // Within reach, work it from where you stand (this side of the door); otherwise walk up,
+      // standing clear of where it swings if anywhere within reach is.
       const pin = pinAt(o, j), clear = sweep(asm, j) + 0.35;
       const inSwing = (px: number, pz: number) => Math.hypot(px - pin[0], pz - pin[2]) < clear;
-      yield* reach(
-        sim,
-        agent,
-        Math.floor(pin[0]),
-        Math.floor(pin[2]),
-        Math.floor(pin[1]),
-        (cx, cz) => inSwing(cx + 0.5, cz + 0.5),
-      );
+      const tx = Math.floor(pin[0]), tz = Math.floor(pin[2]);
+      const near =
+        Math.max(Math.abs(Math.floor(agent.x) - tx), Math.abs(Math.floor(agent.z) - tz)) <= 2 &&
+        Math.abs(agent.y - pin[1]) <= MAX_REACH;
+      if (near) yield* face(agent, tx, tz);
+      else {
+        yield* reach(
+          sim,
+          agent,
+          tx,
+          tz,
+          Math.floor(pin[1]),
+          (cx, cz) => inSwing(cx + 0.5, cz + 0.5),
+        );
+      }
       yield* work(agent, Anim.Build, 6);
       if (!sim.objects.get(o.id)) throw new Error(`The ${name} is gone.`);
       if (o.held) throw new Error(`Someone picked up the ${name}.`);
@@ -251,9 +300,11 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
         sim.physics.wake(o);
         fire();
         const s = Math.abs(Math.round(j.speed * DEG));
+        // "its sails turn", "its blade turns".
+        const one = /s$/.test(j.piece) ? "" : "s";
         return `You switch the ${name}'s motor${n > 1 ? "s" : ""} ${
           on ? "on" : "off"
-        }: its ${j.piece} ${on ? `turn at ${s}°/s` : "coast to a stop"}.`;
+        }: its ${j.piece} ${on ? `turn${one} at ${s}°/s` : `coast${one} to a stop`}.`;
       }
       const [lo, hi] = j.limits!, was = st.target ?? 0;
       const to = Math.abs(was - hi) < Math.abs(was - lo) ? lo : hi;
@@ -268,12 +319,19 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
       const at = st.at ?? 0, slider = j.kind === "slider";
       const show = (v: number) => slider ? `${v.toFixed(2)} blocks` : `${Math.round(v * DEG)}°`;
       if (Math.abs(at - to) >= there) {
-        const who = sim.agents.find((a) => inSwing(a.x, a.z));
+        const who = sim.agents.find((a) => touching(sim, o, j, a.x, a.y, a.z));
+        const heavy = load(o, asm, j);
         const why = who === agent
-          ? "you're standing in its way"
+          ? "you're standing in its way (find room clear of its swing, or hang it to swing " +
+            "the other way, like limits [-95, 0])"
           : who
           ? `${who.name} is in its way`
-          : `something is in the way, or it's too heavy for its ${j.kind}`;
+          : heavy > SERVO_TORQUE * 0.8
+          ? `it's too heavy for its ${j.kind} (its weight pulls with about ${
+            Math.round(heavy)
+          }; a ${j.kind} drives with up to ${SERVO_TORQUE}): make the ${j.piece} lighter or ` +
+            "turn the joint so it doesn't lift it"
+          : "something is in the way: the ground, a wall, or another Object";
         return `${cap(whose(name, j.piece))} stuck at ${show(at)} on its way to ${
           show(to)
         }: ${why}. ` +

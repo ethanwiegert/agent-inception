@@ -104,7 +104,9 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     const x0 = num(args.x, "x"), z0 = num(args.z, "z");
     const width = Math.max(1, num(args.width ?? 1, "width"));
     const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-    if (width * depth > MAX_AREA) throw new Error(`At most ${MAX_AREA} tiles per call.`);
+    if (width * depth > MAX_AREA) {
+      throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
+    }
     const target = args.target === undefined
       ? null
       : String(args.target).trim().toLowerCase().replace(/_/g, " ");

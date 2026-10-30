@@ -78,8 +78,13 @@ const SERVO_SPEED = 1.6;
 export const SERVO_TORQUE = 12;
 /** How quickly a used hinge closes in on where it's going (per second). */
 const SERVO_GAIN = 5;
-/** Friction in a free hinge or axle, so a swing slows and a wheel coasts to a stop. */
+/** Friction in a free hinge, so a swing slows down. */
 const JOINT_FRICTION = 0.02;
+/**
+ * Rolling resistance in an axle (or a motor that's off): a push rolls a cart easily, but a parked
+ * one stays put instead of creeping on its wheels.
+ */
+const AXLE_FRICTION = 0.15;
 /** A limit starts pushing back this close to it (radians or blocks). */
 const LIMIT_MARGIN = 0.05;
 
@@ -224,6 +229,8 @@ export interface Mover {
 /** A body that hit a mover hard: how fast it came at them and with how much momentum. */
 export interface Hit {
   body: BodyState;
+  /** Which of its pieces hit (0: the root). */
+  piece: number;
   mover: number;
   speed: number;
   momentum: number;
@@ -675,7 +682,6 @@ const dist2 = (f: Float64Array, a: number, b: number) =>
 /** Candidate contacts for one pair before they're reduced to a few per direction. */
 const cand = { n: 0, f: new Float64Array(7 * 512) };
 
-const NO_JOINTS: JointState[] = [];
 /** A joint's pull back toward lined up: Baumgarte, capped. */
 const fix = (k: number, e: number) => Math.max(-MAX_CORRECTION, Math.min(MAX_CORRECTION, -k * e));
 /** A limit's row target: past it, push back; short of it, come no closer than reaching it. */
@@ -1877,7 +1883,10 @@ export class Physics {
       this.alongRow(A, B, slide, 1, v, -SERVO_TORQUE * h, SERVO_TORQUE * h);
     } else if (j.kind === "motor" && st.on) {
       this.alongRow(A, B, false, 1, j.speed, -MOTOR_TORQUE * h, MOTOR_TORQUE * h);
-    } else if (!slide) this.alongRow(A, B, false, 1, 0, -JOINT_FRICTION * h, JOINT_FRICTION * h);
+    } else if (!slide) {
+      const f = (j.kind === "hinge" ? JOINT_FRICTION : AXLE_FRICTION) * h;
+      this.alongRow(A, B, false, 1, 0, -f, f);
+    }
   }
 
   /** The joint being prepared: lever arms, how far its pin pulled apart, and its axis. */
@@ -2105,8 +2114,15 @@ export class Physics {
       this.moverHit[m] = momentum;
       const nx = -f[o + NX], nz = -f[o + NX + 2], l = Math.hypot(nx, nz) || 1;
       let hit = this.hits.find((h) => h.mover === m);
-      if (!hit) this.hits.push(hit = { body: a.o, mover: m, speed, momentum, nx: 0, nz: 0 });
-      hit.body = a.o, hit.speed = speed, hit.momentum = momentum, hit.nx = nx / l, hit.nz = nz / l;
+      if (!hit) {
+        this.hits.push(hit = { body: a.o, piece: 0, mover: m, speed, momentum, nx: 0, nz: 0 });
+      }
+      hit.body = a.o,
+        hit.piece = a.piece,
+        hit.speed = speed,
+        hit.momentum = momentum,
+        hit.nx = nx / l,
+        hit.nz = nz / l;
     }
   }
 
@@ -2158,8 +2174,16 @@ export class Physics {
         still = false;
       }
     }
-    // A running motor keeps it awake.
-    for (const j of o.joints ?? NO_JOINTS) if (j.on) still = false;
+    // A running motor keeps it awake, and so does a door that hasn't got where it was sent.
+    if (o.joints) {
+      const defs = this.assembly(o.design)?.joints;
+      for (let i = 0; i < o.joints.length; i++) {
+        const j = o.joints[i], lim = defs?.[i]?.limits;
+        if (j.on) still = false;
+        const to = lim ? Math.max(lim[0], Math.min(lim[1], j.target ?? 0)) : 0;
+        if (lim && Math.abs((j.at ?? 0) - to) > 0.06) still = false;
+      }
+    }
     const air = o.air ?? 0;
     if (impact > LAND_SPEED && air > 2) this.landings.push({ body: o, speed: impact });
     o.air = impact > 0 ? 0 : air + 1;

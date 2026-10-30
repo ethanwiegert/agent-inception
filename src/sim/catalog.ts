@@ -788,9 +788,13 @@ function checkPieces(d: DesignContent) {
   for (const j of rig.joints) {
     for (const k of [j.a, j.b]) {
       if (!named.has(rig.pieces[k])) {
+        const main = rig.pieces[k] === MAIN_PIECE
+          ? ' (a Design\'s blocks, and parts without a "piece", are "main"; a joint belongs to ' +
+            "the first piece it joins, so it can't make one on its own)"
+          : "";
         throw new Error(
-          `parts[${j.part}].joins: no part is in piece "${rig.pieces[k]}". Pieces: ` +
-            `${[...named].join(", ")}.`,
+          `parts[${j.part}].joins: no part is in piece "${rig.pieces[k]}"${main}. Pieces: ` +
+            `${[...named].join(", ") || "none"}.`,
         );
       }
     }

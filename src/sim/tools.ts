@@ -494,7 +494,9 @@ function eachTile(
   const x0 = num(args.x, "x"), z0 = num(args.z, "z");
   const width = Math.max(1, num(args.width ?? 1, "width"));
   const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width * depth > MAX_AREA) throw new Error(`At most ${MAX_AREA} tiles per call.`);
+  if (width * depth > MAX_AREA) {
+    throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
+  }
   return (function* () {
     let done = 0;
     const skipped: string[] = [];
@@ -866,7 +868,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         yours.slice(0, 5).map(({ o, c, d }) =>
           `${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
             Math.floor(c[2])
-          } (${Math.round(d)} tiles${!o.asleep && !o.held ? ", moving" : ""})`
+          } (${Math.round(d)} tiles${
+            !o.asleep && !o.held && Math.hypot(...o.vel) > 0.3 ? ", moving" : ""
+          })`
         ).join(", ")
       }${yours.length > 5 ? ` and ${yours.length - 5} more` : ""}.`,
     );

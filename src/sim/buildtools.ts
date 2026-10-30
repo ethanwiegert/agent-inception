@@ -412,6 +412,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const x0 = num(args.x, "x"), z0 = num(args.z, "z");
     const turn = quarterTurns(args.turn);
     const span = designSpan(content);
+    const [w, d] = turn & 1 ? [span[1], span[0]] : span;
     const cells = designCells(sim, content, turn, span);
     const partTiles = content.parts.length
       ? Objects.cover(sim.world, Objects.boxes(content, x0, 0, z0, turn))
@@ -537,7 +538,19 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       // The parts go up as one Object once the blocks under them are in.
       let object: WorldObject | null = null;
       if (partsLeft && !rest.length && !spent()) {
-        const r = yield* raise(sim, agent, design.id, content, x0, base, z0, turn, partTiles);
+        const r = yield* raise(
+          sim,
+          agent,
+          design.id,
+          content,
+          x0,
+          base,
+          z0,
+          turn,
+          partTiles,
+          // The whole of it, rooms included: a door put up from inside would shut you in.
+          (cx, cz) => cx >= x0 && cx < x0 + w && cz >= z0 && cz < z0 + d,
+        );
         if (typeof r === "string") skipped.push(r);
         else object = r;
       }
@@ -550,7 +563,7 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
         : `Didn't build ${name} ${place}.`;
       if (object) {
         const n = content.parts.length;
-        text += ` Its ${n} part${n === 1 ? "" : "s"} stand as one Object (${
+        text += ` Its ${n} part${n === 1 ? " stands" : "s stand"} as one Object (${
           costText(partCost(content))
         } used).`;
       }
@@ -563,7 +576,12 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
             `${turn ? `, turn=${turn * 90}` : ""}.`
           : " The rest is blocked.";
       }
-      if (shutIn()) text += " You're shut in by your own work: break_block a wall to get out.";
+      if (shutIn()) {
+        const door = object && sim.physics.assembly(object.design)?.joints.find((j) => j.limits);
+        text += door
+          ? ` You're inside with its ${door.piece} shut: use opens it.`
+          : " You're shut in by your own work: break_block a wall to get out.";
+      }
       return text + skippedText(skipped) + ` ${inventoryText(agent)}`;
     })();
   },
@@ -583,6 +601,7 @@ function* raise(
   z: number,
   turn: number,
   tiles: number[],
+  inFootprint: (x: number, z: number) => boolean = () => false,
 ): Generator<void, WorldObject | string> {
   const sizeX = sim.world.sizeX;
   const mine = new Set(tiles);
@@ -597,7 +616,12 @@ function* raise(
     }
     return false;
   };
-  if (!beside(Math.floor(agent.x), Math.floor(agent.z))) {
+  // Outside the whole Design if that's within reach: a door put up from inside shuts you in.
+  const outside = (cx: number, cz: number) => beside(cx, cz) && !inFootprint(cx, cz);
+  const ax = Math.floor(agent.x), az = Math.floor(agent.z);
+  if (!outside(ax, az) && route(sim, agent, outside, octile(x, z))) {
+    yield* walk(sim, agent, outside, octile(x, z), "its side");
+  } else if (!beside(ax, az)) {
     try {
       yield* walk(sim, agent, beside, octile(x, z), "its side");
     } catch {

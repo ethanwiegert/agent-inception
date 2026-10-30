@@ -559,9 +559,15 @@ export class Sim {
   /** A body hit a villager or an animal: hard enough, and they're knocked over or bolt. */
   private hit(
     o: WorldObject,
-    h: { mover: number; speed: number; momentum: number; nx: number; nz: number },
+    h: { piece: number; mover: number; speed: number; momentum: number; nx: number; nz: number },
   ) {
     const name = this.catalog.get(o.design)?.name ?? "Object";
+    // A door or a drawer moving on its hinge or rail bumps people; it never bowls them over.
+    if (
+      h.piece && this.physics.assembly(o.design)?.joints.some((j) => j.b === h.piece && j.limits)
+    ) {
+      return;
+    }
     if (h.mover >= this.agents.length) {
       const a = this.animals[h.mover - this.agents.length];
       if (a && h.momentum >= KNOCK_MOMENTUM / 2 && h.speed >= KNOCK_SPEED / 2) {
