@@ -1,5 +1,6 @@
-import { identity, mat4, rotateY, scale, translate } from "../math.ts";
-import { type Catalog, type DesignContent, rigOf } from "../sim/catalog.ts";
+import { identity, mat4, rotateX, rotateY, scale, translate } from "../math.ts";
+import { type Catalog, type DesignContent, deviceKind, rigOf, type Vec3 } from "../sim/catalog.ts";
+import { deviceOn } from "../sim/signals.ts";
 import { CROP_STRIDE } from "../sim/protocol.ts";
 import type { Props } from "../sim/props.ts";
 import type { Objects } from "../sim/objects.ts";
@@ -17,13 +18,15 @@ export class FloraModels {
   private ids = new Map<number, number>();
   /** Built Objects' templates, one per piece, by design × 16 + piece. */
   private still = new Map<number, number>();
+  /** Levers and plates, one template per part (they move on their own), by `design:part`. */
+  private loose = new Map<string, number>();
   private catalog: Catalog | null = null;
 
   constructor(private lib: MeshLibrary) {}
 
   /** Template id for Design `design` in `catalog`, or -1 if it isn't a drawable Design. */
   template(catalog: Catalog, design: number): number {
-    if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear(), this.still.clear();
+    if (catalog !== this.catalog) this.forget(catalog);
     let id = this.ids.get(design);
     if (id !== undefined) return id;
     const e = catalog.get(design);
@@ -43,7 +46,7 @@ export class FloraModels {
    * Design: its parts in Design space, so each piece is drawn at its own pose.
    */
   stillTemplate(catalog: Catalog, design: number, piece = 0): number {
-    if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear(), this.still.clear();
+    if (catalog !== this.catalog) this.forget(catalog);
     const key = design * 16 + piece;
     let id = this.still.get(key);
     if (id !== undefined) return id;
@@ -53,13 +56,48 @@ export class FloraModels {
       const d = e.content as DesignContent, of = rigOf(d).pieceOf;
       id = this.lib.define(
         `object:${design}:${piece}`,
-        (b) => meshDesign(b, catalog, d, { only: (_, i) => of[i] === piece, sway: false }),
+        (b) =>
+          meshDesign(b, catalog, d, {
+            only: (p, i) => of[i] === piece && !movesAlone(p.part),
+            sway: false,
+          }),
       );
     }
     this.still.set(key, id);
     return id;
   }
+
+  /** A lever's or plate's own template, around its pivot (a lever's foot, a plate's center). */
+  partTemplate(catalog: Catalog, design: number, part: number, pivot: Vec3): number {
+    if (catalog !== this.catalog) this.forget(catalog);
+    const key = `${design}:${part}`;
+    let id = this.loose.get(key);
+    if (id !== undefined) return id;
+    const e = catalog.get(design);
+    id = -1;
+    if (e?.kind === "design") {
+      const d = e.content as DesignContent;
+      id = this.lib.define(
+        `part:${key}`,
+        (b) =>
+          meshDesign(b, catalog, d, { only: (_, i) => i === part, sway: false, origin: pivot }),
+      );
+    }
+    this.loose.set(key, id);
+    return id;
+  }
+
+  private forget(catalog: Catalog) {
+    this.catalog = catalog;
+    this.ids.clear(), this.still.clear(), this.loose.clear();
+  }
 }
+
+/** Levers swing and plates sink on their own, so they're drawn apart from their piece. */
+const movesAlone = (part: string) => part === "lever" || part === "plate";
+/** How far a lever leans each way (radians), and how far a pressed plate sinks. */
+const LEVER_SWING = 0.6, PLATE_SINK = 0.03;
+const DEG = Math.PI / 180;
 
 const m = mat4();
 
@@ -170,15 +208,66 @@ export function buildObjects(
   models: FloraModels,
 ) {
   for (const o of objects.list) {
+    const d = objects.design(o);
+    if (!d) continue;
+    const of = rigOf(d).pieceOf;
     for (let k = 0; k <= (o.pieces?.length ?? 0); k++) {
       const pose = poses.get(o.id * 16 + k);
-      if (pose) addPose(out, pose, models.stillTemplate(objects.catalog, o.design, k));
+      if (!pose) continue;
+      // A piece's lamps glow while any of them is lit (tint alpha below 0 when all are dark).
+      let lamps = 0, lit = 0;
+      d.parts.forEach((p, i) => {
+        if (of[i] !== k || deviceKind(p.part) !== "lamp") return;
+        lamps++;
+        if (deviceOn(o, i, "lamp")) lit++;
+      });
+      addPose(
+        out,
+        pose,
+        models.stillTemplate(objects.catalog, o.design, k),
+        lamps && !lit ? -1 : 1,
+      );
+      d.parts.forEach((p, i) => {
+        if (of[i] !== k || !movesAlone(p.part)) return;
+        const lever = p.part === "lever", on = deviceOn(o, i, lever ? "lever" : "plate");
+        // A lever turns about its foot, across the way it's turned; a pressed plate sinks a little.
+        const c = Math.cos(p.tilt * DEG), sn = Math.sin(p.tilt * DEG), h = p.size[1] / 2;
+        const pivot: Vec3 = lever
+          ? [
+            p.at[0] - Math.sin(p.turn * DEG) * sn * h,
+            p.at[1] - c * h,
+            p.at[2] - Math.cos(p.turn * DEG) * sn * h,
+          ]
+          : [...p.at];
+        const tid = models.partTemplate(objects.catalog, o.design, i, pivot);
+        if (tid < 0) return;
+        posed(pose);
+        translate(m, pivot[0], pivot[1] - (!lever && on ? PLATE_SINK : 0), pivot[2]);
+        if (lever) {
+          rotateY(m, p.turn * DEG);
+          rotateX(m, on ? LEVER_SWING : -LEVER_SWING);
+          rotateY(m, -p.turn * DEG);
+        }
+        out.add(tid, m, 1, 1, 1, 1);
+      });
     }
   }
 }
 
-/** One piece's template at its pose. */
-function addPose(out: InstanceBatch, pose: BodyPose, tid: number) {
+/** `m` = the Design origin's pose: translate(pos) · R(rot). */
+function posed(pose: BodyPose) {
+  const [x, y, z, w] = pose.rot;
+  m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y + z * w), m[2] = 2 * (x * z - y * w);
+  m[3] = 0;
+  m[4] = 2 * (x * y - z * w), m[5] = 1 - 2 * (x * x + z * z), m[6] = 2 * (y * z + x * w);
+  m[7] = 0;
+  m[8] = 2 * (x * z + y * w), m[9] = 2 * (y * z - x * w), m[10] = 1 - 2 * (x * x + y * y);
+  m[11] = 0;
+  m[12] = pose.pos[0], m[13] = pose.pos[1], m[14] = pose.pos[2], m[15] = 1;
+}
+
+/** One piece's template at its pose; `lit` below 0 darkens its lamps. */
+function addPose(out: InstanceBatch, pose: BodyPose, tid: number, lit = 1) {
   if (tid < 0) return;
   const [x, y, z, w] = pose.rot;
   // translate(pos) · R(rot) · translate(ANCHOR): the template's origin is the Design's anchor.
@@ -190,7 +279,7 @@ function addPose(out: InstanceBatch, pose: BodyPose, tid: number) {
   m[11] = 0;
   m[12] = pose.pos[0], m[13] = pose.pos[1], m[14] = pose.pos[2], m[15] = 1;
   translate(m, ANCHOR[0], ANCHOR[1], ANCHOR[2]);
-  out.add(tid, m, 1, 1, 1, 1);
+  out.add(tid, m, 1, 1, 1, lit);
 }
 
 /** Whether any prop is still growing (so the batch needs refreshing now and then). */

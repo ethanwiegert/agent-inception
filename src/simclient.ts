@@ -3,11 +3,13 @@ import {
   type AgentProfile,
   ANIMAL_STRIDE,
   BODY_STRIDE,
+  FIRE_STRIDE,
   type FromWorker,
   type TickMessage,
   type ToWorker,
 } from "./sim/protocol.ts";
 import { BlockRegistry } from "./sim/blocks.ts";
+import { glowingBlocks, LightField, lightSources } from "./sim/light.ts";
 import { Catalog } from "./sim/catalog.ts";
 import { Objects } from "./sim/objects.ts";
 import { Props } from "./sim/props.ts";
@@ -81,6 +83,15 @@ export class SimClient {
   /** The tick `crops` planting times are relative to. */
   cropsTick = 0;
   profiles: AgentProfile[] = [];
+  /** What burns now (FIRE_STRIDE each), and a counter that bumps when it changes. */
+  fires: Float32Array<ArrayBuffer> = new Float32Array(0);
+  firesVersion = 0;
+  /** Light from lamps, flames, fire and glowing blocks: the sim's field, worked out here too. */
+  light: LightField | null = null;
+  /** Block indices of glowing blocks in the mirrored world. */
+  private glowing = new Set<number>();
+  /** Something that casts light changed since the field was last brought up to date. */
+  private lightStale = false;
   onReady: (world: World, caughtUp: number) => void = () => {};
 
   /** Block ids for the mirrored Catalog's Materials, the same ids the sim uses. */
@@ -231,6 +242,11 @@ export class SimClient {
       this.objects = new Objects(world, this.catalog);
       this.objects.reset(msg.objects);
       this.world = world;
+      this.light = new LightField(world);
+      this.glowing = glowingBlocks(world, this.blocks);
+      this.fires = new Float32Array(0);
+      this.firesVersion++;
+      this.lightStale = true;
       this.prev = this.curr = new Float32Array(0);
       this.prevAnimals = this.currAnimals = new Float32Array(0);
       this.prevBodies = this.currBodies = new Float32Array(0);
@@ -275,8 +291,15 @@ export class SimClient {
       this.cropsTick = msg.tick;
       this.cropsVersion++;
     }
-    if (this.world) applyEdits(this.world, msg.edits);
+    if (this.world) this.applyEdits(this.world, msg.edits);
     if (msg.objects && this.objects) this.objects.reset(msg.objects);
+    if (msg.fires) {
+      this.fires = msg.fires;
+      this.firesVersion++;
+    }
+    if (msg.objects || msg.bodies || msg.fires || msg.catalog || msg.edits.length) {
+      this.lightStale = true;
+    }
     if (msg.bodies) {
       this.prevBodies = this.currBodies.length ? this.currBodies : msg.bodies;
       this.currBodies = msg.bodies;
@@ -288,12 +311,56 @@ export class SimClient {
     for (const event of msg.events) this.onEvent(event);
     this.resolve(msg.results);
   }
+
+  private applyEdits(world: World, edits: Int32Array) {
+    const blocks = this.blocks;
+    for (let i = 0; i < edits.length; i += 4) {
+      const [x, y, z, b] = [edits[i], edits[i + 1], edits[i + 2], edits[i + 3]];
+      world.set(x, y, z, b);
+      const index = world.index(x, y, z);
+      if (blocks.get(b)?.glows) this.glowing.add(index);
+      else this.glowing.delete(index);
+      this.light?.blockChanged(x, y, z);
+    }
+  }
+
+  /**
+   * Bring the light field up to date with what casts light, as of the last tick (moving lamps
+   * relight once a tick, not every frame). True if any of it changed.
+   */
+  updateLight(): boolean {
+    if (!this.lightStale || !this.light || !this.world || !this.objects) return false;
+    this.lightStale = false;
+    const poses = new Map<number, number>();
+    const c = this.currBodies;
+    for (let i = 0; i < c.length; i += BODY_STRIDE) poses.set(c[i], i);
+    const fires: { key: string; x: number; y: number; z: number }[] = [];
+    for (let i = 0; i < this.fires.length; i += FIRE_STRIDE) {
+      const f = this.fires;
+      fires.push({
+        key: `${f[i + 6]}:${f[i]}:${f[i + 2]}:${f[i + 4]}:${f[i + 7]}`,
+        x: (f[i] + f[i + 1]) / 2,
+        y: f[i + 2] + (f[i + 3] - f[i + 2]) * 0.6,
+        z: (f[i + 4] + f[i + 5]) / 2,
+      });
+    }
+    return this.light.update(lightSources({
+      catalog: this.catalog,
+      objects: this.objects.list,
+      pose: (o, piece) => {
+        const at = poses.get(o.id * 16 + piece);
+        if (at === undefined) return null;
+        return {
+          pos: [c[at + 1], c[at + 2], c[at + 3]],
+          rot: [c[at + 4], c[at + 5], c[at + 6], c[at + 7]],
+        };
+      },
+      world: this.world,
+      blocks: this.blocks,
+      glowing: this.glowing,
+      fires,
+    }));
+  }
 }
 
 const mix = (p: Float32Array, c: Float32Array, i: number, t: number) => p[i] + (c[i] - p[i]) * t;
-
-function applyEdits(world: World, edits: Int32Array) {
-  for (let i = 0; i < edits.length; i += 4) {
-    world.set(edits[i], edits[i + 1], edits[i + 2], edits[i + 3]);
-  }
-}

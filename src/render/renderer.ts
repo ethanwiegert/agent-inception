@@ -1,6 +1,7 @@
 import { frustumPlanes, lookAt, mat4, multiply, ortho, type Vec3 } from "../math.ts";
 import type { BlockRegistry } from "../sim/blocks.ts";
 import type { Catalog } from "../sim/catalog.ts";
+import type { LightField } from "../sim/light.ts";
 import type { Objects } from "../sim/objects.ts";
 import type { Props } from "../sim/props.ts";
 import { World } from "../sim/world.ts";
@@ -14,8 +15,10 @@ import { anyGrowing, buildObjects, buildProps, CropLooks, FloraModels } from "./
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
 import { applyLook, type Look, type Weather } from "./look.ts";
+import { LightTexture } from "./lighttex.ts";
 import { InstanceBatch, MeshLibrary } from "./meshes.ts";
 import { ModelBatch, ModelRenderer } from "./models.ts";
+import { ParticleRenderer } from "./particles.ts";
 import { PostRenderer } from "./post.ts";
 import { SkyRenderer } from "./sky.ts";
 import { SurfaceTexture } from "./surface.ts";
@@ -23,7 +26,7 @@ import { TerrainRenderer } from "./terrain.ts";
 import { WaterRenderer } from "./water.ts";
 
 export interface Layouts {
-  /** Group 0 for lit passes: frame uniforms + shadow map + comparison sampler. */
+  /** Group 0 for lit passes: frame uniforms, shadow map, comparison sampler, light field. */
   frame: GPUBindGroupLayout;
   /** Group 0 for passes that only need frame uniforms (shadow, sky, post). */
   shadowFrame: GPUBindGroupLayout;
@@ -53,6 +56,10 @@ export interface SceneState {
   tick: number;
   day: number;
   weather: Weather;
+  /** Lamplight, firelight and glowing blocks (the page's copy of the sim's field). */
+  light: LightField | null;
+  /** What burns (FIRE_STRIDE each). */
+  fires: Float32Array;
 }
 
 /** Where a frame ends up: the canvas, or an offscreen texture for captures. */
@@ -79,7 +86,7 @@ export interface RenderStats {
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
-   * "props". */
+   * "props", "fire". */
   debug = new Set<string>();
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
@@ -118,6 +125,9 @@ export class Renderer {
   private timer: GpuTimer | null;
   private lightView = mat4();
   private lightProj = mat4();
+  private lightField: LightTexture;
+  /** Fire, smoke, lamp halos and signal sparks. */
+  readonly particles: ParticleRenderer;
 
   constructor(private device: GPUDevice, private world: World) {
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
@@ -128,6 +138,8 @@ export class Renderer {
           { binding: 0, visibility: VF, buffer: {} },
           { binding: 1, visibility: VF, texture: { sampleType: "depth" } },
           { binding: 2, visibility: VF, sampler: { type: "comparison" } },
+          { binding: 3, visibility: VF, texture: { sampleType: "float", viewDimension: "3d" } },
+          { binding: 4, visibility: VF, sampler: { type: "filtering" } },
         ],
       }),
       shadowFrame: device.createBindGroupLayout({
@@ -156,12 +168,15 @@ export class Renderer {
       magFilter: "linear",
       minFilter: "linear",
     });
+    this.lightField = new LightTexture(device, world);
     this.frameBindGroup = device.createBindGroup({
       layout: this.layouts.frame,
       entries: [
         { binding: 0, resource: { buffer: this.frameBuffer } },
         { binding: 1, resource: this.shadowView },
         { binding: 2, resource: shadowSampler },
+        { binding: 3, resource: this.lightField.view },
+        { binding: 4, resource: this.lightField.sampler },
       ],
     });
     this.plainFrameBindGroup = device.createBindGroup({
@@ -181,6 +196,7 @@ export class Renderer {
     this.fishModels = defineFishModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
+    this.particles = new ParticleRenderer(device, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
 
@@ -219,6 +235,7 @@ export class Renderer {
     }
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);
+    this.particles.update(scene.objects, scene.bodies, scene.fires, time);
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -228,6 +245,8 @@ export class Renderer {
     fd[F.cameraPos + 3] = time;
     applyLook(fd, look, timeOfDay, scene.day, scene.weather);
     fd[F.extra + 2] = SEA_LEVEL;
+    this.lightField.update(scene.light);
+    fd[F.extra + 3] = scene.light?.lit ? 1 : 0;
     fd[F.weather + 2] = scene.tick - scene.cropsTick;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
@@ -300,6 +319,8 @@ export class Renderer {
     // Transparent last: water blends over everything opaque, including the sky at the horizon.
     main.setBindGroup(0, this.frameBindGroup);
     if (!skip.has("water")) this.water.draw(main, this.planes);
+    main.setBindGroup(0, this.frameBindGroup);
+    if (!skip.has("fire")) this.particles.draw(main);
     main.end();
 
     const post = encoder.beginRenderPass({

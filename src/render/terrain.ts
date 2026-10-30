@@ -9,7 +9,7 @@ import type { Layouts } from "./renderer.ts";
 const P = Pattern;
 const shader = frameWgsl + lightingWgsl + grassWeightWgsl + /* wgsl */ `
 @group(1) @binding(0) var<storage, read> chunkOrigins: array<vec4f>;
-/** Per block id: linear rgb, pattern index. */
+/** Per block id: linear rgb, pattern index + glow (its fraction, 0-0.99). */
 @group(1) @binding(1) var<storage, read> blockInfo: array<vec4f, ${MAX_BLOCKS}>;
 @group(1) @binding(2) var surface: texture_2d<u32>;
 
@@ -180,7 +180,7 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
   let jitter = 0.95 + 0.1 * hash21(cell.xz + cell.y * 17.0);
   let albedo = patternAlbedo(u32(info.w), info.rgb, in.world, in.face) * jitter;
   let ao = mix(1.0, in.ao, frame.groundAmbient.w);
-  var color = shade(albedo, n, in.world, ao, 0.0);
+  var color = shade(albedo, n, in.world, ao, 0.0) + selfLit(albedo * fract(info.w) * EMISSIVE);
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.
   let s = textureLoad(surface, vec2i(floor(in.world.xz)), 0);
@@ -316,7 +316,7 @@ export class TerrainRenderer {
           srgbToLinear(c >> 16),
           srgbToLinear((c >> 8) & 255),
           srgbToLinear(c & 255),
-          Pattern[def.pattern],
+          Pattern[def.pattern] + Math.min(0.99, def.glows),
         ],
         id * 4,
       );

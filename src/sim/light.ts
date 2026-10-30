@@ -21,7 +21,7 @@ export const FIRE_REACH = 6;
 /** A glowing Material reaches this much per unit of `glows`, plus two. */
 const GLOW_REACH = 5;
 /** Tame and wild fire light: warm orange, linear rgb. */
-export const FIRE_COLOR: [number, number, number] = [1, 0.5, 0.16];
+export const FIRE_COLOR: [number, number, number] = [1, 0.42, 0.12];
 /** How a source's light fades over the way it travelled: (1 - d / reach) ^ FALLOFF. */
 const FALLOFF = 1.6;
 

@@ -90,6 +90,8 @@ client.onEvent = (event) => {
     overlay.log(event.agent ? agentName(event.agent) : "catalog", event.text);
   } else if (event.type === "physics") {
     overlay.log(agentName(event.agent), event.text);
+  } else if (event.type === "signal") {
+    renderer?.particles.spark(event.from, event.to, event.on, performance.now() / 1000);
   }
 };
 
@@ -311,6 +313,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
   const agents = client.agents(now);
   const followed = agents.find((a) => a.id === camera!.follow);
   if (followed) camera.track(followed.x, followed.z);
+  client.updateLight();
 
   renderer.render(
     camera,
@@ -332,6 +335,8 @@ function draw(now: number, out: RenderTarget, capture = false) {
       tick: client.tick,
       day: client.day,
       weather: { clouds: client.clouds },
+      light: client.light,
+      fires: client.fires,
     },
     out,
     capture,

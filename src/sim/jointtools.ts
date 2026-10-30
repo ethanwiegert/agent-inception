@@ -339,13 +339,13 @@ function workDevice(sim: Sim, agent: Agent, f: DeviceFound): Job {
       used();
       const channel = channelOf(o, d, part);
       if (!channel) {
-        return `You flip the ${name}'s lever ${on ? "on" : "off"}. It's on no channel, so ` +
+        return `You flip ${whose(name, "lever")} ${on ? "on" : "off"}. It's on no channel, so ` +
           `nothing follows it: use x=${Math.floor(f.at[0])} z=${
             Math.floor(f.at[2])
           } channel "name" tunes it.`;
       }
       const n = sim.signals.changed(o, part, agent);
-      return `You flip the ${name}'s lever ${on ? "on" : "off"}: channel "${channel}" ` +
+      return `You flip ${whose(name, "lever")} ${on ? "on" : "off"}: channel "${channel}" ` +
         (n
           ? `reaches ${n} thing${n === 1 ? "" : "s"} within ${SIGNAL_RANGE} tiles.`
           : `reaches nothing within ${SIGNAL_RANGE} tiles (tune a lamp, flame, motor or ` +

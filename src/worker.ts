@@ -11,6 +11,8 @@ import {
   BODY_STRIDE,
   type CatalogDelta,
   CROP_STRIDE,
+  FIRE_KINDS,
+  FIRE_STRIDE,
   type FromWorker,
   SCHOOL_STRIDE,
   type ToWorker,
@@ -36,6 +38,7 @@ let sentPosesVersion = -1;
 let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
+let sentFireVersion = -1;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
 
@@ -98,6 +101,7 @@ function start(caughtUp: number) {
   sentPropsVersion = s.props.version;
   sentObjectsVersion = s.objects.version;
   sentPosesVersion = -1;
+  sentFireVersion = -1;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -208,6 +212,18 @@ function send() {
     }
   }
 
+  let fires: Float32Array<ArrayBuffer> | undefined;
+  if (s.wildfire.version !== sentFireVersion) {
+    sentFireVersion = s.wildfire.version;
+    const fire = s.wildfire;
+    fires = new Float32Array(fire.burning.size * FIRE_STRIDE);
+    let i = 0;
+    for (const b of fire.burning.values()) {
+      fires.set([...fire.box(b), FIRE_KINDS.indexOf(b.kind), b.ref % 997], i);
+      i += FIRE_STRIDE;
+    }
+  }
+
   const edits = Int32Array.from(s.pendingEdits);
   s.pendingEdits = [];
   post({
@@ -231,6 +247,7 @@ function send() {
     edits,
     crops,
     bodies,
+    fires,
     events: s.events.splice(0),
     results: s.results.splice(0),
   }, [
@@ -240,6 +257,7 @@ function send() {
     edits.buffer,
     ...(crops ? [crops.buffer] : []),
     ...(bodies ? [bodies.buffer] : []),
+    ...(fires ? [fires.buffer] : []),
   ]);
 }
 

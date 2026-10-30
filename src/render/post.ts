@@ -45,11 +45,16 @@ fn display(p: vec2i) -> vec3f {
   let raw = textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb * frame.skyZenith.w;
   var c = toSrgb(neutral(raw * GAIN));
   let g = frame.grade;
+  // Moonlit grading (washed-out colors, a blue cast) is for things lit only by the moon; what a
+  // lamp or a fire lights is bright enough to keep its color, as eyes see it.
+  let lit = max(frame.extra.y, smoothstep(0.12, 0.55, max(raw.r, max(raw.g, raw.b))));
+  let day = 1.0 - 0.55 * (1.0 - frame.extra.y);
+  let saturation = mix(g.x, g.x / day, lit * 0.7);
   let luma = dot(c, vec3f(0.2126, 0.7152, 0.0722));
-  c = mix(vec3f(luma), c, g.x);
+  c = mix(vec3f(luma), c, saturation);
   c = (c - 0.5) * g.y + 0.5;
   c += vec3f(g.z, g.z * 0.3, -g.z) * 0.06;
-  return c * mix(vec3f(0.6, 0.78, 1.3), vec3f(1.0), frame.extra.y); // moonlight
+  return c * mix(vec3f(0.6, 0.78, 1.3), vec3f(1.0), lit); // moonlight
 }
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {

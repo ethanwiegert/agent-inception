@@ -18,7 +18,7 @@ export const F = {
   grassCenter: 84, // center x, center z, world size x, world size z
   wind: 88, // dir x, dir z, strength, -
   grade: 92, // saturation, contrast, warmth, vignette
-  extra: 96, // star visibility, 1 - moonlit grading, sea level, -
+  extra: 96, // star visibility, 1 - moonlit grading, sea level, 1 if anything casts lamplight
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
   weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, -
@@ -120,10 +120,40 @@ fn skyColor(dir: vec3f) -> vec3f {
 }
 `;
 
-/** Lighting helpers for shaders that receive shadows (group 0 bindings 1 and 2). */
+/**
+ * Lighting helpers for shaders that receive shadows and lamplight (group 0 bindings 1-4): the
+ * shadow map, its comparison sampler, and the light field (sim/light.ts) as a 3D texture over
+ * every cell, rgb stored as square roots, alpha the share of fire (it flickers).
+ */
 export const lightingWgsl = commonWgsl + /* wgsl */ `
 @group(0) @binding(1) var shadowMap: texture_depth_2d;
 @group(0) @binding(2) var shadowSampler: sampler_comparison;
+@group(0) @binding(3) var lightField: texture_3d<f32>;
+@group(0) @binding(4) var lightSampler: sampler;
+
+/** How bright the field's full light is, in the scene's HDR units. */
+const LAMP_INTENSITY = 2.2;
+/** How bright glowing Materials look in themselves. */
+const EMISSIVE = 1.2;
+
+/**
+ * Light that shines by itself (glowing Materials, fire) as the scene sees it: eyes adjust to the
+ * dark (the night exposure), but a lamp shouldn't blaze white for it.
+ */
+fn selfLit(c: vec3f) -> vec3f {
+  return c / mix(1.0, frame.skyZenith.w, 0.7);
+}
+
+/** Lamplight reaching a surface at world with normal n: the field in the open cell in front of it. */
+fn lampLight(world: vec3f, n: vec3f) -> vec3f {
+  if (frame.extra.w <= 0.0) { return vec3f(0.0); }
+  let size = vec3f(textureDimensions(lightField));
+  let s = textureSampleLevel(lightField, lightSampler, (world + n * 0.45) / size, 0.0);
+  let t = frame.cameraPos.w;
+  let flicker = 1.0 + s.a * ((valueNoise(world.xz * 0.9 + vec2f(t * 6.0, t * 2.3)) - 0.5) * 0.7);
+  // Eyes open up in the dark, but a lamp's pool of light shouldn't look like noon.
+  return s.rgb * s.rgb * LAMP_INTENSITY * flicker / mix(1.0, frame.skyZenith.w, 0.6);
+}
 
 const POISSON = array<vec2f, 12>(
   vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696, 0.457), vec2f(-0.203, 0.621),
@@ -179,7 +209,7 @@ fn shadeWith(albedo: vec3f, n: vec3f, light: f32, ao: f32, wrap: f32) -> vec3f {
 }
 
 fn shade(albedo: vec3f, n: vec3f, world: vec3f, ao: f32, wrap: f32) -> vec3f {
-  return shadeWith(albedo, n, keyLight(world, n), ao, wrap);
+  return shadeWith(albedo, n, keyLight(world, n), ao, wrap) + albedo * lampLight(world, n) * ao;
 }
 
 /** Aerial perspective: distant things fade toward the sky color in their direction. */
