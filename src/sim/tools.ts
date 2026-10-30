@@ -2,11 +2,13 @@ import { SPECIES } from "./animals.ts";
 import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
 import {
   angleDiff,
+  areaArgs,
   type Args,
   clock,
   give,
   type Handler,
   inventoryText,
+  MAX_AREA,
   num,
   reach,
   solidProp,
@@ -46,7 +48,6 @@ export interface ToolDef {
 
 /** A body Design fits in this box (x, height, z), in blocks. */
 export const BODY_SIZE = [1.2, 2.4, 1.2] as const;
-const MAX_AREA = 16;
 const CAST_RANGE = 4;
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -286,8 +287,11 @@ const HANDLERS: Record<string, Handler> = {
   ...BODY_HANDLERS,
   ...JOINT_HANDLERS,
   ...FIRE_HANDLERS,
-  look: (sim, agent, args) =>
-    describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
+  look(sim, agent, args) {
+    const want = Number(args.radius ?? 6) | 0, r = Math.min(12, Math.max(3, want));
+    const text = describe(sim, agent, r);
+    return r === want ? text : `(radius is 3-12: mapping ${r}.)\n${text}`;
+  },
 
   walk_to(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
@@ -498,12 +502,7 @@ function eachTile(
   ticks: number,
   action: TileAction,
 ): Job {
-  const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-  const width = Math.max(1, num(args.width ?? 1, "width"));
-  const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width * depth > MAX_AREA) {
-    throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
-  }
+  const { x0, z0, width, depth } = areaArgs(args);
   return (function* () {
     let done = 0;
     const skipped: string[] = [];
@@ -704,7 +703,15 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       objMarks.set(o.design, m = { mark, name, how: "" });
     }
     const key = z * w.sizeX + x;
-    const how = w.objSolid[key] ? "in the way" : w.objLift[key] ? "stand on" : "walk under";
+    // Not in the way and not lifting anyone: flat on the ground (a plate), or high overhead.
+    const flat = sim.objects.topAt(x, z) < w.heightAt(x, z) + 1.5;
+    const how = w.objSolid[key]
+      ? "in the way"
+      : w.objLift[key]
+      ? "stand on"
+      : flat
+      ? "walk over"
+      : "walk under";
     if (!m.how.includes(how)) m.how = m.how ? `${m.how}/${how}` : how;
     return m.mark;
   };
@@ -802,6 +809,35 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       : []),
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
+  // Ground worth digging (the map draws sand, gravel and clay alike) and water: the nearest of each.
+  const beyond: string[] = [];
+  const want = new Map<number, string>([
+    [Block.Sand, "sand"],
+    [Block.Clay, "clay"],
+    [Block.Gravel, "gravel"],
+    [Block.Stone, "stone"],
+  ]);
+  for (let d = 1; d <= 40 && (want.size || !beyond.some((b) => b.startsWith("water"))); d++) {
+    for (let i = -d; i <= d; i++) {
+      for (
+        const [x, z] of [[ax + i, az - d], [ax + i, az + d], [ax - d, az + i], [ax + d, az + i]]
+      ) {
+        const h = w.heightAt(x, z);
+        if (h < 0) continue;
+        if (w.waterTop[z * w.sizeX + x] >= 0) {
+          if (!beyond.some((b) => b.startsWith("water"))) {
+            beyond.push(`water at x=${x} z=${z} (${d} tile${d === 1 ? "" : "s"})`);
+          }
+          continue;
+        }
+        const name = want.get(w.get(x, h, z));
+        if (!name) continue;
+        want.delete(w.get(x, h, z));
+        beyond.push(`${name} at x=${x} z=${z} (${d} tile${d === 1 ? "" : "s"})`);
+      }
+    }
+  }
+  if (beyond.length) lines.push("", `Nearest within 40 tiles: ${beyond.join(", ")}.`);
   if (ripe || growing) {
     const soon = growing ? `; next ripens in ~${gameDuration(soonest)}` : "";
     lines.push("", `Crops in view: ${ripe} ripe, ${growing} growing${soon}.`);
@@ -878,7 +914,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   if (fires.length) {
     lines.push(
       "",
-      "Fire! Burning near you (^ on the map):",
+      `Fire! Burning within ${Math.round(r * 1.5)} tiles (^ marks it on the map):`,
       ...fires,
       "  (Fire spreads to touching things that burn; douse x z puts it out. Paths go round it.)",
     );

@@ -1,6 +1,6 @@
 import { type Animal, SPECIES } from "./animals.ts";
 import type { DesignContent, Entry, MaterialContent } from "./catalog.ts";
-import { give, type Handler, inventoryText, num, reach, work } from "./jobs.ts";
+import { areaArgs, give, type Handler, inventoryText, MAX_AREA, num, reach, work } from "./jobs.ts";
 import { PART_TICKS, partCost, type WorldObject } from "./objects.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -12,7 +12,6 @@ import type { ToolDef } from "./tools.ts";
  * Catalog data: made_from and drops Relations, each following replaced_by.
  */
 
-const MAX_AREA = 16;
 /** Batches one craft call may run (about a second each). */
 const MAX_TIMES = 16;
 const CRAFT_TICKS = TICK_HZ;
@@ -101,12 +100,7 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
   },
 
   interact(sim, agent, args) {
-    const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-    const width = Math.max(1, num(args.width ?? 1, "width"));
-    const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-    if (width * depth > MAX_AREA) {
-      throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
-    }
+    const { x0, z0, width, depth } = areaArgs(args);
     const target = args.target === undefined
       ? null
       : String(args.target).trim().toLowerCase().replace(/_/g, " ");

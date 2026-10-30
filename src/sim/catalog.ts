@@ -771,10 +771,18 @@ function pieceName(v: unknown, where: string): string {
 /** A signal channel's name: 1-24 letters, digits, spaces, ' _ -, any case ("north gate"). */
 export function channelName(v: unknown, where: string): string {
   const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, " ") : "";
-  if (!s || s.length > 24 || !PIECE_RE.test(s)) {
+  const why = !s
+    ? "it's empty"
+    : s.length > 24
+    ? `it's ${s.length} characters long`
+    : !PIECE_RE.test(s)
+    ? "it has characters other than letters, digits, spaces, ' _ -, or doesn't start with a " +
+      "letter or digit"
+    : "";
+  if (why) {
     throw new Error(
-      `${where} names a signal channel: 1-24 letters, digits, spaces, ' _ - ("gate", ` +
-        '"street lamps").',
+      `${where} names a signal channel, 1-24 letters, digits, spaces, ' _ - ("gate", "street ` +
+        `lamps"), but ${why}.`,
     );
   }
   return s;

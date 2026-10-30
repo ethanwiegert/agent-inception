@@ -440,3 +440,25 @@ Deno.test("a world saved before M11 gains its Parts, examples, Rules and recipe 
   assert(sim.catalog.byName("lantern glass made_from sand"), "the recipe, matched by name");
   assert(sim.blocks.byName("lantern glass")?.glows, "lantern glass glows as a block");
 });
+
+Deno.test("playtest 0008: whole tiles, real areas, costs, nearest ground, and plain words", () => {
+  const { sim, fern, x, z, g } = site();
+  err(run(sim, "a", "ignite", { x: x + 1.5, z }), "whole number");
+  err(run(sim, "a", "douse", { x, z, width: 0 }), "1 or more");
+  err(run(sim, "a", "till", { x, z, depth: -3 }), "1 or more");
+  const post = ok(run(sim, "a", "catalog_get", { entry: "lantern post" }));
+  assert(post.includes("To build it: 2 planks, 1 lantern glass."), post);
+  const seen = ok(run(sim, "a", "look", { radius: 40 }));
+  assert(seen.startsWith("(radius is 3-12: mapping 12.)"), seen.split("\n")[0]);
+  assert(/Nearest within 40 tiles: .*(sand|stone|water) at x=/.test(seen), seen);
+  // A flat plate is walked over, not under.
+  spawn(sim, byName(sim, "pressure plate"), [x + 2, g, z + 2]);
+  steps(sim, 5);
+  fern.x = x + 0.5, fern.z = z + 0.5, fern.y = g;
+  assert(ok(run(sim, "a", "look")).includes("pressure plate (walk over)"));
+  // Relighting what burns says it's already burning.
+  sim.setBlock(x + 4, g, z + 1, Block.Planks);
+  ok(run(sim, "a", "ignite", { x: x + 4, z: z + 1 }));
+  err(run(sim, "a", "ignite", { x: x + 4, z: z + 1 }), "is already burning at");
+  err(run(sim, "a", "use", { x: x + 2, z: z + 2, channel: "🔥" }), "characters other than");
+});

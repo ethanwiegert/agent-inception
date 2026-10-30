@@ -1,5 +1,5 @@
 import { FIRE_LIMITS, type Target } from "./fire.ts";
-import { type Handler, num, reach, work } from "./jobs.ts";
+import { areaArgs, type Handler, MAX_AREA, num, reach, work } from "./jobs.ts";
 import { Anim, type Sim } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
 
@@ -8,7 +8,6 @@ import type { ToolDef } from "./tools.ts";
  * item (like `interact`). What burns, how fire spreads and its caps are in fire.ts.
  */
 
-const MAX_AREA = 16;
 const int = (description: string) => ({ type: "integer", description });
 
 export const FIRE_TOOL_DEFS: ToolDef[] = [
@@ -36,7 +35,8 @@ export const FIRE_TOOL_DEFS: ToolDef[] = [
     name: "douse",
     description: "Put out fires over an area (width × depth tiles, at most 16): you walk to each " +
       "burning thing and beat it out, about a second each. Whatever had burnt is gone; what " +
-      "was still burning stays as it is.",
+      "was still burning stays as it is. Tame flames (torches, campfires) aren't wild fire: " +
+      "use puts those out.",
     inputSchema: {
       type: "object",
       properties: {
@@ -67,7 +67,7 @@ export function fireText(sim: Sim, x: number, z: number, r: number): string[] {
     const left = Math.max(1, Math.round((b.until - sim.tick) / 20));
     return `  ${fire.nameOf(b)} at x=${Math.floor(cx)} z=${Math.floor(cz)}${
       b.kind === "block" ? ` y=${y}` : ""
-    } (${Math.round(d)} tiles; burnt through in ~${left} s)`;
+    } (${Math.round(d)} tile${Math.round(d) === 1 ? "" : "s"}; burnt through in ~${left} s)`;
   });
   if (near.length > 8) lines.push(`  …and ${near.length - 8} more`);
   return lines;
@@ -91,6 +91,9 @@ export const FIRE_HANDLERS: Record<string, Handler> = {
       return why || "there's nothing there to burn";
     };
     const first = pick();
+    if (typeof first === "string" && first.includes("already burning")) {
+      throw new Error(`${first[0].toUpperCase()}${first.slice(1)} at (${x}, ${z}).`);
+    }
     if (typeof first === "string") {
       throw new Error(
         `Nothing at (${x}, ${z}) will catch: ${first}. Logs, planks, thatch, trees, crops and ` +
@@ -117,12 +120,7 @@ export const FIRE_HANDLERS: Record<string, Handler> = {
   },
 
   douse(sim, agent, args) {
-    const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-    const width = Math.max(1, num(args.width ?? 1, "width"));
-    const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-    if (width * depth > MAX_AREA) {
-      throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
-    }
+    const { x0, z0, width, depth } = areaArgs(args);
     const fire = sim.wildfire;
     const inArea = () =>
       [...fire.burning].filter(([, b]) => {

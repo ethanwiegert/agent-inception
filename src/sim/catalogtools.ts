@@ -1,6 +1,7 @@
 import { Pattern } from "./blocks.ts";
 import {
   AUTHORED_KINDS,
+  type DesignContent,
   ENGINE_RELATIONS,
   type Entry,
   KINDS,
@@ -11,6 +12,7 @@ import {
   ZONES,
 } from "./catalog.ts";
 import { type Args, clock, type Handler } from "./jobs.ts";
+import { costText, partCost } from "./objects.ts";
 import { RULE_EVENTS, RULE_LIMITS, type RuleContent } from "./rules.ts";
 import { type Agent, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -40,8 +42,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
         author: { type: "string", description: 'A villager\'s name, or "nature".' },
         property: {
           type: "string",
-          description: 'A content field test, like "burns", "density>2", "pattern=planks" or ' +
-            '"type=made_from". Operators: = != < <= > >=.',
+          description: 'A content field test, like "burns", "density>2", "pattern=planks", or ' +
+            '"type=made_from" with kind "relation" for recipes. Operators: = != < <= > >=.',
         },
         related_to: ref("Only entries connected to this one by a Relation (and the Relations)."),
         include_retired: { type: "boolean" },
@@ -96,7 +98,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "Devices: a lamp part shines in its Material's color (8 blocks; walls stop it) while " +
       "it's on; a flame part is a tame fire (drawn as fire, warm light, never spreads); a " +
       "lever is flipped by use; a plate is pressed while someone or something stands on it " +
-      '(keep it flat, ≤0.05 tall, or anchored). "channel": "gate" on a lever or plate sends ' +
+      "(make it flat, ≤0.05 tall, or anchored, so people walk onto it rather than around it). " +
+      '"channel": "gate" on a lever or plate sends ' +
       "on that channel; on a lamp, flame, motor, or hinge or slider with limits, it follows " +
       "every lever and plate on it within 16 tiles (on: shine, run, open to the far limit; " +
       "off: dark, stop, back as built). use with channel retunes a built one. See the lantern " +
@@ -537,6 +540,20 @@ function get(sim: Sim, e: Entry): string {
     ? relationText(sim, e)
     : JSON.stringify(e.content, (k, v) => (k === "if" && v === null ? undefined : v));
   lines.push(`Content: ${content}`);
+  if (e.kind === "design" && !(e.content as DesignContent).habitat) {
+    // What build takes: each block, and each part's volume in its Material (at least 1).
+    const d = e.content as DesignContent, cost = new Map<string, number>();
+    for (const layer of d.blocks?.layers ?? []) {
+      for (const row of layer) {
+        for (const ch of row) {
+          const m = d.blocks!.palette[ch];
+          if (m) cost.set(m, (cost.get(m) ?? 0) + 1);
+        }
+      }
+    }
+    for (const [m, n] of partCost(d)) cost.set(m, (cost.get(m) ?? 0) + n);
+    lines.push(`To build it: ${costText(cost)}.`);
+  }
   const forks = c.forksOf(e.id);
   if (forks.length) {
     lines.push(
@@ -571,7 +588,7 @@ function get(sim: Sim, e: Entry): string {
       ? `every ${rule.when.every} game minutes`
       : `daily at ${rule.when.daily}:00`;
     lines.push(
-      `Runs ${trigger}. Fired ${s?.fired ?? 0} times, for anyone` +
+      `Runs ${trigger}. Fired ${s?.fired ?? 0} time${s?.fired === 1 ? "" : "s"}, for anyone` +
         (s?.dropped ? `, ${s.dropped} dropped by the limits` : "") +
         (s?.skipped ? `; last skipped effect: ${s.skipped}` : "") + ".",
     );
