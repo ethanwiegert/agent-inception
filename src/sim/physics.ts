@@ -1,4 +1,12 @@
-import type { Catalog, DesignContent, MaterialContent, Vec3 } from "./catalog.ts";
+import {
+  type Catalog,
+  type DesignContent,
+  type JointKind,
+  type MaterialContent,
+  rigOf,
+  shapeOf,
+  type Vec3,
+} from "./catalog.ts";
 import { slopeDrop, solid, type World } from "./world.ts";
 
 /**
@@ -12,6 +20,12 @@ import { slopeDrop, solid, type World } from "./world.ts";
  * contact pushing it out of the nearest face. True spheres are tested exactly, so balls roll
  * smoothly. Contacts are solved with sequential impulses (friction, a little bounce) a few times
  * per tick. Everything runs on the fixed tick in a fixed order, so it is deterministic.
+ *
+ * Joints (physics phase 3): a Design's parts may split into pieces, each its own body, held
+ * together by hinge, axle, slider and motor parts. Each joint is a handful of constraint rows
+ * solved with the contacts: the pin stays together, the axis stays lined up, limits stop it, and
+ * motors and used hinges drive it. Pieces of one Object never collide with each other, and sleep
+ * and wake together.
  */
 
 export const GRAVITY = 9.8;
@@ -27,6 +41,8 @@ const GROUND_FRICTION = 1.1;
 /** Penetration left alone, and how fast the rest is corrected. */
 const SLOP = 0.01;
 const BAUMGARTE = 0.3;
+/** Joints pull back together a little harder than contacts push apart. */
+const JOINT_BAUMGARTE = 0.4;
 const MAX_CORRECTION = 2;
 const RESTITUTION = 0.2;
 /** Slower impacts than this don't bounce at all. */
@@ -53,6 +69,24 @@ const PROP_HALF = 0.3;
 const PROP_HEIGHT = 2.5;
 /** A body hitting the ground faster than this has landed (Rules hear it). */
 export const LAND_SPEED = 2.5;
+
+/** Most a motor turns with (tonne · blocks² / s²): sails, mills and small carts, not boulders. */
+export const MOTOR_TORQUE = 12;
+/** A used hinge or slider swings to its limit this fast at most (radians, or blocks, per second). */
+const SERVO_SPEED = 1.6;
+/** How hard it drives there and holds (torque, or force for a slider), so a door stays shut. */
+export const SERVO_TORQUE = 12;
+/** How quickly a used hinge closes in on where it's going (per second). */
+const SERVO_GAIN = 5;
+/** Friction in a free hinge, so a swing slows down. */
+const JOINT_FRICTION = 0.02;
+/**
+ * Rolling resistance in an axle (or a motor that's off): a push rolls a cart easily, but a parked
+ * one stays put instead of creeping on its wheels.
+ */
+const AXLE_FRICTION = 0.15;
+/** A limit starts pushing back this close to it (radians or blocks). */
+const LIMIT_MARGIN = 0.05;
 
 export const Kind = { Box: 0, Ellipsoid: 1, Cylinder: 2, Cone: 3 } as const;
 const KINDS: Record<string, number> = {
@@ -121,6 +155,56 @@ export interface BodyState {
   /** Ticks it has been still (it sleeps at SLEEP_TICKS), and ticks since it touched anything. */
   still?: number;
   air?: number;
+  /** A jointed Object's other pieces (its root piece is the body itself), in its Design's order. */
+  pieces?: PieceState[];
+  /** Its joints' state, in its Design's order. */
+  joints?: JointState[];
+}
+
+/** Where one piece of a jointed Object is: its Design origin and turn as the piece carries them. */
+export interface PieceState {
+  pos: Vec3;
+  rot: Quat;
+  vel: Vec3;
+  spin: Vec3;
+}
+
+export interface JointState {
+  /** A motor turns while on. */
+  on?: boolean;
+  /** Where a hinge (radians) or slider (blocks) with limits is driven to and held; 0 as built. */
+  target?: number;
+  /** Where it is now: radians a hinge has swung, blocks a slider has slid. */
+  at?: number;
+}
+
+/** A joint as the engine sees it, in Design space. */
+export interface JointDef {
+  kind: JointKind;
+  /** The pieces it joins; the angle is b's turn relative to a. */
+  a: number;
+  b: number;
+  /** The pin, and the axis it turns about or slides along. */
+  anchor: Vec3;
+  axis: Vec3;
+  /** Limits (radians, or blocks for sliders) if it has any. */
+  limits: [number, number] | null;
+  /** Motors: radians per second while on. */
+  speed: number;
+  /** The piece it moves (b's name) and its part's index in the Design. */
+  piece: string;
+  part: number;
+}
+
+/** Every piece's shape and the joints between them. */
+export interface Assembly {
+  shapes: Shape[];
+  joints: JointDef[];
+  pieces: string[];
+  /** Tonnes, all pieces together. */
+  mass: number;
+  /** Some piece can move (an unanchored root, or anything on a joint). */
+  movable: boolean;
 }
 
 /** Something that moves bodies by walking into them: a villager or an animal (a capsule). */
@@ -145,6 +229,8 @@ export interface Mover {
 /** A body that hit a mover hard: how fast it came at them and with how much momentum. */
 export interface Hit {
   body: BodyState;
+  /** Which of its pieces hit (0: the root). */
+  piece: number;
   mover: number;
   speed: number;
   momentum: number;
@@ -239,12 +325,15 @@ function volume(kind: number, hx: number, hy: number, hz: number): number {
  * The rigid body a Design makes: mass, center of mass, inertia and surface points from its parts.
  * Designs with blocks (buildings) and anchored ones are fixed.
  */
-export function compileShape(catalog: Catalog, d: DesignContent): Shape {
+export function compileShape(catalog: Catalog, d: DesignContent, piece = -1): Shape {
   const parts: { kind: number; at: Vec3; h: Vec3; R: Float64Array; m: number; cm: Vec3 }[] = [];
   let mass = 0;
   const com: Vec3 = [0, 0, 0];
-  for (const p of d.parts) {
-    const kind = KINDS[p.part] ?? Kind.Box;
+  const pieceOf = rigOf(d).pieceOf;
+  for (let i = 0; i < d.parts.length; i++) {
+    const p = d.parts[i];
+    if (piece >= 0 && pieceOf[i] !== piece) continue;
+    const kind = KINDS[shapeOf(p.part)] ?? Kind.Box;
     const h: Vec3 = [p.size[0] / 2, p.size[1] / 2, p.size[2] / 2];
     const mat = catalog.byName(p.material)?.content as MaterialContent | undefined;
     const m = Math.max(1e-4, volume(kind, h[0], h[1], h[2]) * (mat?.density ?? 1));
@@ -320,8 +409,67 @@ export function compileShape(catalog: Catalog, d: DesignContent): Shape {
     points,
     pointPart,
     radius,
-    fixed: !!d.blocks || !!d.anchored,
+    fixed: piece <= 0 && (!!d.blocks || !!d.anchored),
   };
+}
+
+/** A Design's pieces as bodies and its joints between them. */
+export function compileAssembly(catalog: Catalog, d: DesignContent): Assembly {
+  const rig = rigOf(d);
+  const shapes = rig.pieces.map((_, k) => compileShape(catalog, d, k));
+  const joints = rig.joints.map((j): JointDef => {
+    const p = d.parts[j.part], R = partAxes(p.turn, p.tilt);
+    const rad = j.kind === "hinge" ? DEG : 1;
+    return {
+      kind: j.kind,
+      a: j.a,
+      b: j.b,
+      anchor: [...p.at],
+      axis: [R[1], R[4], R[7]],
+      limits: p.limits ? [p.limits[0] * rad, p.limits[1] * rad] : null,
+      speed: (p.speed ?? 0) * DEG,
+      piece: rig.pieces[j.b],
+      part: j.part,
+    };
+  });
+  const mass = rig.pieces.length > 1
+    ? shapes.reduce((m, s) => m + (s.parts.length ? s.mass : 0), 0)
+    : shapes[0].mass;
+  return {
+    shapes,
+    joints,
+    pieces: rig.pieces,
+    mass,
+    movable: shapes.some((s) => !s.fixed),
+  };
+}
+
+/** Give a jointed Object its pieces' and joints' state if it lacks them: all as built. */
+export function ensurePieces(o: BodyState, asm: Assembly) {
+  const n = asm.shapes.length - 1;
+  if ((o.pieces?.length ?? 0) !== n) {
+    o.pieces = Array.from({ length: n }, (_, i) => o.pieces?.[i] ?? asBuilt(o));
+    if (!n) delete o.pieces;
+  }
+  if ((o.joints?.length ?? 0) !== asm.joints.length) {
+    o.joints = asm.joints.map((_, i) => o.joints?.[i] ?? {});
+    if (!asm.joints.length) delete o.joints;
+  }
+}
+
+/** A piece where the root has it as built. */
+const asBuilt = (o: BodyState): PieceState => ({
+  pos: [...o.pos],
+  rot: [...o.rot],
+  vel: [...o.vel],
+  spin: [...o.spin],
+});
+
+/** Put every piece back where the root has it as built (carried things fold up as made). */
+export function foldPieces(o: BodyState) {
+  for (const p of o.pieces ?? []) {
+    p.pos = [...o.pos], p.rot = [...o.rot], p.vel = [...o.vel], p.spin = [...o.spin];
+  }
 }
 
 /** At most MAX_POINTS: every corner and rim point, and an even share of the rest. */
@@ -400,10 +548,22 @@ function surfacePoints(kind: number, hx: number, hy: number, hz: number): [
   return out;
 }
 
-/** The world boxes ([x0, x1, y0, y1, z0, z1]) of a Design's parts with its origin at pos, turned rot. */
-export function poseBoxes(d: DesignContent, pos: Vec3, rot: Quat): number[][] {
-  const R = quatMatrix(rot, new Float64Array(9)), M = new Float64Array(9);
-  return d.parts.map((p) => {
+/**
+ * The world boxes ([x0, x1, y0, y1, z0, z1, piece]) of a Design's parts with its origin at pos,
+ * turned rot, each part where its piece has it.
+ */
+export function poseBoxes(
+  d: DesignContent,
+  pos: Vec3,
+  rot: Quat,
+  pieces?: PieceState[],
+): number[][] {
+  const Rs = [quatMatrix(rot, new Float64Array(9))], M = new Float64Array(9);
+  const poses = [pos];
+  for (const p of pieces ?? []) Rs.push(quatMatrix(p.rot, new Float64Array(9))), poses.push(p.pos);
+  const pieceOf = rigOf(d).pieceOf;
+  return d.parts.map((p, i) => {
+    const k = Math.min(pieceOf[i], Rs.length - 1), R = Rs[k], pos = poses[k];
     mul3(R, partAxes(p.turn, p.tilt), M);
     const hx = p.size[0] / 2, hy = p.size[1] / 2, hz = p.size[2] / 2;
     const c = [0, 1, 2].map((k) =>
@@ -412,15 +572,22 @@ export function poseBoxes(d: DesignContent, pos: Vec3, rot: Quat): number[][] {
     const e = [0, 1, 2].map((k) =>
       Math.abs(M[k * 3]) * hx + Math.abs(M[k * 3 + 1]) * hy + Math.abs(M[k * 3 + 2]) * hz
     );
-    return [c[0] - e[0], c[0] + e[0], c[1] - e[1], c[1] + e[1], c[2] - e[2], c[2] + e[2]];
+    return [c[0] - e[0], c[0] + e[0], c[1] - e[1], c[1] + e[1], c[2] - e[2], c[2] + e[2], k];
   });
 }
 
 // ---------------------------------------------------------------- runtime
 
-/** A body as the solver sees it this tick. */
+/** Where a body's pose lives: the Object itself for its root piece, else one of its pieces. */
+type PoseState = Pick<BodyState, "pos" | "rot" | "vel" | "spin">;
+
+/** A body (one piece of an Object) as the solver sees it this tick. */
 class Rt {
   shape!: Shape;
+  /** The Object's pieces' bodies, shared by all of them; the root first. */
+  group: Rt[] = [];
+  /** Where its pose is kept. */
+  s: PoseState;
   design = -1;
   version = -1;
   invMass = 0;
@@ -441,7 +608,11 @@ class Rt {
   impact = 0;
   /** Its place in the solver's arrays this step. */
   index = 0;
-  constructor(public o: BodyState) {}
+  /** The last step its group was settled in. */
+  stamp = 0;
+  constructor(public o: BodyState, readonly piece: number) {
+    this.s = o;
+  }
 }
 
 const tmp = new Float64Array(9), tmp2 = new Float64Array(9);
@@ -466,6 +637,32 @@ class Contacts {
     this.mover = m;
   }
 }
+/**
+ * Joint rows, struct-of-arrays: each is one direction a joint holds or drives, between bodies a
+ * and b (index -1: static). Relative velocity is JL·(va − vb) + JA·wa + JB·wb.
+ */
+class Rows {
+  n = 0;
+  cap = 0;
+  f = new Float64Array(0);
+  ia = new Int32Array(0);
+  ib = new Int32Array(0);
+  static readonly F = 20;
+  ensure(n: number) {
+    if (n <= this.cap) return;
+    this.cap = Math.max(n, this.cap * 2, 64);
+    const f = new Float64Array(this.cap * Rows.F);
+    f.set(this.f);
+    this.f = f;
+    const a = new Int32Array(this.cap), b = new Int32Array(this.cap);
+    a.set(this.ia), b.set(this.ib);
+    this.ia = a, this.ib = b;
+  }
+}
+// Field offsets in Rows.f: linear, a's angular, b's angular, their I⁻¹ images, effective mass,
+// target velocity, impulse bounds and the impulse so far.
+const JL = 0, JA = 3, JB = 6, MA = 9, MB = 12, JM = 15, JBIAS = 16, JLO = 17, JHI = 18, JACC = 19;
+
 // Field offsets in Contacts.f: the point, normal, depth, a mover's velocity, then per direction
 // (normal, tangent, tangent) a row of d, rA × d, I⁻¹(rA × d), rB × d, I⁻¹(rB × d), mass, impulse.
 const PX = 0,
@@ -485,13 +682,22 @@ const dist2 = (f: Float64Array, a: number, b: number) =>
 /** Candidate contacts for one pair before they're reduced to a few per direction. */
 const cand = { n: 0, f: new Float64Array(7 * 512) };
 
+/** A joint's pull back toward lined up: Baumgarte, capped. */
+const fix = (k: number, e: number) => Math.max(-MAX_CORRECTION, Math.min(MAX_CORRECTION, -k * e));
+/** A limit's row target: past it, push back; short of it, come no closer than reaching it. */
+const stop = (gap: number, h: number) => gap < 0 ? -gap * JOINT_BAUMGARTE / h : -gap / h;
+
 export class Physics {
   private rts = new Map<number, Rt>();
-  private shapes = new Map<number, Shape>();
+  private assemblies = new Map<number, Assembly>();
   private shapesVersion = -1;
   private contacts = new Contacts();
+  private rows = new Rows();
   private awake: Rt[] = [];
   private all: Rt[] = [];
+  /** Objects with joints in play this tick, by their root body. */
+  private jointed: Rt[] = [];
+  private stampNow = 0;
   readonly hits: Hit[] = [];
   /** Bodies that landed hard this tick, and how fast. */
   readonly landings: { body: BodyState; speed: number }[] = [];
@@ -502,21 +708,31 @@ export class Physics {
 
   constructor(readonly world: World, public catalog: Catalog) {}
 
-  /** The shape a Design makes (cached per Catalog version). */
-  shape(design: number): Shape | null {
+  /** A Design's pieces and joints (cached per Catalog version). */
+  assembly(design: number): Assembly | null {
     if (this.shapesVersion !== this.catalog.version) {
-      this.shapes.clear(), this.shapesVersion = this.catalog.version;
+      this.assemblies.clear(), this.shapesVersion = this.catalog.version;
     }
-    let s = this.shapes.get(design);
-    if (s) return s;
+    let a = this.assemblies.get(design);
+    if (a) return a;
     const e = this.catalog.get(design);
     if (e?.kind !== "design") return null;
-    s = compileShape(this.catalog, e.content as DesignContent);
-    this.shapes.set(design, s);
-    return s;
+    a = compileAssembly(this.catalog, e.content as DesignContent);
+    this.assemblies.set(design, a);
+    return a;
   }
 
-  /** Where a body's center of mass is. */
+  /** The shape of a Design's root piece (the whole thing, unless it has joints). */
+  shape(design: number): Shape | null {
+    return this.assembly(design)?.shapes[0] ?? null;
+  }
+
+  /** Tonnes, all pieces together. */
+  mass(design: number): number {
+    return this.assembly(design)?.mass ?? 0;
+  }
+
+  /** Where a body's center of mass is (its root piece's). */
   center(o: BodyState): Vec3 {
     const s = this.shape(o.design);
     const R = quatMatrix(o.rot, tmp);
@@ -526,30 +742,38 @@ export class Physics {
     ) as Vec3;
   }
 
-  /** Lowest point of a body turned `rot`, relative to its center of mass. */
+  /** Lowest point of a body turned `rot` as built, relative to its root's center of mass. */
   lowest(design: number, rot: ArrayLike<number>): number {
-    const s = this.shape(design);
-    if (!s) return 0;
-    const R = quatMatrix(rot, tmp2);
+    const a = this.assembly(design);
+    if (!a) return 0;
+    const R = quatMatrix(rot, tmp2), c0 = a.shapes[0].com;
     let low = 0;
-    const pts = s.points;
-    for (let i = 0; i < pts.length; i += 3) {
-      low = Math.min(low, R[3] * pts[i] + R[4] * pts[i + 1] + R[5] * pts[i + 2]);
-    }
-    for (const p of s.parts) {
-      if (!p.r) continue;
-      low = Math.min(low, R[3] * p.c[0] + R[4] * p.c[1] + R[5] * p.c[2] - p.r);
+    for (const s of a.shapes) {
+      const ox = s.com[0] - c0[0], oy = s.com[1] - c0[1], oz = s.com[2] - c0[2];
+      const pts = s.points;
+      for (let i = 0; i < pts.length; i += 3) {
+        const x = ox + pts[i], y = oy + pts[i + 1], z = oz + pts[i + 2];
+        low = Math.min(low, R[3] * x + R[4] * y + R[5] * z);
+      }
+      for (const p of s.parts) {
+        if (!p.r) continue;
+        const x = ox + p.c[0], y = oy + p.c[1], z = oz + p.c[2];
+        low = Math.min(low, R[3] * x + R[4] * y + R[5] * z - p.r);
+      }
     }
     return low;
   }
 
+  /** Wake an Object: every piece that can move. */
   wake(o: BodyState) {
-    const s = this.shape(o.design);
-    if (!s || s.fixed || o.held) return;
+    const a = this.assembly(o.design);
+    if (!a?.movable || o.held) return;
     if (o.asleep) o.asleep = false;
-    const rt = this.rts.get(o.id);
     o.still = 0;
-    if (rt) rt.posed = false;
+    for (let k = 0; k < a.shapes.length; k++) {
+      const rt = this.rts.get(o.id * 16 + k);
+      if (rt) rt.posed = false;
+    }
   }
 
   /**
@@ -606,17 +830,24 @@ export class Physics {
 
   /** How far a body reaches from its center of mass along horizontal direction (dx, dz). */
   reach(o: BodyState, dx: number, dz: number): number {
-    const s = this.shape(o.design);
-    if (!s) return 0.5;
-    const R = quatMatrix(o.rot, tmp);
+    const a = this.assembly(o.design);
+    if (!a) return 0.5;
+    const c = this.center(o);
     let best = 0;
-    const pts = s.points;
-    const along = (x: number, y: number, z: number) =>
-      (R[0] * x + R[1] * y + R[2] * z) * dx + (R[6] * x + R[7] * y + R[8] * z) * dz;
-    for (let i = 0; i < pts.length; i += 3) {
-      best = Math.max(best, along(pts[i], pts[i + 1], pts[i + 2]));
-    }
-    for (const p of s.parts) if (p.r) best = Math.max(best, along(p.c[0], p.c[1], p.c[2]) + p.r);
+    a.shapes.forEach((s, k) => {
+      const at = k ? o.pieces?.[k - 1] ?? o : o;
+      const R = quatMatrix(at.rot, tmp), m = s.com;
+      // The piece's center of mass, from the root's.
+      const ox = at.pos[0] + R[0] * m[0] + R[1] * m[1] + R[2] * m[2] - c[0];
+      const oz = at.pos[2] + R[6] * m[0] + R[7] * m[1] + R[8] * m[2] - c[2];
+      const along = (x: number, y: number, z: number) =>
+        (ox + R[0] * x + R[1] * y + R[2] * z) * dx + (oz + R[6] * x + R[7] * y + R[8] * z) * dz;
+      const pts = s.points;
+      for (let i = 0; i < pts.length; i += 3) {
+        best = Math.max(best, along(pts[i], pts[i + 1], pts[i + 2]));
+      }
+      for (const p of s.parts) if (p.r) best = Math.max(best, along(p.c[0], p.c[1], p.c[2]) + p.r);
+    });
     return best;
   }
 
@@ -624,16 +855,25 @@ export class Physics {
   wakeNear(list: BodyState[], x: number, y: number, z: number, r: number) {
     for (const o of list) {
       if (!o.asleep) continue;
-      const s = this.shape(o.design);
-      if (!s) continue;
-      const c = this.center(o);
-      if (Math.hypot(c[0] - x, c[1] - y, c[2] - z) <= s.radius + r) this.wake(o);
+      const a = this.assembly(o.design);
+      if (!a?.movable) continue;
+      for (let k = 0; k < a.shapes.length; k++) {
+        const at = k ? o.pieces?.[k - 1] ?? o : o;
+        const s = a.shapes[k], R = quatMatrix(at.rot, tmp), m = s.com;
+        const cx = at.pos[0] + R[0] * m[0] + R[1] * m[1] + R[2] * m[2];
+        const cy = at.pos[1] + R[3] * m[0] + R[4] * m[1] + R[5] * m[2];
+        const cz = at.pos[2] + R[6] * m[0] + R[7] * m[1] + R[8] * m[2];
+        if (Math.hypot(cx - x, cy - y, cz - z) <= s.radius + r) {
+          this.wake(o);
+          break;
+        }
+      }
     }
   }
 
   /** Bodies that are gone (taken apart) drop their runtime state. */
   forget(id: number) {
-    this.rts.delete(id);
+    for (let k = 0; k < 16; k++) this.rts.delete(id * 16 + k);
   }
 
   /** One sim tick: every awake body, `SUBSTEPS` times. */
@@ -644,14 +884,31 @@ export class Physics {
     this.movers = movers;
     if (this.moverHit.length < movers.length) this.moverHit = new Float64Array(movers.length);
     this.moverHit.fill(0);
-    const awake = this.awake, all = this.all;
-    awake.length = 0, all.length = 0;
+    const awake = this.awake, all = this.all, jointed = this.jointed;
+    awake.length = 0, all.length = 0, jointed.length = 0;
     for (const o of list) {
-      const rt = this.sync(o);
-      if (!rt) continue;
       if (o.held) continue; // carried overhead: out of the world until put down
-      all.push(rt);
-      if (rt.dynamic) awake.push(rt);
+      const asm = this.assembly(o.design);
+      if (!asm) continue;
+      if (asm.shapes.length > 1 || asm.joints.length) ensurePieces(o, asm);
+      let group: Rt[] | null = null;
+      for (let k = 0; k < asm.shapes.length; k++) {
+        const rt = this.sync(o, k, asm.shapes[k]);
+        if (k === 0) group = rt.group;
+        else if (rt.group !== group) rt.group = group!;
+        group![k] = rt;
+        all.push(rt);
+        if (rt.dynamic) awake.push(rt);
+      }
+      group!.length = asm.shapes.length;
+      if (asm.joints.length) {
+        for (const rt of group!) {
+          if (rt.dynamic) {
+            jointed.push(group![0]);
+            break;
+          }
+        }
+      }
     }
     this.wakeByMovers();
     if (!awake.length) return;
@@ -659,7 +916,13 @@ export class Physics {
     all.sort((a, b) => a.p[0] - a.shape.radius - (b.p[0] - b.shape.radius));
     const h = dt / SUBSTEPS;
     for (let s = 0; s < SUBSTEPS; s++) this.substep(h);
-    for (const rt of awake) this.settle(rt, dt);
+    const stamp = ++this.stampNow;
+    for (const rt of awake) this.writeBack(rt);
+    for (const rt of awake) {
+      if (rt.group[0].stamp === stamp) continue;
+      rt.group[0].stamp = stamp;
+      this.settle(rt.group, dt);
+    }
     for (const o of list) delete o.force;
   }
 
@@ -675,18 +938,25 @@ export class Physics {
         if ((mv.x - p[0]) ** 2 + (mv.z - p[2]) ** 2 >= reach * reach) continue;
         if (p[1] - r >= mv.y + mv.top || p[1] + r <= mv.y) continue;
         this.wake(rt.o);
-        rt.dynamic = true, rt.invMass = rt.shape.invMass;
-        this.awake.push(rt);
+        let joined = false;
+        for (const g of rt.group) {
+          if (g.dynamic || g.shape.fixed) continue;
+          g.dynamic = true, g.invMass = g.shape.invMass;
+          this.awake.push(g);
+          joined = true;
+        }
+        const root = rt.group[0];
+        if (joined && rt.group.length > 1 && !this.jointed.includes(root)) this.jointed.push(root);
       }
     }
   }
 
-  /** The runtime body for `o`, its pose loaded from the saved state. */
-  private sync(o: BodyState): Rt | null {
-    const shape = this.shape(o.design);
-    if (!shape) return null;
-    let rt = this.rts.get(o.id);
-    if (!rt || rt.o !== o) this.rts.set(o.id, rt = new Rt(o));
+  /** The runtime body for piece `k` of `o`, its pose loaded from the saved state. */
+  private sync(o: BodyState, k: number, shape: Shape): Rt {
+    const key = o.id * 16 + k;
+    let rt = this.rts.get(key);
+    if (!rt || rt.o !== o) this.rts.set(key, rt = new Rt(o, k));
+    rt.s = k ? o.pieces![k - 1] : o;
     if (rt.shape !== shape) {
       rt.shape = shape, rt.posed = false;
       rt.pts = new Float64Array(shape.points.length);
@@ -696,13 +966,14 @@ export class Physics {
     rt.dynamic = !shape.fixed && !o.asleep && !o.held;
     rt.invMass = rt.dynamic ? shape.invMass : 0;
     if (rt.dynamic || !rt.posed) {
-      rt.q.set(o.rot);
+      const st = rt.s;
+      rt.q.set(st.rot);
       quatMatrix(rt.q, rt.R);
       const c = shape.com, R = rt.R;
-      for (let k = 0; k < 3; k++) {
-        rt.p[k] = o.pos[k] + R[k * 3] * c[0] + R[k * 3 + 1] * c[1] + R[k * 3 + 2] * c[2];
+      for (let i = 0; i < 3; i++) {
+        rt.p[i] = st.pos[i] + R[i * 3] * c[0] + R[i * 3 + 1] * c[1] + R[i * 3 + 2] * c[2];
       }
-      rt.v.set(o.vel), rt.w.set(o.spin);
+      rt.v.set(st.vel), rt.w.set(st.spin);
       if (!rt.dynamic) rt.v.fill(0), rt.w.fill(0);
       this.pose(rt);
     }
@@ -762,6 +1033,7 @@ export class Physics {
         const b = all[j];
         if (b.p[0] - b.shape.radius > hi) break;
         if (!a.dynamic && !b.dynamic) continue;
+        if (a.o === b.o) continue; // pieces of one Object pass through each other
         const r = ra + b.shape.radius;
         const dx = a.p[0] - b.p[0], dy = a.p[1] - b.p[1], dz = a.p[2] - b.p[2];
         if (dx * dx + dy * dy + dz * dz > r * r) continue;
@@ -779,7 +1051,7 @@ export class Physics {
   private forces(rt: Rt, h: number) {
     const v = rt.v, w = rt.w, s = rt.shape, world = this.world;
     v[1] -= GRAVITY * h;
-    const f = rt.o.force;
+    const f = rt.piece ? undefined : rt.o.force;
     if (f) {
       const I = rt.invIw, m = rt.invMass * h;
       v[0] += f[0] * m, v[1] += f[1] * m, v[2] += f[2] * m;
@@ -1524,6 +1796,247 @@ export class Physics {
       }
       if (c.mover[k] < 0) a.impact = Math.max(a.impact, -vn);
     }
+    this.prepareJoints(h);
+  }
+
+  // ---------------------------------------------------------------- joints
+
+  private prepareJoints(h: number) {
+    this.rows.n = 0;
+    for (const root of this.jointed) {
+      const o = root.o, asm = this.assembly(o.design)!, group = root.group;
+      for (let i = 0; i < asm.joints.length; i++) {
+        const j = asm.joints[i], A = group[j.a], B = group[j.b];
+        if (!A || !B || (!A.dynamic && !B.dynamic)) continue;
+        this.joint(A, B, j, o.joints![i], h);
+      }
+    }
+  }
+
+  /** The rows that hold one joint together and drive it this step. */
+  private joint(A: Rt, B: Rt, j: JointDef, st: JointState, h: number) {
+    const RA = A.R, RB = B.R, ca = A.shape.com, cb = B.shape.com, an = j.anchor, g = this.jg;
+    // Lever arms from each center of mass to the pin, as each piece has it.
+    const ax = an[0] - ca[0], ay = an[1] - ca[1], az = an[2] - ca[2];
+    const rax = g[0] = RA[0] * ax + RA[1] * ay + RA[2] * az;
+    const ray = g[1] = RA[3] * ax + RA[4] * ay + RA[5] * az;
+    const raz = g[2] = RA[6] * ax + RA[7] * ay + RA[8] * az;
+    const bx = an[0] - cb[0], by = an[1] - cb[1], bz = an[2] - cb[2];
+    const rbx = g[3] = RB[0] * bx + RB[1] * by + RB[2] * bz;
+    const rby = g[4] = RB[3] * bx + RB[4] * by + RB[5] * bz;
+    const rbz = g[5] = RB[6] * bx + RB[7] * by + RB[8] * bz;
+    // How far the pin has pulled apart (a's minus b's).
+    const ex = g[6] = A.p[0] + rax - B.p[0] - rbx;
+    const ey = g[7] = A.p[1] + ray - B.p[1] - rby;
+    const ez = g[8] = A.p[2] + raz - B.p[2] - rbz;
+    // The axis as a has it.
+    const d = j.axis;
+    const ux = g[9] = RA[0] * d[0] + RA[1] * d[1] + RA[2] * d[2];
+    const uy = g[10] = RA[3] * d[0] + RA[4] * d[1] + RA[5] * d[2];
+    const uz = g[11] = RA[6] * d[0] + RA[7] * d[1] + RA[8] * d[2];
+    // b's turn relative to a: qb · qa⁻¹ (both are as built at first).
+    const qa = A.q, qb = B.q;
+    const pw = qb[3], px = qb[0], py = qb[1], pz = qb[2];
+    const sx = -qa[0], sy = -qa[1], sz = -qa[2], sw = qa[3];
+    let qx = pw * sx + px * sw + py * sz - pz * sy;
+    let qy = pw * sy - px * sz + py * sw + pz * sx;
+    let qz = pw * sz + px * sy - py * sx + pz * sw;
+    let qw = pw * sw - px * sx - py * sy - pz * sz;
+    if (qw < 0) qx = -qx, qy = -qy, qz = -qz, qw = -qw;
+    // Two directions across the axis.
+    let t1x: number, t1y: number, t1z: number;
+    if (Math.abs(ux) < 0.57) t1x = 0, t1y = uz, t1z = -uy;
+    else t1x = -uz, t1y = 0, t1z = ux;
+    const l = Math.hypot(t1x, t1y, t1z);
+    t1x /= l, t1y /= l, t1z /= l;
+    const t2x = uy * t1z - uz * t1y, t2y = uz * t1x - ux * t1z, t2z = ux * t1y - uy * t1x;
+    const k = JOINT_BAUMGARTE / h, inf = Infinity, slide = j.kind === "slider";
+    let at: number;
+    if (slide) {
+      this.pointRow(A, B, k, t1x, t1y, t1z), this.pointRow(A, B, k, t2x, t2y, t2z);
+      // No turning at all: b's turn relative to a goes back to none.
+      this.turnRow(A, B, 1, 0, 0, -fix(k, 2 * qx), -inf, inf);
+      this.turnRow(A, B, 0, 1, 0, -fix(k, 2 * qy), -inf, inf);
+      this.turnRow(A, B, 0, 0, 1, -fix(k, 2 * qz), -inf, inf);
+      at = -(ux * ex + uy * ey + uz * ez);
+    } else {
+      this.pointRow(A, B, k, 1, 0, 0), this.pointRow(A, B, k, 0, 1, 0);
+      this.pointRow(A, B, k, 0, 0, 1);
+      // Keep b's axis on a's: b turns toward a about b × a.
+      const ubx = RB[0] * d[0] + RB[1] * d[1] + RB[2] * d[2];
+      const uby = RB[3] * d[0] + RB[4] * d[1] + RB[5] * d[2];
+      const ubz = RB[6] * d[0] + RB[7] * d[1] + RB[8] * d[2];
+      const cx = uby * uz - ubz * uy, cy = ubz * ux - ubx * uz, cz = ubx * uy - uby * ux;
+      this.turnRow(A, B, t1x, t1y, t1z, fix(k, t1x * cx + t1y * cy + t1z * cz), -inf, inf);
+      this.turnRow(A, B, t2x, t2y, t2z, fix(k, t2x * cx + t2y * cy + t2z * cz), -inf, inf);
+      at = 2 * Math.atan2(qx * ux + qy * uy + qz * uz, qw);
+      if (at > Math.PI) at -= 2 * Math.PI;
+    }
+    st.at = at;
+    const lim = j.limits;
+    if (lim) {
+      // Stops: past one, push back; near one, come no closer than reaching it this step.
+      if (at < lim[0] + LIMIT_MARGIN) this.alongRow(A, B, slide, 1, stop(at - lim[0], h), 0, inf);
+      if (at > lim[1] - LIMIT_MARGIN) this.alongRow(A, B, slide, -1, stop(lim[1] - at, h), 0, inf);
+      const to = Math.max(lim[0], Math.min(lim[1], st.target ?? 0));
+      const v = Math.max(-SERVO_SPEED, Math.min(SERVO_SPEED, SERVO_GAIN * (to - at)));
+      this.alongRow(A, B, slide, 1, v, -SERVO_TORQUE * h, SERVO_TORQUE * h);
+    } else if (j.kind === "motor" && st.on) {
+      this.alongRow(A, B, false, 1, j.speed, -MOTOR_TORQUE * h, MOTOR_TORQUE * h);
+    } else if (!slide) {
+      const f = (j.kind === "hinge" ? JOINT_FRICTION : AXLE_FRICTION) * h;
+      this.alongRow(A, B, false, 1, 0, -f, f);
+    }
+  }
+
+  /** The joint being prepared: lever arms, how far its pin pulled apart, and its axis. */
+  private jg = new Float64Array(12);
+
+  /** Keep the pin together along (dx, dy, dz). */
+  private pointRow(A: Rt, B: Rt, k: number, dx: number, dy: number, dz: number) {
+    const g = this.jg, rax = g[0], ray = g[1], raz = g[2], rbx = g[3], rby = g[4], rbz = g[5];
+    this.row(
+      A,
+      B,
+      dx,
+      dy,
+      dz,
+      ray * dz - raz * dy,
+      raz * dx - rax * dz,
+      rax * dy - ray * dx,
+      -(rby * dz - rbz * dy),
+      -(rbz * dx - rbx * dz),
+      -(rbx * dy - rby * dx),
+      fix(k, g[6] * dx + g[7] * dy + g[8] * dz),
+      -Infinity,
+      Infinity,
+    );
+  }
+
+  /** Relative spin (a's less b's) along (dx, dy, dz), driven to `bias`. */
+  private turnRow(
+    A: Rt,
+    B: Rt,
+    dx: number,
+    dy: number,
+    dz: number,
+    bias: number,
+    lo: number,
+    hi: number,
+  ) {
+    this.row(A, B, 0, 0, 0, dx, dy, dz, -dx, -dy, -dz, bias, lo, hi);
+  }
+
+  /** Along the axis: how fast it moves the way its angle (or slide) grows, times `sign`. */
+  private alongRow(
+    A: Rt,
+    B: Rt,
+    slide: boolean,
+    sign: number,
+    bias: number,
+    lo: number,
+    hi: number,
+  ) {
+    const g = this.jg, ux = g[9] * sign, uy = g[10] * sign, uz = g[11] * sign;
+    if (!slide) return this.row(A, B, 0, 0, 0, -ux, -uy, -uz, ux, uy, uz, bias, lo, hi);
+    const rax = g[0], ray = g[1], raz = g[2], rbx = g[3], rby = g[4], rbz = g[5];
+    this.row(
+      A,
+      B,
+      -ux,
+      -uy,
+      -uz,
+      -(ray * uz - raz * uy),
+      -(raz * ux - rax * uz),
+      -(rax * uy - ray * ux),
+      rby * uz - rbz * uy,
+      rbz * ux - rbx * uz,
+      rbx * uy - rby * ux,
+      bias,
+      lo,
+      hi,
+    );
+  }
+
+  /** One joint row between a and b: Jacobian, target velocity and impulse bounds. */
+  private row(
+    A: Rt,
+    B: Rt,
+    lx: number,
+    ly: number,
+    lz: number,
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    bias: number,
+    lo: number,
+    hi: number,
+  ) {
+    const r = this.rows;
+    r.ensure(r.n + 1);
+    const k = r.n++, o = k * Rows.F, f = r.f;
+    r.ia[k] = A.dynamic ? A.index : -1;
+    r.ib[k] = B.dynamic ? B.index : -1;
+    f[o + JL] = lx, f[o + JL + 1] = ly, f[o + JL + 2] = lz;
+    f[o + JA] = ax, f[o + JA + 1] = ay, f[o + JA + 2] = az;
+    f[o + JB] = bx, f[o + JB + 1] = by, f[o + JB + 2] = bz;
+    let m = (lx * lx + ly * ly + lz * lz) *
+      ((A.dynamic ? A.invMass : 0) + (B.dynamic ? B.invMass : 0));
+    if (A.dynamic) {
+      const I = A.invIw;
+      const ix = I[0] * ax + I[1] * ay + I[2] * az, iy = I[3] * ax + I[4] * ay + I[5] * az;
+      const iz = I[6] * ax + I[7] * ay + I[8] * az;
+      f[o + MA] = ix, f[o + MA + 1] = iy, f[o + MA + 2] = iz;
+      m += ax * ix + ay * iy + az * iz;
+    } else f[o + MA] = f[o + MA + 1] = f[o + MA + 2] = 0;
+    if (B.dynamic) {
+      const I = B.invIw;
+      const ix = I[0] * bx + I[1] * by + I[2] * bz, iy = I[3] * bx + I[4] * by + I[5] * bz;
+      const iz = I[6] * bx + I[7] * by + I[8] * bz;
+      f[o + MB] = ix, f[o + MB + 1] = iy, f[o + MB + 2] = iz;
+      m += bx * ix + by * iy + bz * iz;
+    } else f[o + MB] = f[o + MB + 1] = f[o + MB + 2] = 0;
+    f[o + JM] = m > 1e-12 ? 1 / m : 0;
+    f[o + JBIAS] = bias, f[o + JLO] = lo, f[o + JHI] = hi, f[o + JACC] = 0;
+  }
+
+  private solveJoints() {
+    const r = this.rows, f = r.f, v = this.sv, sm = this.sm;
+    for (let k = 0; k < r.n; k++) {
+      const o = k * Rows.F, a = r.ia[k], b = r.ib[k];
+      let vel = 0;
+      if (a >= 0) {
+        const q = a * 6;
+        vel += f[o + JL] * v[q] + f[o + JL + 1] * v[q + 1] + f[o + JL + 2] * v[q + 2] +
+          f[o + JA] * v[q + 3] + f[o + JA + 1] * v[q + 4] + f[o + JA + 2] * v[q + 5];
+      }
+      if (b >= 0) {
+        const q = b * 6;
+        vel += -(f[o + JL] * v[q] + f[o + JL + 1] * v[q + 1] + f[o + JL + 2] * v[q + 2]) +
+          f[o + JB] * v[q + 3] + f[o + JB + 1] * v[q + 4] + f[o + JB + 2] * v[q + 5];
+      }
+      const old = f[o + JACC];
+      const now = Math.min(
+        f[o + JHI],
+        Math.max(f[o + JLO], old + f[o + JM] * (f[o + JBIAS] - vel)),
+      );
+      f[o + JACC] = now;
+      const dj = now - old;
+      if (!dj) continue;
+      if (a >= 0) {
+        const q = a * 6, m = sm[a] * dj;
+        v[q] += f[o + JL] * m, v[q + 1] += f[o + JL + 1] * m, v[q + 2] += f[o + JL + 2] * m;
+        v[q + 3] += f[o + MA] * dj, v[q + 4] += f[o + MA + 1] * dj, v[q + 5] += f[o + MA + 2] * dj;
+      }
+      if (b >= 0) {
+        const q = b * 6, m = sm[b] * dj;
+        v[q] -= f[o + JL] * m, v[q + 1] -= f[o + JL + 1] * m, v[q + 2] -= f[o + JL + 2] * m;
+        v[q + 3] += f[o + MB] * dj, v[q + 4] += f[o + MB + 1] * dj, v[q + 5] += f[o + MB + 2] * dj;
+      }
+    }
   }
 
   private speed(rt: Rt): number {
@@ -1557,6 +2070,7 @@ export class Physics {
   }
 
   private solve() {
+    if (this.rows.n) this.solveJoints();
     const c = this.contacts, f = c.f, v = this.sv;
     for (let k = 0; k < c.n; k++) {
       const o = k * Contacts.F, qn = o + DIR;
@@ -1600,8 +2114,15 @@ export class Physics {
       this.moverHit[m] = momentum;
       const nx = -f[o + NX], nz = -f[o + NX + 2], l = Math.hypot(nx, nz) || 1;
       let hit = this.hits.find((h) => h.mover === m);
-      if (!hit) this.hits.push(hit = { body: a.o, mover: m, speed, momentum, nx: 0, nz: 0 });
-      hit.body = a.o, hit.speed = speed, hit.momentum = momentum, hit.nx = nx / l, hit.nz = nz / l;
+      if (!hit) {
+        this.hits.push(hit = { body: a.o, piece: 0, mover: m, speed, momentum, nx: 0, nz: 0 });
+      }
+      hit.body = a.o,
+        hit.piece = a.piece,
+        hit.speed = speed,
+        hit.momentum = momentum,
+        hit.nx = nx / l,
+        hit.nz = nz / l;
     }
   }
 
@@ -1628,26 +2149,53 @@ export class Physics {
     this.pose(rt);
   }
 
-  /** After a tick: write the state back, note landings, and let still bodies sleep. */
-  private settle(rt: Rt, dt: number) {
-    const o = rt.o, v = rt.v, w = rt.w, s = rt.shape, R = rt.R, c = s.com;
+  /** A body's pose back into the state the world saves. */
+  private writeBack(rt: Rt) {
+    const st = rt.s, v = rt.v, w = rt.w, R = rt.R, c = rt.shape.com;
     for (let k = 0; k < 3; k++) {
-      o.pos[k] = rt.p[k] - (R[k * 3] * c[0] + R[k * 3 + 1] * c[1] + R[k * 3 + 2] * c[2]);
-      o.vel[k] = v[k], o.spin[k] = w[k];
+      st.pos[k] = rt.p[k] - (R[k * 3] * c[0] + R[k * 3 + 1] * c[1] + R[k * 3 + 2] * c[2]);
+      st.vel[k] = v[k], st.spin[k] = w[k];
     }
-    for (let i = 0; i < 4; i++) o.rot[i] = rt.q[i];
+    for (let i = 0; i < 4; i++) st.rot[i] = rt.q[i];
+  }
+
+  /** After a tick: note landings, and let an Object sleep once all its pieces are still. */
+  private settle(group: Rt[], dt: number) {
+    const o = group[0].o;
     this.moved.push(o);
+    let impact = 0, still = true;
+    for (const rt of group) {
+      if (!rt.dynamic) continue;
+      impact = Math.max(impact, rt.impact);
+      const v = rt.v, w = rt.w;
+      if (
+        Math.hypot(v[0], v[1], v[2]) >= SLEEP_SPEED || Math.hypot(w[0], w[1], w[2]) >= SLEEP_SPIN
+      ) {
+        still = false;
+      }
+    }
+    // A running motor keeps it awake, and so does a door that hasn't got where it was sent.
+    if (o.joints) {
+      const defs = this.assembly(o.design)?.joints;
+      for (let i = 0; i < o.joints.length; i++) {
+        const j = o.joints[i], lim = defs?.[i]?.limits;
+        if (j.on) still = false;
+        const to = lim ? Math.max(lim[0], Math.min(lim[1], j.target ?? 0)) : 0;
+        if (lim && Math.abs((j.at ?? 0) - to) > 0.06) still = false;
+      }
+    }
     const air = o.air ?? 0;
-    if (rt.impact > LAND_SPEED && air > 2) this.landings.push({ body: o, speed: rt.impact });
-    o.air = rt.impact > 0 ? 0 : air + 1;
-    const still = Math.hypot(v[0], v[1], v[2]) < SLEEP_SPEED &&
-      Math.hypot(w[0], w[1], w[2]) < SLEEP_SPIN;
+    if (impact > LAND_SPEED && air > 2) this.landings.push({ body: o, speed: impact });
+    o.air = impact > 0 ? 0 : air + 1;
     o.still = still ? (o.still ?? 0) + 1 : 0;
     if (o.still >= SLEEP_TICKS * Math.max(1, Math.round(0.05 / dt))) {
       o.asleep = true;
-      o.vel.fill(0), o.spin.fill(0);
+      for (const rt of group) {
+        if (!rt.dynamic) continue;
+        rt.s.vel.fill(0), rt.s.spin.fill(0);
+        rt.v.fill(0), rt.w.fill(0);
+      }
       delete o.mover, delete o.quiet, delete o.still, delete o.air;
-      rt.v.fill(0), rt.w.fill(0);
     }
   }
 }

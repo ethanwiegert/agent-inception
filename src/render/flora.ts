@@ -1,5 +1,5 @@
 import { identity, mat4, rotateY, scale, translate } from "../math.ts";
-import type { Catalog, DesignContent } from "../sim/catalog.ts";
+import { type Catalog, type DesignContent, rigOf } from "../sim/catalog.ts";
 import { CROP_STRIDE } from "../sim/protocol.ts";
 import type { Props } from "../sim/props.ts";
 import type { Objects } from "../sim/objects.ts";
@@ -15,6 +15,7 @@ const SURFACE_DROP = 0.12;
 /** Mesh templates for plant Designs, made the first time each Design is drawn. */
 export class FloraModels {
   private ids = new Map<number, number>();
+  /** Built Objects' templates, one per piece, by design × 16 + piece. */
   private still = new Map<number, number>();
   private catalog: Catalog | null = null;
 
@@ -37,20 +38,25 @@ export class FloraModels {
     return id;
   }
 
-  /** The same, held still: built Objects don't sway in the wind. */
-  stillTemplate(catalog: Catalog, design: number): number {
+  /**
+   * The same, held still (built Objects don't sway in the wind), for one piece of a jointed
+   * Design: its parts in Design space, so each piece is drawn at its own pose.
+   */
+  stillTemplate(catalog: Catalog, design: number, piece = 0): number {
     if (catalog !== this.catalog) this.catalog = catalog, this.ids.clear(), this.still.clear();
-    let id = this.still.get(design);
+    const key = design * 16 + piece;
+    let id = this.still.get(key);
     if (id !== undefined) return id;
     const e = catalog.get(design);
     id = -1;
     if (e?.kind === "design") {
+      const d = e.content as DesignContent, of = rigOf(d).pieceOf;
       id = this.lib.define(
-        `object:${design}`,
-        (b) => meshDesign(b, catalog, e.content as DesignContent, { role: null, sway: false }),
+        `object:${design}:${piece}`,
+        (b) => meshDesign(b, catalog, d, { only: (_, i) => of[i] === piece, sway: false }),
       );
     }
-    this.still.set(design, id);
+    this.still.set(key, id);
     return id;
   }
 }
@@ -164,21 +170,27 @@ export function buildObjects(
   models: FloraModels,
 ) {
   for (const o of objects.list) {
-    const pose = poses.get(o.id);
-    const tid = pose ? models.stillTemplate(objects.catalog, o.design) : -1;
-    if (tid < 0) continue;
-    const [x, y, z, w] = pose!.rot;
-    // translate(pos) · R(rot) · translate(ANCHOR): the template's origin is the Design's anchor.
-    m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y + z * w), m[2] = 2 * (x * z - y * w);
-    m[3] = 0;
-    m[4] = 2 * (x * y - z * w), m[5] = 1 - 2 * (x * x + z * z), m[6] = 2 * (y * z + x * w);
-    m[7] = 0;
-    m[8] = 2 * (x * z + y * w), m[9] = 2 * (y * z - x * w), m[10] = 1 - 2 * (x * x + y * y);
-    m[11] = 0;
-    m[12] = pose!.pos[0], m[13] = pose!.pos[1], m[14] = pose!.pos[2], m[15] = 1;
-    translate(m, ANCHOR[0], ANCHOR[1], ANCHOR[2]);
-    out.add(tid, m, 1, 1, 1, 1);
+    for (let k = 0; k <= (o.pieces?.length ?? 0); k++) {
+      const pose = poses.get(o.id * 16 + k);
+      if (pose) addPose(out, pose, models.stillTemplate(objects.catalog, o.design, k));
+    }
   }
+}
+
+/** One piece's template at its pose. */
+function addPose(out: InstanceBatch, pose: BodyPose, tid: number) {
+  if (tid < 0) return;
+  const [x, y, z, w] = pose.rot;
+  // translate(pos) · R(rot) · translate(ANCHOR): the template's origin is the Design's anchor.
+  m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y + z * w), m[2] = 2 * (x * z - y * w);
+  m[3] = 0;
+  m[4] = 2 * (x * y - z * w), m[5] = 1 - 2 * (x * x + z * z), m[6] = 2 * (y * z + x * w);
+  m[7] = 0;
+  m[8] = 2 * (x * z + y * w), m[9] = 2 * (y * z - x * w), m[10] = 1 - 2 * (x * x + y * y);
+  m[11] = 0;
+  m[12] = pose.pos[0], m[13] = pose.pos[1], m[14] = pose.pos[2], m[15] = 1;
+  translate(m, ANCHOR[0], ANCHOR[1], ANCHOR[2]);
+  out.add(tid, m, 1, 1, 1, 1);
 }
 
 /** Whether any prop is still growing (so the batch needs refreshing now and then). */

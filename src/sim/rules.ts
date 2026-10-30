@@ -25,6 +25,7 @@ export const RULE_EVENTS = [
   "pushed",
   "carried",
   "landed",
+  "used",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -49,7 +50,8 @@ export type Effect =
   | { weather: { clouds: number; hours: number } }
   | { spread: { what: string; count: number } }
   | { grow: { what: string; hours: number } }
-  | { impulse: Impulse };
+  | { impulse: Impulse }
+  | { switch: { what: string; on: boolean } };
 
 /** A nudge to bodies: up and sideways speeds (blocks/s), optionally only those named `what`. */
 export interface Impulse {
@@ -103,6 +105,8 @@ export const RULE_LIMITS = {
   impulseEverywhere: 3,
   /** Bodies one impulse may move. */
   impulseBodies: 16,
+  /** Objects one switch may turn on or off. */
+  switchObjects: 16,
   /** Each Rule fires at most this often per game hour. */
   firingsPerHour: 20,
   /** Condition and effect steps the engine spends on Rules per tick, across all Rules. */
@@ -120,7 +124,17 @@ const CONDITIONS = [
   "any",
   "not",
 ];
-const EFFECTS = ["give", "take", "set_block", "say", "weather", "spread", "grow", "impulse"];
+const EFFECTS = [
+  "give",
+  "take",
+  "set_block",
+  "say",
+  "weather",
+  "spread",
+  "grow",
+  "impulse",
+  "switch",
+];
 
 // ---------------------------------------------------------------- validation
 
@@ -384,6 +398,14 @@ function effect(v: unknown, c: Check, where: string): Effect {
       }
       return { impulse: out };
     }
+    case "switch": {
+      const o = fields(val, ["what", "on"], at);
+      if (typeof o.what !== "string" || !o.what.trim() || o.what.length > 40) {
+        throw new Error(`${at}.what names the Objects whose motors it switches, e.g. "windmill".`);
+      }
+      if (typeof o.on !== "boolean") throw new Error(`${at}.on is true (start) or false (stop).`);
+      return { switch: { what: o.what.trim().toLowerCase(), on: o.on } };
+    }
     default: {
       const o = fields(val, ["clouds", "hours"], at);
       return {
@@ -579,6 +601,7 @@ export class Rules {
     if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);
     if ("grow" in fx) return this.grow(fx.grow.what, fx.grow.hours, ctx === NO_PLACE ? null : ctx);
     if ("impulse" in fx) return this.impulse(fx.impulse, ctx === NO_PLACE ? null : ctx);
+    if ("switch" in fx) return this.switch(fx.switch, ctx === NO_PLACE ? null : ctx);
     if (!agent) return "no villager to act on";
     if ("give" in fx) {
       const name = sim.produce(fx.give.item);
@@ -628,6 +651,33 @@ export class Rules {
       n++;
     }
     if (!n) return `no ${fx.what ?? "movable Object"} ${near ? "nearby" : "anywhere"}`;
+  }
+
+  /**
+   * Switch the motors of the Objects named `what` near the event (±4, or every one on a timer, at
+   * most 16) on or off.
+   */
+  private switch(fx: { what: string; on: boolean }, near: RuleCtx | null): string | void {
+    const sim = this.sim, reach = RULE_LIMITS.reach + 0.5;
+    let n = 0;
+    for (const o of sim.objects.list) {
+      if (n >= RULE_LIMITS.switchObjects) break;
+      const joints = sim.physics.assembly(o.design)?.joints ?? [];
+      if (!joints.some((j) => j.kind === "motor")) continue;
+      if (!saysWords(sim.catalog.get(o.design)?.name ?? "", fx.what)) continue;
+      if (near) {
+        const c = sim.physics.center(o);
+        const ex = c[0] - (near.x + 0.5), ey = c[1] - (near.y + 0.5), ez = c[2] - (near.z + 0.5);
+        if (Math.abs(ex) > reach || Math.abs(ey) > reach || Math.abs(ez) > reach) continue;
+      }
+      o.joints ??= joints.map(() => ({}));
+      joints.forEach((j, k) => {
+        if (j.kind === "motor") o.joints![k].on = fx.on;
+      });
+      sim.physics.wake(o);
+      n++;
+    }
+    if (!n) return `no ${fx.what} with a motor ${near ? "nearby" : "anywhere"}`;
   }
 
   private setBlock(x: number, y: number, z: number, to: string): string | void {

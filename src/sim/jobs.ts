@@ -1,4 +1,5 @@
 import { findPath, levelAt, MAX_HOP_DOWN, octile } from "./path.ts";
+import { quatMatrix } from "./physics.ts";
 import { type Agent, Anim, type Job, type Sim, TICK_HZ } from "./sim.ts";
 
 /** Building blocks for tool handlers: walking, reaching, working and the inventory. */
@@ -26,9 +27,14 @@ export function* walk(
 ): Generator<void, void> {
   const path = route(sim, agent, goal, heuristic);
   if (!path) {
+    const door = shutDoorNear(sim, agent.x, agent.z);
     throw new Error(
       `You can't find a way to ${label}: you climb 1 block and drop 2, and trees, rocks and tall ` +
-        "Objects are in the way. A step (place_block, or terraform) gets you up a bigger rise.",
+        "Objects are in the way. " +
+        (door
+          ? `The ${door.name} nearby is shut and a closed door is a wall: use x=${door.x} ` +
+            `z=${door.z} opens it.`
+          : "A step (place_block, or terraform) gets you up a bigger rise."),
     );
   }
   agent.anim = Anim.Walk;
@@ -48,6 +54,32 @@ export function* walk(
     }
   }
   agent.anim = Anim.Idle;
+}
+
+/** The nearest shut door or gate (a hinge or slider with limits, as built) within 8 tiles. */
+function shutDoorNear(sim: Sim, x: number, z: number) {
+  let best: { name: string; x: number; z: number; d: number } | null = null;
+  for (const o of sim.objects.list) {
+    const joints = sim.physics.assembly(o.design)?.joints ?? [];
+    joints.forEach((j, i) => {
+      const st = o.joints?.[i];
+      if (!j.limits || Math.abs(st?.target ?? 0) > 1e-6) return;
+      const at = j.a ? o.pieces?.[j.a - 1] ?? o : o;
+      const R = quatMatrix(at.rot, new Float64Array(9)), p = j.anchor;
+      const px = at.pos[0] + R[0] * p[0] + R[1] * p[1] + R[2] * p[2];
+      const pz = at.pos[2] + R[6] * p[0] + R[7] * p[1] + R[8] * p[2];
+      const d = Math.hypot(px - x, pz - z);
+      if (d > 8 || (best && best.d <= d)) return;
+      const name = sim.catalog.get(o.design)?.name ?? "door";
+      best = {
+        name: name.includes(j.piece) ? name : `${name}'s ${j.piece}`,
+        x: Math.floor(px),
+        z: Math.floor(pz),
+        d,
+      };
+    });
+  }
+  return best as { name: string; x: number; z: number } | null;
 }
 
 /**
@@ -112,11 +144,14 @@ export function* reach(
 ): Generator<void, void> {
   if (sim.world.heightAt(x, z) < 0) throw new Error(`(${x}, ${z}) is outside the world.`);
   const h = sim.world.heightAt(x, z);
-  // Within 2 of the column's top, or (for a given block height) within arm's reach of it.
-  const fits = (cx: number, cz: number) =>
-    y === undefined
-      ? Math.abs(sim.world.heightAt(cx, cz) - h) <= 2
-      : Math.abs(sim.world.heightAt(cx, cz) + 1 - y) <= MAX_REACH;
+  // Within 2 of the column's top, or (for a given block height) within arm's reach of it, from
+  // the column's top or a floor under a roof (inside a house).
+  const fits = (cx: number, cz: number) => {
+    if (y === undefined) return Math.abs(sim.world.heightAt(cx, cz) - h) <= 2;
+    if (Math.abs(sim.world.heightAt(cx, cz) + 1 - y) <= MAX_REACH) return true;
+    const floor = sim.world.floorBelow(cx, cz, y + 1);
+    return floor >= 0 && Math.abs(floor + 1 - y) <= MAX_REACH;
+  };
   const within = (d: number, keepClear: boolean) => (cx: number, cz: number) =>
     Math.max(Math.abs(cx - x), Math.abs(cz - z)) === d && fits(cx, cz) &&
     !(keepClear && avoid?.(cx, cz));
@@ -151,7 +186,7 @@ function* tryWalk(
   return true;
 }
 
-function* face(agent: Agent, x: number, z: number): Generator<void, void> {
+export function* face(agent: Agent, x: number, z: number): Generator<void, void> {
   const target = Math.atan2(x + 0.5 - agent.x, z + 0.5 - agent.z);
   while (Math.abs(angleDiff(agent.yaw, target)) > 0.05) {
     agent.yaw = turn(agent.yaw, target, 0.3);

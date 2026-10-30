@@ -33,8 +33,23 @@ export interface MaterialContent {
 }
 
 export const PART_SHAPES = ["box", "sphere", "cylinder", "cone"] as const;
+export type PartShapeName = (typeof PART_SHAPES)[number];
+/** Mechanisms: a joint part joins two pieces of a Design and lets them move about its axis. */
+export const JOINTS = ["hinge", "axle", "slider", "motor"] as const;
+export type JointKind = (typeof JOINTS)[number];
+/** The shape each joint is drawn and collides as: a pin, or a slider's rail. */
+export const JOINT_SHAPES: Record<JointKind, PartShapeName> = {
+  hinge: "cylinder",
+  axle: "cylinder",
+  slider: "box",
+  motor: "cylinder",
+};
+/** The piece of a Design its parts belong to unless they name another (and its blocks always). */
+export const MAIN_PIECE = "main";
 export interface PartContent {
-  shape: (typeof PART_SHAPES)[number];
+  shape: PartShapeName;
+  /** A mechanism: it joins two pieces of a Design and lets them move about its axis. */
+  joint?: JointKind;
 }
 
 export type Vec3 = [number, number, number];
@@ -51,6 +66,14 @@ export interface DesignPart {
   tilt: number;
   /** For bodies: which moving piece it belongs to. */
   role?: Role;
+  /** Which rigid piece of a jointed Design it belongs to ("main" if none). */
+  piece?: string;
+  /** Joint parts: the two pieces it joins. The joint itself belongs to the first. */
+  joins?: [string, string];
+  /** Hinge (degrees) or slider (blocks) travel from how it's built: [min, max], min ≤ 0 ≤ max. */
+  limits?: [number, number];
+  /** Motor: degrees per second while it's on (negative turns the other way). */
+  speed?: number;
 }
 
 /** Moving pieces of a body. Legs and arms swing from the top, heads turn on the neck. */
@@ -108,6 +131,52 @@ export interface DesignContent {
   look?: "blades";
   /** Its Object stays where it's built (a signpost, a statue): no falling, pushing or carrying. */
   anchored?: boolean;
+}
+
+/** The shape a Design's part is drawn and collides as, by its Part's name. */
+export function shapeOf(part: string): PartShapeName {
+  return (JOINT_SHAPES as Record<string, PartShapeName>)[part] ?? part as PartShapeName;
+}
+
+/** The joint a Part is, by name, if it's one. */
+export function jointKind(part: string): JointKind | null {
+  return (JOINTS as readonly string[]).includes(part) ? part as JointKind : null;
+}
+
+/** How a Design's parts split into rigid pieces, and the joints between them. */
+export interface Rig {
+  /** Piece names, the root first: the piece with the blocks, else the first part's. */
+  pieces: string[];
+  /** Which piece each part belongs to (a joint belongs to the first piece it joins). */
+  pieceOf: number[];
+  /** Joint parts: their index in `parts`, and the pieces they join (a carries the pin). */
+  joints: { part: number; kind: JointKind; a: number; b: number }[];
+}
+
+const rigs = new WeakMap<DesignContent, Rig>();
+
+/** The pieces and joints of a Design (one piece and no joints for most). */
+export function rigOf(d: DesignContent): Rig {
+  let rig = rigs.get(d);
+  if (rig) return rig;
+  const pieces: string[] = [];
+  const index = (name: string) => {
+    let i = pieces.indexOf(name);
+    if (i < 0) i = pieces.push(name) - 1;
+    return i;
+  };
+  const own = (p: DesignPart) => jointKind(p.part) && p.joins ? p.joins[0] : p.piece ?? MAIN_PIECE;
+  if (d.blocks || d.parts.some((p) => !p.joins && !p.piece)) index(MAIN_PIECE);
+  for (const p of d.parts) if (!p.joins) index(own(p));
+  const pieceOf = d.parts.map((p) => index(own(p)));
+  const joints: Rig["joints"] = [];
+  d.parts.forEach((p, i) => {
+    const kind = jointKind(p.part);
+    if (kind && p.joins) joints.push({ part: i, kind, a: index(p.joins[0]), b: index(p.joins[1]) });
+  });
+  rig = { pieces: pieces.length ? pieces : [MAIN_PIECE], pieceOf, joints };
+  rigs.set(d, rig);
+  return rig;
 }
 
 /** Relations the world will enforce; any other type is a free label that records knowledge. */
@@ -190,6 +259,10 @@ export const LIMITS = {
   growHours: 720,
   /** What one craft of an agent's recipe may yield (nature's planks: 4 from a log). */
   recipeCount: 4,
+  /** Joint parts per Design (so at most 9 pieces). */
+  joints: 8,
+  /** A motor's fastest turn, degrees per second. */
+  motorSpeed: 360,
 } as const;
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 '_-]*$/;
@@ -488,6 +561,25 @@ export class Catalog {
     return closed;
   }
 
+  /**
+   * Add nature's entries a world was saved without (Parts and examples added since), so an older
+   * world gains what a new one starts with. Relations are left out: they name entries by id.
+   */
+  addMissingNature(tick: number) {
+    for (const e of natureCatalog().entries) {
+      if (!e.name || e.kind === "relation" || this.byName(e.name)) continue;
+      try {
+        this.add(
+          { kind: e.kind, name: e.name, description: e.description, content: e.content },
+          NATURE,
+          tick,
+        );
+      } catch {
+        // Something it builds on was retired or renamed in this world: it stays out.
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- save
 
   save(): CatalogSave {
@@ -616,9 +708,119 @@ function validateMaterial(o: Record<string, unknown>, author: string): MaterialC
 }
 
 function validatePart(o: Record<string, unknown>): PartContent {
-  onlyKeys(o, ["shape"], "part");
-  if (!PART_SHAPES.includes(o.shape as PartContent["shape"])) throw new Error("unknown shape");
-  return { shape: o.shape as PartContent["shape"] };
+  onlyKeys(o, ["shape", "joint"], "part");
+  if (!PART_SHAPES.includes(o.shape as PartShapeName)) throw new Error("unknown shape");
+  const out: PartContent = { shape: o.shape as PartShapeName };
+  if (o.joint !== undefined) {
+    if (!JOINTS.includes(o.joint as JointKind)) throw new Error("unknown joint");
+    out.joint = o.joint as JointKind;
+  }
+  return out;
+}
+
+const PIECE_RE = /^[a-z0-9][a-z0-9 '_-]*$/;
+
+function pieceName(v: unknown, where: string): string {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, " ") : "";
+  if (!s || s.length > 24 || !PIECE_RE.test(s)) {
+    throw new Error(
+      `${where} names a piece: 1-24 letters, digits, spaces, ' _ - ("door", "wheel").`,
+    );
+  }
+  return s;
+}
+
+/** A joint part's own fields: what it joins, how far it may move, how fast a motor turns. */
+function jointFields(
+  p: Record<string, unknown>,
+  kind: JointKind,
+  part: DesignPart,
+  where: string,
+) {
+  if (p.piece !== undefined) {
+    throw new Error(`${where}: a joint belongs to the first piece it joins; drop "piece".`);
+  }
+  if (!Array.isArray(p.joins) || p.joins.length !== 2) {
+    throw new Error(`${where}.joins names the two pieces the ${kind} joins: ["main", "door"].`);
+  }
+  const joins = p.joins.map((v, i) => pieceName(v, `${where}.joins[${i}]`)) as [string, string];
+  if (joins[0] === joins[1]) throw new Error(`${where}.joins needs two different pieces.`);
+  part.joins = joins;
+  if (p.limits !== undefined) {
+    if (kind !== "hinge" && kind !== "slider") {
+      throw new Error(
+        `${where}: a${kind === "axle" ? "n" : ""} ${kind} turns all the way round; only hinges ` +
+          "and sliders take limits.",
+      );
+    }
+    const max = kind === "hinge" ? 180 : LIMITS.designSize;
+    if (!Array.isArray(p.limits) || p.limits.length !== 2) {
+      throw new Error(`${where}.limits is [min, max] ${kind === "hinge" ? "degrees" : "blocks"}.`);
+    }
+    const [lo, hi] = p.limits.map((v, i) => numberIn(v, -max, max, `${where}.limits[${i}]`));
+    if (lo > 0 || hi < 0 || hi - lo < 1e-3) {
+      throw new Error(
+        `${where}.limits [min, max] is measured from how it's built: min ≤ 0 ≤ max, min < max ` +
+          (kind === "hinge" ? "(a door opening one way: [0, 100])." : "(a drawer: [0, 0.8])."),
+      );
+    }
+    part.limits = [lo, hi];
+  } else if (kind === "slider") {
+    throw new Error(`${where}: a slider needs limits, [min, max] blocks along its length.`);
+  }
+  if (p.speed !== undefined) {
+    if (kind !== "motor") throw new Error(`${where}: only motors take a speed.`);
+    const speed = numberIn(p.speed, -LIMITS.motorSpeed, LIMITS.motorSpeed, `${where}.speed`);
+    if (!speed) throw new Error(`${where}.speed can't be 0 (degrees per second).`);
+    part.speed = speed;
+  } else if (kind === "motor") part.speed = 30;
+}
+
+/** Every piece hangs off the root through joints, like a tree: no strays, no loops. */
+function checkPieces(d: DesignContent) {
+  const rig = rigOf(d);
+  if (rig.joints.length > LIMITS.joints) {
+    throw new Error(`A design has at most ${LIMITS.joints} joints.`);
+  }
+  const named = new Set<string>();
+  d.parts.forEach((p) => !p.joins && named.add(p.piece ?? MAIN_PIECE));
+  if (d.blocks) named.add(MAIN_PIECE);
+  for (const j of rig.joints) {
+    for (const k of [j.a, j.b]) {
+      if (!named.has(rig.pieces[k])) {
+        const main = rig.pieces[k] === MAIN_PIECE
+          ? ' (a Design\'s blocks, and parts without a "piece", are "main"; a joint belongs to ' +
+            "the first piece it joins, so it can't make one on its own)"
+          : "";
+        throw new Error(
+          `parts[${j.part}].joins: no part is in piece "${rig.pieces[k]}"${main}. Pieces: ` +
+            `${[...named].join(", ") || "none"}.`,
+        );
+      }
+    }
+  }
+  const group = rig.pieces.map((_, i) => i);
+  const find = (i: number): number => group[i] === i ? i : (group[i] = find(group[i]));
+  for (const j of rig.joints) {
+    const a = find(j.a), b = find(j.b);
+    if (a === b) {
+      throw new Error(
+        `parts[${j.part}]: "${rig.pieces[j.a]}" and "${rig.pieces[j.b]}" are already joined; ` +
+          "pieces hang off each other like a tree, without loops.",
+      );
+    }
+    group[b] = a;
+  }
+  const root = find(0);
+  for (let i = 1; i < rig.pieces.length; i++) {
+    if (find(i) !== root) {
+      throw new Error(
+        `Piece "${rig.pieces[i]}" isn't joined to "${rig.pieces[0]}": add a hinge, axle, slider ` +
+          "or motor part that joins them.",
+      );
+    }
+  }
+  if (rig.joints.length && d.habitat) throw new Error("Plants can't have joints.");
 }
 
 function vec(v: unknown, min: number, max: number, where: string): Vec3 {
@@ -679,7 +881,24 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
     o.parts.forEach((p, i) => {
       const where = `parts[${i}]`;
       if (!isObject(p)) throw new Error(`${where} must be an object.`);
-      onlyKeys(p, ["part", "material", "at", "size", "turn", "tilt", "role"], where);
+      onlyKeys(
+        p,
+        [
+          "part",
+          "material",
+          "at",
+          "size",
+          "turn",
+          "tilt",
+          "role",
+          "piece",
+          "joins",
+          "limits",
+          "speed",
+        ],
+        where,
+      );
+      const kind = (c.live(p.part, "part", where).content as PartContent).joint;
       const part: DesignPart = {
         part: c.live(p.part, "part", where).name,
         material: c.live(p.material, "material", where).name,
@@ -689,6 +908,18 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
         tilt: numberIn(p.tilt ?? 0, -180, 180, `${where}.tilt`),
       };
       if (p.role !== undefined) part.role = role(p.role, `${where}.role`);
+      if (kind) jointFields(p, kind, part, where);
+      else {
+        for (const k of ["joins", "limits", "speed"]) {
+          if (p[k] !== undefined) {
+            throw new Error(`${where}: only joint parts (${JOINTS.join(", ")}) take ${k}.`);
+          }
+        }
+        if (p.piece !== undefined) {
+          const piece = pieceName(p.piece, `${where}.piece`);
+          if (piece !== MAIN_PIECE) part.piece = piece;
+        }
+      }
       parts.push(part);
     });
   }
@@ -722,6 +953,7 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
     if (typeof o.anchored !== "boolean") throw new Error("anchored is true or false.");
     if (o.anchored) out.anchored = true;
   }
+  checkPieces(out);
   return out;
 }
 

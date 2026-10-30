@@ -18,6 +18,7 @@ import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
 import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
 import { BODY_HANDLERS, BODY_TOOL_DEFS, CARRY_MAX, kg, PUSH_MAX } from "./bodytools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
+import { JOINT_HANDLERS, JOINT_TOOL_DEFS, mechanismsText } from "./jointtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
 import { partBounds } from "./objects.ts";
@@ -122,6 +123,7 @@ export const TOOL_DEFS: ToolDef[] = [
   ...BUILD_TOOL_DEFS,
   ...MAKE_TOOL_DEFS,
   ...BODY_TOOL_DEFS,
+  ...JOINT_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -256,7 +258,9 @@ function join(sim: Sim, session: string, args: Args): string {
     "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
     "into brick. Objects built from parts are real things: they fall, stack, roll, float or " +
     "sink, and you can push them along or carry light ones and put_down them anywhere (mind " +
-    "anyone standing downhill of a rolling boulder). People are watching " +
+    "anyone standing downhill of a rolling boulder). Designs can have moving pieces on hinges, " +
+    "axles, sliders and motors (doors, carts, windmills): use opens a door or switches a " +
+    "motor, and a closed door is a wall. People are watching " +
     "you live here, so take your time and narrate now and then with say. Choose how you look " +
     "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
@@ -274,6 +278,7 @@ const HANDLERS: Record<string, Handler> = {
   ...BUILD_HANDLERS,
   ...MAKE_HANDLERS,
   ...BODY_HANDLERS,
+  ...JOINT_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -489,7 +494,9 @@ function eachTile(
   const x0 = num(args.x, "x"), z0 = num(args.z, "z");
   const width = Math.max(1, num(args.width ?? 1, "width"));
   const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width * depth > MAX_AREA) throw new Error(`At most ${MAX_AREA} tiles per call.`);
+  if (width * depth > MAX_AREA) {
+    throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
+  }
   return (function* () {
     let done = 0;
     const skipped: string[] = [];
@@ -818,7 +825,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
   if (things.length) {
     lines.push("", "Things that move:");
     for (const { o, c, d } of things.slice(0, 8)) {
-      const mass = sim.physics.shape(o.design)!.mass;
+      const mass = sim.physics.mass(o.design);
       const how = o.held === agent.id
         ? "you carry it"
         : o.held
@@ -837,6 +844,16 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);
   }
+  // Doors, gates, wheels and windmills: what each joint is doing and where to use it.
+  const mechanisms = mechanismsText(sim, agent.x, agent.z, r * 1.5);
+  if (mechanisms.length) {
+    lines.push(
+      "",
+      "Mechanisms (joints):",
+      ...mechanisms,
+      "  (use swings a hinge with limits or a slider to its other end, and switches motors.)",
+    );
+  }
   // Things of yours that rolled, slid or floated out of view, so they're never simply lost.
   const yours = sim.objects.list
     .filter((o) => (o.mover ?? o.by) === agent.name && sim.physics.shape(o.design)?.fixed === false)
@@ -851,7 +868,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         yours.slice(0, 5).map(({ o, c, d }) =>
           `${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
             Math.floor(c[2])
-          } (${Math.round(d)} tiles${!o.asleep && !o.held ? ", moving" : ""})`
+          } (${Math.round(d)} tiles${
+            !o.asleep && !o.held && Math.hypot(...o.vel) > 0.3 ? ", moving" : ""
+          })`
         ).join(", ")
       }${yours.length > 5 ? ` and ${yours.length - 5} more` : ""}.`,
     );

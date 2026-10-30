@@ -128,7 +128,7 @@ Deno.test("build puts a Design's parts up as one Object, paid for by volume", ()
   fern.inventory.planks = 1;
   const text = ok(run(sim, "a", "build", { design: "stone bench", x, z }));
   assert(
-    text.includes("2 of 2 done") && text.includes("stand as one Object (1 planks used)"),
+    text.includes("2 of 2 done") && text.includes("stands as one Object (1 planks used)"),
     text,
   );
   assertEquals(sim.objects.list.length, 1);
@@ -346,7 +346,7 @@ Deno.test("playtest 0004: parts on a tall block grid go up from beside it", () =
   });
   fern.inventory.stone = 4;
   const text = ok(run(sim, "a", "build", { design: "pillar lamp", x, z }));
-  assert(text.includes("3 of 3 done") && text.includes("stand as one Object"), text);
+  assert(text.includes("3 of 3 done") && text.includes("stands as one Object"), text);
   assertEquals(sim.objects.list[0].y, h + 1);
 });
 

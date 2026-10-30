@@ -78,7 +78,10 @@ export interface TickMessage {
   props?: PropDiff;
   /** Every Object, sent when one is built, taken apart, picked up or put down. */
   objects?: WorldObject[];
-  /** Where every Object is now (BODY_STRIDE each), sent when any moved. */
+  /**
+   * Where every Object is now, each of its pieces (BODY_STRIDE each, keyed id × 16 + piece), sent
+   * when any moved.
+   */
   bodies?: Float32Array<ArrayBuffer>;
   catalog?: CatalogDelta;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */

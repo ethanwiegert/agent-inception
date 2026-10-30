@@ -1,6 +1,13 @@
-import type { Catalog, DesignContent, DesignPart, Vec3 } from "./catalog.ts";
+import {
+  type Catalog,
+  type DesignContent,
+  type DesignPart,
+  jointKind,
+  shapeOf,
+  type Vec3,
+} from "./catalog.ts";
 import { type BodyState, poseBoxes, type Quat, yawQuat } from "./physics.ts";
-import type { World } from "./world.ts";
+import { solid, type World } from "./world.ts";
 
 /**
  * Objects: Designs built from Parts. An Object is built at its Design's first cell, turned in
@@ -8,7 +15,8 @@ import type { World } from "./world.ts";
  * body (physics.ts) and rests in any pose. For walking every part is rasterized to the tiles it
  * covers, whatever its pose: a low top (up to a block above the ground) is stood on, anything
  * taller is walked around, and parts two blocks or more above the ground leave room to walk
- * underneath. Bodies stacked on one column add up.
+ * underneath. Bodies stacked on one column add up. The moving pieces of a jointed Object (a door,
+ * a gate, a wheel) are never stood on: a closed door is a wall until someone opens it.
  */
 
 /**
@@ -106,14 +114,19 @@ export function turnPoint(
 export function partCost(d: DesignContent): Map<string, number> {
   const cost = new Map<string, number>();
   for (const p of d.parts) {
-    const v = p.size[0] * p.size[1] * p.size[2] * (FILL[p.part] ?? 1);
+    const v = p.size[0] * p.size[1] * p.size[2] * (FILL[shapeOf(p.part)] ?? 1);
     cost.set(p.material, (cost.get(p.material) ?? 0) + Math.max(1, Math.ceil(v - 1e-6)));
   }
   return cost;
 }
 
-/** One part's box in the world: x0, x1, y0, y1, z0, z1. */
-type Box = [number, number, number, number, number, number];
+/**
+ * One part's box in the world: x0, x1, y0, y1, z0, z1, the piece it's on (0: the root), and once
+ * it's marked, the tiles it covers (tx0, tx1, tz0, tz1).
+ */
+type Box = [number, number, number, number, number, number, number?, ...number[]];
+/** A thin part this close to a tile's edge is on the edge, between two tiles. */
+const EDGE = 0.2;
 
 export class Objects {
   readonly list: WorldObject[] = [];
@@ -161,7 +174,7 @@ export class Objects {
     for (const id of this.columns.get(z * w.sizeX + x) ?? []) {
       if (id === except) continue;
       for (const b of this.boxes.get(id) ?? []) {
-        if (b[1] > x && b[0] < x + 1 && b[5] > z && b[4] < z + 1) top = Math.max(top, b[3]);
+        if (Objects.covers(b, x, z)) top = Math.max(top, b[3]);
       }
     }
     return top;
@@ -189,14 +202,55 @@ export class Objects {
     });
   }
 
+  /**
+   * The tiles one box covers, [tx0, tx1, tz0, tz1]: those it reaches well into, or for a thin
+   * one, the tile its middle is over. A thin one on a tile's edge (an open door against its wall)
+   * is in the way on whichever side `walled` says is already taken, if only one is.
+   */
+  static span(
+    b: Box,
+    walled?: (tx: number, tz: number) => boolean,
+  ): [number, number, number, number] {
+    const [x0, x1, , , z0, z1] = b;
+    let tx0 = Math.floor(x0 + COVER), tx1 = Math.ceil(x1 - COVER) - 1;
+    let tz0 = Math.floor(z0 + COVER), tz1 = Math.ceil(z1 - COVER) - 1;
+    const thinX = tx1 < tx0, thinZ = tz1 < tz0;
+    if (thinX) tx0 = tx1 = Math.floor((x0 + x1) / 2);
+    if (thinZ) tz0 = tz1 = Math.floor((z0 + z1) / 2);
+    const edge = (m: number, taken: (t: number) => boolean) => {
+      const t = Math.floor(m), f = m - t;
+      const o = f < EDGE ? t - 1 : f > 1 - EDGE ? t + 1 : t;
+      return o !== t && taken(o) && !taken(t) ? o : t;
+    };
+    const all = (a: number, b: number, f: (i: number) => boolean) => {
+      for (let i = a; i <= b; i++) if (!f(i)) return false;
+      return true;
+    };
+    if (walled && thinX) {
+      tx0 = tx1 = edge((x0 + x1) / 2, (t) => all(tz0, tz1, (tz) => walled(t, tz)));
+    }
+    if (walled && thinZ) {
+      tz0 = tz1 = edge((z0 + z1) / 2, (t) => all(tx0, tx1, (tx) => walled(tx, t)));
+    }
+    return [tx0, tx1, tz0, tz1];
+  }
+
+  /** The tiles a box covers: as marked, or as it would be on its own. */
+  static marked(b: Box): [number, number, number, number] {
+    return b.length > 7 ? [b[7]!, b[8]!, b[9]!, b[10]!] : Objects.span(b);
+  }
+
+  /** Whether box `b` covers tile (tx, tz). */
+  static covers(b: Box, tx: number, tz: number): boolean {
+    const [tx0, tx1, tz0, tz1] = Objects.marked(b);
+    return tx >= tx0 && tx <= tx1 && tz >= tz0 && tz <= tz1;
+  }
+
   /** Tile keys a set of part boxes covers. */
   static cover(world: World, boxes: Box[]): number[] {
     const keys = new Set<number>();
-    for (const [x0, x1, , , z0, z1] of boxes) {
-      let tx0 = Math.floor(x0 + COVER), tx1 = Math.ceil(x1 - COVER) - 1;
-      let tz0 = Math.floor(z0 + COVER), tz1 = Math.ceil(z1 - COVER) - 1;
-      if (tx1 < tx0) tx0 = tx1 = Math.floor((x0 + x1) / 2);
-      if (tz1 < tz0) tz0 = tz1 = Math.floor((z0 + z1) / 2);
+    for (const b of boxes) {
+      const [tx0, tx1, tz0, tz1] = Objects.marked(b);
       for (let tz = tz0; tz <= tz1; tz++) {
         for (let tx = tx0; tx <= tx1; tx++) {
           if (tx >= 0 && tz >= 0 && tx < world.sizeX && tz < world.sizeZ) {
@@ -234,6 +288,8 @@ export class Objects {
     this.list.length = 0;
     for (const o of list) {
       const copy = { ...o };
+      if (o.pieces) copy.pieces = structuredClone(o.pieces);
+      if (o.joints) copy.joints = structuredClone(o.joints);
       if (!copy.pos || !copy.rot) {
         // Saved before Objects moved: where it was built, settling from there.
         const d = this.catalog.get(o.design)?.content as DesignContent | undefined;
@@ -257,7 +313,30 @@ export class Objects {
     this.clear(o);
     const d = this.design(o);
     if (!d || o.held) return;
-    const boxes = poseBoxes(d, o.pos, o.rot) as Box[];
+    // Pins and rails are hardware: too small to stand on or be stopped by.
+    const boxes = (poseBoxes(d, o.pos, o.rot, o.pieces) as Box[]).filter((_, i) =>
+      !jointKind(d.parts[i].part)
+    );
+    // The fixed parts first; then the moving ones, which lean on what's walled already.
+    const w = this.world, taken = new Set<number>();
+    for (const b of boxes) {
+      if (b[6]) continue;
+      const span = Objects.span(b);
+      b.length = 7, b.push(...span);
+      for (let tz = span[2]; tz <= span[3]; tz++) {
+        for (let tx = span[0]; tx <= span[1]; tx++) taken.add(tz * w.sizeX + tx);
+      }
+    }
+    for (const b of boxes) {
+      if (!b[6]) continue;
+      const y = Math.floor(b[2] + 0.5);
+      const span = Objects.span(
+        b,
+        (tx, tz) =>
+          taken.has(tz * w.sizeX + tx) || (w.inBounds(tx, y, tz) && solid(w.get(tx, y, tz))),
+      );
+      b.length = 7, b.push(...span);
+    }
     const keys = Objects.cover(this.world, boxes);
     this.boxes.set(o.id, boxes);
     this.tiles.set(o.id, keys);
@@ -298,19 +377,20 @@ export class Objects {
       return;
     }
     const tx = key % w.sizeX, tz = Math.floor(key / w.sizeX);
-    const ground = w.top[key] + 1;
-    let top = -Infinity, topId = ids[0], loose = false;
+    let lift = -Infinity, topId = ids[0], loose = false;
     for (const id of ids) {
       const o = this.get(id);
       for (const b of this.boxes.get(id) ?? []) {
-        const [x0, x1, y0, y1, z0, z1] = b;
-        if (x1 <= tx || x0 >= tx + 1 || z1 <= tz || z0 >= tz + 1) continue;
+        const [, , y0, y1] = b;
+        if (!Objects.covers(b, tx, tz)) continue;
+        // Measured from the floor it stands over: inside a house, its floor, not its roof.
+        const floor = w.floorBelow(tx, tz, Math.floor(y0 + 0.01));
+        const ground = (floor < 0 ? w.top[key] : floor) + 1;
         if (y0 - ground >= HEADROOM || y1 <= ground) continue; // overhead, or buried
-        if (y1 > top) top = y1, topId = id;
-        if (y1 - ground > FLAT && o && !this.steady(o)) loose = true;
+        if (y1 - ground > lift) lift = y1 - ground, topId = id;
+        if (y1 - ground > FLAT && o && (b[6] || !this.steady(o))) loose = true;
       }
     }
-    const lift = top - ground;
     w.objectAt[key] = topId;
     w.objSolid[key] = lift > 1 || loose ? 1 : 0;
     w.objLift[key] = lift > FLAT && lift <= 1 ? lift : 0;

@@ -54,7 +54,8 @@ src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
                     shared by handlers), blocks.ts (block ids for the Catalog's Materials, patterns),
-                    catalog.ts (append-only Catalog: entries, content schemas, Proposals),
+                    catalog.ts (append-only Catalog: entries, content schemas, Proposals,
+                    rigOf: a Design's pieces and joints),
                     nature.ts (nature's entries as Catalog data: every block, item, plant, the
                     farmer, animal bodies, drops/growth/food Relations, example Rules),
                     rules.ts (Rule schema + engine: triggers, budget, effects),
@@ -66,8 +67,10 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     any pose; part cost; parts rasterized to tiles for walking: stand on low heavy
                     tops, walk around tall or light ones),
                     physics.ts (rigid bodies: shapes from Designs, voxel/slope/capsule/body
-                    contacts, sequential impulses, buoyancy, sleeping), bodytools.ts (push,
-                    carry, put_down),
+                    contacts, sequential impulses, buoyancy, sleeping; a jointed Design's pieces
+                    as bodies with hinge/axle/slider/motor rows), bodytools.ts (push, carry,
+                    put_down), jointtools.ts (use: swing hinges and sliders, switch motors;
+                    Mechanisms in look),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),
@@ -97,7 +100,7 @@ shader has a WGSL mirror of `slopeDrop` that must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M9 are done; M10, joints, is next. The
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M10 are done; M11, fields, is next. The
 hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report

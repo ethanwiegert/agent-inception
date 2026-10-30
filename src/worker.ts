@@ -196,8 +196,16 @@ function send() {
   let bodies: Float32Array<ArrayBuffer> | undefined;
   if (s.posesVersion !== sentPosesVersion || s.objects.version !== sentObjectsVersion) {
     sentPosesVersion = s.posesVersion;
-    bodies = new Float32Array(s.objects.list.length * BODY_STRIDE);
-    s.objects.list.forEach((o, i) => bodies!.set([o.id, ...o.pos, ...o.rot], i * BODY_STRIDE));
+    // Every piece of a jointed Object is its own body: keyed id × 16 + piece.
+    const n = s.objects.list.reduce((n, o) => n + 1 + (o.pieces?.length ?? 0), 0);
+    bodies = new Float32Array(n * BODY_STRIDE);
+    let i = 0;
+    for (const o of s.objects.list) {
+      bodies.set([o.id * 16, ...o.pos, ...o.rot], i++ * BODY_STRIDE);
+      o.pieces?.forEach((p, k) =>
+        bodies!.set([o.id * 16 + k + 1, ...p.pos, ...p.rot], i++ * BODY_STRIDE)
+      );
+    }
   }
 
   const edits = Int32Array.from(s.pendingEdits);

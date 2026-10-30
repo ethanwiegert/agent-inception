@@ -119,6 +119,23 @@ add("part", "box", "A rectangular block of any size.", { shape: "box" });
 add("part", "sphere", "A ball, stretched by its size.", { shape: "sphere" });
 add("part", "cylinder", "A round post, stretched by its size.", { shape: "cylinder" });
 add("part", "cone", "A point on a round base, stretched by its size.", { shape: "cone" });
+// Joints: a pin along its length (a slider's rail) joining two pieces of a Design.
+add("part", "hinge", "A pin two pieces swing about, between limits: doors, gates, lids.", {
+  shape: "cylinder",
+  joint: "hinge",
+});
+add("part", "axle", "A pin a piece spins freely on: wheels, rollers, weathervanes.", {
+  shape: "cylinder",
+  joint: "axle",
+});
+add("part", "slider", "A rail a piece slides along, between limits: drawers, sliding doors.", {
+  shape: "box",
+  joint: "slider",
+});
+add("part", "motor", "An axle that turns itself while it's switched on: sails, mills, carts.", {
+  shape: "cylinder",
+  joint: "motor",
+});
 
 // ---------------------------------------------------------------- designs
 
@@ -160,6 +177,91 @@ const scatter = (seed: number) => {
 add("design", "stone bench", "A low seat of stone with a plank top.", {
   blocks: { palette: { s: "stone" }, layers: [["s.s"]] },
   parts: [part("box", "planks", [1.5, 1.1, 0.5], [3, 0.2, 1])],
+});
+
+/** A joint part: a pin of `mat` at `at`, `size` long, joining two pieces. */
+const joint = (
+  kind: string,
+  mat: string,
+  at: Vec3,
+  size: Vec3,
+  joins: [string, string],
+  extra: Record<string, unknown> = {},
+  turn = 0,
+  tilt = 0,
+) => ({ ...part(kind, mat, at, size, turn, tilt), joins, ...extra });
+const piece = (p: ReturnType<typeof part>, name: string) => ({ ...p, piece: name });
+
+// Worked examples of joints. The gate hangs at the north edge of its tile and swings north, clear
+// of the gateway, so the way through is open once it's open.
+add("design", "garden gate", "A plank gate between two posts. use it to open and shut.", {
+  anchored: true,
+  parts: [
+    part("box", "planks", [0.9, 0.6, 0.1], [0.16, 1.2, 0.16]),
+    part("box", "planks", [2.1, 0.6, 0.1], [0.16, 1.2, 0.16]),
+    piece(part("box", "planks", [1.5, 0.55, 0.1], [0.9, 0.85, 0.06]), "gate"),
+    joint("hinge", "planks", [1.02, 0.55, 0.1], [0.05, 0.85, 0.05], ["main", "gate"], {
+      limits: [0, 95],
+    }),
+  ],
+});
+const wheels = [[0.45, 0.04], [0.45, 0.96], [1.55, 0.04], [1.55, 0.96]].flatMap(([x, z], i) => [
+  piece(part("cylinder", "planks", [x, 0.28, z], [0.56, 0.07, 0.56], 0, 90), `wheel ${i + 1}`),
+  joint(
+    "axle",
+    "planks",
+    [x, 0.28, 0.5 + (z - 0.5) * 0.85],
+    [0.05, 0.12, 0.05],
+    [
+      "main",
+      `wheel ${i + 1}`,
+    ],
+    {},
+    0,
+    90,
+  ),
+]);
+add("design", "hand cart", "A plank bed on four wheels: put things on it and push it along.", {
+  parts: [
+    part("box", "planks", [1, 0.5, 0.5], [1.7, 0.08, 0.84]),
+    part("box", "planks", [0.45, 0.36, 0.5], [0.08, 0.2, 0.76]),
+    part("box", "planks", [1.55, 0.36, 0.5], [0.08, 0.2, 0.76]),
+    ...wheels,
+  ],
+});
+const sails = [0, 90, 180, -90].map((t) =>
+  piece(
+    part(
+      "box",
+      "planks",
+      [0.5 + 0.85 * Math.sin(t * DEG), 3.6 + 0.85 * Math.cos(t * DEG), -0.22],
+      [0.04, 1.3, 0.32],
+      90,
+      t,
+    ),
+    "sails",
+  )
+);
+add("design", "windmill", "A post mill whose sails turn on a motor. use it to start or stop.", {
+  anchored: true,
+  parts: [
+    part("box", "planks", [0.5, 2, 0.5], [0.8, 4, 0.8]),
+    part("cone", "thatch", [0.5, 4.3, 0.5], [1.1, 0.6, 1.1]),
+    piece(part("cylinder", "planks", [0.5, 3.6, -0.18], [0.3, 0.12, 0.3], 0, 90), "sails"),
+    ...sails,
+    joint(
+      "motor",
+      "planks",
+      [0.5, 3.6, -0.02],
+      [0.08, 0.2, 0.08],
+      ["main", "sails"],
+      {
+        speed: 45,
+      },
+      0,
+      90,
+    ),
+  ],
 });
 
 const TREE_GROUND = ["grass", "dirt"];

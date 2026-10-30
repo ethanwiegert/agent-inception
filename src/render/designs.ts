@@ -1,11 +1,12 @@
 import { identity, mat4, rotateX, rotateY, scale, translate } from "../math.ts";
-import type {
-  Catalog,
-  DesignContent,
-  DesignPart,
-  MaterialContent,
-  Role,
-  Vec3,
+import {
+  type Catalog,
+  type DesignContent,
+  type DesignPart,
+  type MaterialContent,
+  type Role,
+  shapeOf,
+  type Vec3,
 } from "../sim/catalog.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { MeshBuilder, Rgb, Style } from "./meshes.ts";
@@ -29,8 +30,8 @@ export function materialRgb(hex: string): Rgb {
 export interface MeshOptions {
   /** Only the parts with this role (undefined: the parts without a role; null: all parts). */
   role?: Role | null;
-  /** Only the parts this accepts (instead of `role`). */
-  only?: (p: DesignPart) => boolean;
+  /** Only the parts this accepts (instead of `role`), by part and its index. */
+  only?: (p: DesignPart, i: number) => boolean;
   /** The point that becomes the template origin; ANCHOR by default. */
   origin?: Vec3;
   /** Bodies hold still in the wind; plants sway. */
@@ -53,7 +54,7 @@ export function meshDesign(
   for (const p of design.parts) top = Math.max(top, p.at[1] + p.size[1] / 2);
   let drawn = 0;
   design.parts.forEach((p, i) => {
-    if (o.only ? !o.only(p) : o.role !== null && p.role !== o.role) return;
+    if (o.only ? !o.only(p, i) : o.role !== null && p.role !== o.role) return;
     const mat = catalog.byName(p.material)?.content as MaterialContent | undefined;
     if (!mat) return;
     meshPart(b, p, i, mat, o.colors?.get(p.material), origin, o.sway === false ? 0 : top);
@@ -106,7 +107,8 @@ function meshPart(
   rotateY(m, p.turn * DEG);
   rotateX(m, p.tilt * DEG);
   const thin = Math.min(sx, sz);
-  switch (p.part) {
+  const shape = shapeOf(p.part);
+  switch (shape) {
     case "box":
       b.box(m, p.size, style, Math.min(0.1, 0.3 * Math.min(sx, sy, sz)));
       break;
@@ -125,7 +127,7 @@ function meshPart(
       scale(m, sx, sy, sz);
       const segments = thin < 0.06 ? 3 : thin < 0.2 ? 6 : thin < 0.6 ? 9 : 14;
       const opts = { segments, caps: thin >= 0.06 };
-      if (p.part === "cone") b.cone(m, 0.5, 1, style, opts);
+      if (shape === "cone") b.cone(m, 0.5, 1, style, opts);
       else b.cylinder(m, 0.5, 0.5, 1, style, opts);
       break;
     }
