@@ -88,6 +88,8 @@ client.onEvent = (event) => {
     overlay.log(`✦ ${event.rule}`, event.text);
   } else if (event.type === "catalog") {
     overlay.log(event.agent ? agentName(event.agent) : "catalog", event.text);
+  } else if (event.type === "physics") {
+    overlay.log(agentName(event.agent), event.text);
   }
 };
 
@@ -326,6 +328,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
       catalog: client.catalog,
       props: client.props,
       objects: client.objects,
+      bodies: client.bodies(now),
       tick: client.tick,
       day: client.day,
       weather: { clouds: client.clouds },

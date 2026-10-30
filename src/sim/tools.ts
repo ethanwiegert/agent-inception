@@ -16,6 +16,7 @@ import {
 } from "./jobs.ts";
 import { BUILD_HANDLERS, BUILD_TOOL_DEFS } from "./buildtools.ts";
 import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
+import { BODY_HANDLERS, BODY_TOOL_DEFS, CARRY_MAX, kg, PUSH_MAX } from "./bodytools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
@@ -120,6 +121,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   ...BUILD_TOOL_DEFS,
   ...MAKE_TOOL_DEFS,
+  ...BODY_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -214,6 +216,17 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
     const handler = HANDLERS[name];
     if (!handler) return done(`Unknown tool "${name}".`, true);
     if (name !== "_whoami") agent.lastActive = sim.tick;
+    // An argument the tool doesn't take is a mistake to point out, not to ignore quietly.
+    const known = TOOL_DEFS.find((t) => t.name === name)?.inputSchema.properties;
+    const unknown = known && Object.keys(args ?? {}).filter((k) => !(k in known));
+    if (unknown?.length) {
+      const takes = Object.keys(known!);
+      return done(
+        `${name} doesn't take ${unknown.map((k) => `"${k}"`).join(", ")}. ` +
+          (takes.length ? `It takes ${takes.join(", ")}.` : "It takes no arguments."),
+        true,
+      );
+    }
     const out = handler(sim, agent, args ?? {});
     if (typeof out === "string") done(out);
     else sim.enqueue(agent, callId, out);
@@ -241,7 +254,9 @@ function join(sim: Sim, session: string, args: Args): string {
     "one call, break_block digs, and build puts up a whole Design (its blocks, and its parts as " +
     "an Object like a bench). interact chops trees, breaks rocks, picks flowers and shears, " +
     "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
-    "into brick. People are watching " +
+    "into brick. Objects built from parts are real things: they fall, stack, roll, float or " +
+    "sink, and you can push them along or carry light ones and put_down them anywhere (mind " +
+    "anyone standing downhill of a rolling boulder). People are watching " +
     "you live here, so take your time and narrate now and then with say. Choose how you look " +
     "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
@@ -258,6 +273,7 @@ const HANDLERS: Record<string, Handler> = {
   ...CATALOG_HANDLERS,
   ...BUILD_HANDLERS,
   ...MAKE_HANDLERS,
+  ...BODY_HANDLERS,
   look: (sim, agent, args) =>
     describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
 
@@ -268,8 +284,8 @@ const HANDLERS: Record<string, Handler> = {
       (sim.world.objSolid[z * sim.world.sizeX + x] ? objectThere(sim, x, z) : undefined);
     if (inWay) {
       throw new Error(
-        `You can't stand at (${x}, ${z}): ${inWay}, too tall to stand on. ` +
-          "Walk to a tile beside it.",
+        `You can't stand at (${x}, ${z}): ${inWay}, in the way (too tall, or light enough to ` +
+          "kick away). Walk to a tile beside it.",
       );
     }
     return (function* () {
@@ -790,6 +806,54 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       "  (Animals shy away from villagers walking right at them, and follow anyone carrying " +
         "their food: is_food_for in the Catalog. interact shears, milks or collects eggs when " +
         "theirs is ready.)",
+    );
+  }
+  // Objects that move: where they are now and what it takes to move them.
+  const things = sim.objects.list
+    .filter((o) => sim.physics.shape(o.design)?.fixed === false)
+    .map((o) => ({ o, c: sim.physics.center(o) }))
+    .map((t) => ({ ...t, d: Math.hypot(t.c[0] - agent.x, t.c[2] - agent.z) }))
+    .filter((t) => t.d <= r * 1.5)
+    .sort((a, b) => a.d - b.d);
+  if (things.length) {
+    lines.push("", "Things that move:");
+    for (const { o, c, d } of things.slice(0, 8)) {
+      const mass = sim.physics.shape(o.design)!.mass;
+      const how = o.held === agent.id
+        ? "you carry it"
+        : o.held
+        ? `carried by ${sim.agents.find((a) => a.id === o.held)?.name ?? "someone"}`
+        : mass <= CARRY_MAX
+        ? "carry or push"
+        : mass <= PUSH_MAX
+        ? "push"
+        : "too heavy to move";
+      const motion = !o.asleep && !o.held && Math.hypot(...o.vel) > 0.3 ? ", moving" : "";
+      lines.push(
+        `  ${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
+          Math.floor(c[2])
+        } (${Math.round(d)} tiles, ${kg(mass)}: ${how}${motion})`,
+      );
+    }
+    if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);
+  }
+  // Things of yours that rolled, slid or floated out of view, so they're never simply lost.
+  const yours = sim.objects.list
+    .filter((o) => (o.mover ?? o.by) === agent.name && sim.physics.shape(o.design)?.fixed === false)
+    .map((o) => ({ o, c: sim.physics.center(o) }))
+    .map((t) => ({ ...t, d: Math.hypot(t.c[0] - agent.x, t.c[2] - agent.z) }))
+    .filter((t) => t.d > r * 1.5)
+    .sort((a, b) => a.d - b.d);
+  if (yours.length) {
+    lines.push(
+      "",
+      `Yours out of view: ${
+        yours.slice(0, 5).map(({ o, c, d }) =>
+          `${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
+            Math.floor(c[2])
+          } (${Math.round(d)} tiles${!o.asleep && !o.held ? ", moving" : ""})`
+        ).join(", ")
+      }${yours.length > 5 ? ` and ${yours.length - 5} more` : ""}.`,
     );
   }
   const schools = sim.schools

@@ -56,6 +56,9 @@ Saves may break freely until M14; save versioning and migrations come last befor
 - **M8 — character and land.** `set_body` (any Design with a body part; sprites removed),
   `terraform` (raise, lower, flatten, conserving earth), crops drawn from their Design (wheat opts
   into blades), a `grow` Rule effect; playtest [0005](playtests/0005-m8.md).
+- **M9 — rigid bodies.** Built Objects fall, stack, topple, roll, float or sink by Material density;
+  `push`, `carry`, `put_down`; knockdowns with grace and blame; `pushed`/`carried`/`landed` triggers
+  and an `impulse` effect; playtest [0006](playtests/0006-m9.md).
 
 ## V1
 
@@ -305,6 +308,54 @@ Budget: sim tick < 4 ms with 500 awake bodies.
 - **M10 joints**: hinge, axle, slider, motor; doors, carts, windmills become possible Designs.
 - **M11 fields**: light from lamp Parts, then fire (spreads to Materials that burn), then signals.
 
+M9 is done (playtest [0006](playtests/0006-m9.md)). Grill outcome (2026-10-29):
+
+- **Built Objects are rigid bodies.** Every Object built from a parts-only Design is a body made of
+  its parts (a compound shape; mass is each part's volume × its Material's density). It falls,
+  stacks, topples, rolls, floats or sinks, and rests in any pose, no longer snapped to tiles or
+  quarter turns. Props stay static scenery that bodies bump into. A Design marked `"anchored": true`
+  stays put.
+- **Blocks stay static.** Voxels are the world bodies collide with (slopes included). Digging out
+  what an Object stands on makes it fall; blocks themselves never fall.
+- **`push` and `carry` / `put_down`.** `push {x, z, toward, tiles}` shoves a body along by walking
+  behind it (heavier is slower, too heavy won't budge; tall things topple, round things roll on).
+  `carry {x, z}` lifts a light body overhead (carrying slows the walk); `put_down {x, z, turn}` sets
+  it down at any angle, and it settles or falls from there.
+- **Full interaction with villagers and animals.** Walking villagers and animals shove light bodies.
+  A hard enough hit (by momentum) knocks a villager over: a stumble, the current job pauses about 2
+  s and carries on; never damage. After a knockdown a villager can't be knocked over again for about
+  10 s. The feed and the victim's next tool result name who pushed or dropped the body. Animals
+  bolt.
+- **Rules see physics.** Triggers `pushed`, `carried`, `landed` (with `what`), and an `impulse`
+  effect that nudges bodies within ±4 of the event (capped), for wind gusts and bouncy mushrooms.
+
+Decided in the build (M9):
+
+- **Engine** (`sim/physics.ts`): each part carries sample points over its surface (corners, edge
+  midpoints, faces, rims; true spheres are exact), tested against voxels (slopes follow
+  `slopeDrop`), solid props (a post 0.6 wide and 2.5 tall), villager and animal capsules and other
+  bodies; box pairs push apart along their separating axis. Sequential impulses, 2 steps × 8 passes
+  per tick, at most four contacts per direction per pair, friction 0.6 between bodies and 1.1 on the
+  ground (a box stays on a 45° slope; balls still roll down). Buoyancy per part by how deep it sits
+  (water's density is 1). A body still for 15 ticks sleeps; edits nearby, hits, pushes, Rules and
+  walkers wake it. Mass is tonnes: a block is a cubic meter.
+- **Designs with blocks keep their parts fixed** (a house's door doesn't fall off); parts-only
+  Designs are bodies unless `"anchored": true`. Objects remember where `build` put them up, so
+  building again there knows it's done unless the Object was moved away.
+- **Light Objects are walked around** (under 0.6 t): stepping onto a light crate only kicked it
+  away. Heavier low ones are stood on, as in M7. Walking villagers shove with 4 t·m/s², the `push`
+  tool with 10 (a crate slides up to about 0.9 t on grass; round things roll far heavier); `carry`
+  lifts up to 300 kg and slows the walk to 75%; refusals over 8 t.
+- **Knockdowns**: a body coming at a villager at 1.5 blocks/s with 0.12 t·m/s or more knocks them
+  over for 2 s (their job waits, they slide back half a block), then 10 s of grace. Your own push
+  and what you dropped never knock you over. The victim's next result and the feed name who moved it
+  last. Animals hit half as hard bolt.
+- **Rules**: `landed` fires at 2.5 blocks/s or more after a few ticks in the air; a body a Rule
+  nudged doesn't fire `landed` again until it sleeps (Rules don't chain). `impulse` is a change of
+  speed (≤ 8 near an event, ≤ 3 and a compass direction on a timer), up to 16 bodies.
+- **Page**: the worker streams every Object's pose (8 floats) whenever one moved; the page
+  interpolates and draws Objects per frame instead of in the GPU-culled prop batch.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no
@@ -372,6 +423,11 @@ Pick these up in the gate of whichever milestone touches them.
 - Playtests: spawn cheap players as an agent type limited to Bash, so they can't stray into
   unrelated tools (two did in 0004, harmlessly).
 - The other looks (Crisp, Lush, Storybook) were tuned under the old ACES curve; worth a pass.
+- **500 piled bodies** cost 6-9 ms a sim tick on the cloud VM (budget 4 ms; 500 spread out cost ~3.7
+  ms). Measure on the dev box first; if still over, warm-started contacts or islands that sleep
+  together (both tried in M9 without enough gain to keep), or Zig→WASM for the solver.
+- From playtest 0006: an Object covering two tiles shows as two marks on the look map; the look map
+  stops at radius 12.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

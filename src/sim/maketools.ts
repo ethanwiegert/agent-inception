@@ -139,7 +139,7 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     const things = tiles.filter(([x, z]) => {
       const o = sim.objects.at(x, z);
       if (o) {
-        if (seen.has(o.id) || !fits(objectName(sim, o))) return false;
+        if (seen.has(o.id) || o.held || !fits(objectName(sim, o))) return false;
         seen.add(o.id);
         return true;
       }
@@ -209,11 +209,15 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
           const content = sim.objects.design(o);
           const parts = content?.parts.length ?? 1;
           yield* work(agent, Anim.Build, Math.min(8 * TICK_HZ, PART_TICKS * parts));
-          if (!sim.objects.get(o.id)) {
+          if (!sim.objects.get(o.id) || o.held) {
             skipped.push(`(${x},${z}) the ${label} is gone`);
             continue;
           }
+          // Whatever rested on it falls.
+          const c = sim.physics.center(o);
           sim.objects.remove(o);
+          sim.physics.forget(o.id);
+          sim.physics.wakeNear(sim.objects.list, c[0], c[1], c[2], 1);
           take(content ? [...partCost(content)] : []);
           did.push(`took apart the ${label}`);
           sim.fire("gathered", agent, x, w.heightAt(x, z), z, label);

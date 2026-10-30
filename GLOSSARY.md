@@ -28,7 +28,12 @@ map, level, save
 **Tile**: One column position (x, z) on the island, as tools and `look` address it. _Avoid_: block,
 cell
 
-**Object**: One built Design standing in the world. _Avoid_: item, entity, model
+**Object**: One built Design standing in the world. One built from parts is a rigid body: it falls,
+stacks, rolls, floats or sinks, and can be pushed or carried, unless its Design is anchored or built
+into blocks. _Avoid_: item, entity, model
+
+**Knockdown**: A villager bowled over by a hard enough hit from a moving Object: down for a moment,
+then their job carries on. Never damage. _Avoid_: damage, hit points, stun
 
 **Prop**: An Object the world grew by itself from a nature-authored Design: a tree, bush, flower
 patch, reed, rock or lily pad. _Avoid_: decoration

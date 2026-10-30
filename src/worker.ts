@@ -8,6 +8,7 @@ import {
   type AgentProfile,
   ANIMAL_READY,
   ANIMAL_STRIDE,
+  BODY_STRIDE,
   type CatalogDelta,
   CROP_STRIDE,
   type FromWorker,
@@ -31,6 +32,7 @@ let sentCropsVersion = -1;
 let sentCropsCatalog = -1;
 let sentPropsVersion = -1;
 let sentObjectsVersion = -1;
+let sentPosesVersion = -1;
 let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
@@ -95,6 +97,7 @@ function start(caughtUp: number) {
   sentAgentsVersion = sentCropsVersion = sentCropsCatalog = -1;
   sentPropsVersion = s.props.version;
   sentObjectsVersion = s.objects.version;
+  sentPosesVersion = -1;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -134,7 +137,11 @@ function send() {
   const s = sim!;
   const agents = new Float32Array(s.agents.length * AGENT_STRIDE);
   s.agents.forEach((a, i) => {
-    agents.set([a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color], i * AGENT_STRIDE);
+    const carry = s.carried(a) ? 1 : 0, down = Math.max(0, (a.downUntil ?? 0) - s.tick);
+    agents.set(
+      [a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color, carry, down],
+      i * AGENT_STRIDE,
+    );
   });
 
   const animals = new Float32Array(s.animals.length * ANIMAL_STRIDE);
@@ -186,6 +193,13 @@ function send() {
     }
   }
 
+  let bodies: Float32Array<ArrayBuffer> | undefined;
+  if (s.posesVersion !== sentPosesVersion || s.objects.version !== sentObjectsVersion) {
+    sentPosesVersion = s.posesVersion;
+    bodies = new Float32Array(s.objects.list.length * BODY_STRIDE);
+    s.objects.list.forEach((o, i) => bodies!.set([o.id, ...o.pos, ...o.rot], i * BODY_STRIDE));
+  }
+
   const edits = Int32Array.from(s.pendingEdits);
   s.pendingEdits = [];
   post({
@@ -208,6 +222,7 @@ function send() {
     catalog,
     edits,
     crops,
+    bodies,
     events: s.events.splice(0),
     results: s.results.splice(0),
   }, [
@@ -216,6 +231,7 @@ function send() {
     schools.buffer,
     edits.buffer,
     ...(crops ? [crops.buffer] : []),
+    ...(bodies ? [bodies.buffer] : []),
   ]);
 }
 

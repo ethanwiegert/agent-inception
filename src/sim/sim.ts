@@ -1,4 +1,11 @@
-import { type Animal, type Farmer, spawnAnimals, SPECIES, stepAnimals } from "./animals.ts";
+import {
+  type Animal,
+  AnimalMode,
+  type Farmer,
+  spawnAnimals,
+  SPECIES,
+  stepAnimals,
+} from "./animals.ts";
 import { BlockRegistry } from "./blocks.ts";
 import {
   Catalog,
@@ -10,7 +17,8 @@ import {
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { perlin2 } from "./noise.ts";
 import { Objects, type WorldObject } from "./objects.ts";
-import { standY } from "./path.ts";
+import { levelAt, standY, step as stepTo } from "./path.ts";
+import { type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "./physics.ts";
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
@@ -23,7 +31,26 @@ export const TICKS_PER_DAY = TICK_HZ * 600;
 /** Ticks in `hours` game hours. */
 export const gameHours = (hours: number) => Math.round((hours / 24) * TICKS_PER_DAY);
 
-export const Anim = { Idle: 0, Walk: 1, Till: 2, Plant: 3, Harvest: 4, Build: 5, Fish: 6 } as const;
+export const Anim = {
+  Idle: 0,
+  Walk: 1,
+  Till: 2,
+  Plant: 3,
+  Harvest: 4,
+  Build: 5,
+  Fish: 6,
+  /** Knocked over by something heavy, getting back up. */
+  Fall: 7,
+} as const;
+
+/** A blow this fast (blocks/s) with this much momentum (tonne · blocks/s) knocks a villager over. */
+export const KNOCK_SPEED = 1.5;
+export const KNOCK_MOMENTUM = 0.12;
+/** Ticks a knocked-over villager stays down, and after that can't be knocked over again. */
+export const DOWN_TICKS = 40;
+export const GRACE_TICKS = 200;
+/** Objects at least this heavy (tonnes) stay put when stood on; lighter ones are walked around. */
+export const STEADY_MASS = 0.6;
 
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
@@ -51,6 +78,14 @@ export interface Agent {
   gentle?: boolean;
   /** Things Rules did to this villager, told with the next tool result. Not saved. */
   notes: string[];
+  /** Knocked over until this tick (their job waits), and safe from it again until graceUntil. */
+  downUntil?: number;
+  graceUntil?: number;
+  /** What they were doing when knocked over, and which way they're sliding. */
+  resume?: number;
+  knock?: [number, number];
+  /** The Object they're pushing (it doesn't knock them over). Not saved. */
+  pushing?: number;
   queue: { callId: number; job: Job }[];
 }
 
@@ -70,7 +105,9 @@ export type SimEvent =
   /** A Rule's `say` effect; agent is 0 for timer Rules. */
   | { type: "rule"; agent: number; rule: string; text: string }
   /** Catalog news: entries added, proposals opened, votes, outcomes. */
-  | { type: "catalog"; agent: number; text: string };
+  | { type: "catalog"; agent: number; text: string }
+  /** Something physical happened to a villager: knocked over, dropped what they carried. */
+  | { type: "physics"; agent: number; text: string };
 
 export interface CallResult {
   callId: number;
@@ -116,6 +153,10 @@ export class Sim {
   readonly props: Props;
   /** Designs built from Parts: benches, fences, statues (static until physics phase 2). */
   readonly objects: Objects;
+  /** Rigid bodies: every movable Object falls, stacks, rolls and floats here. */
+  readonly physics: Physics;
+  /** Bumps whenever an Object moved (the page gets every pose again). */
+  posesVersion = 0;
   animals: Animal[];
   /** Fish schools in rivers and the sea. */
   schools: School[];
@@ -143,6 +184,11 @@ export class Sim {
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed, this.catalog);
     this.objects = new Objects(this.world, this.catalog);
+    this.physics = new Physics(this.world, this.catalog);
+    this.objects.steady = (o) => {
+      const shape = this.physics.shape(o.design);
+      return !shape || shape.fixed || shape.mass >= STEADY_MASS;
+    };
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
@@ -190,8 +236,9 @@ export class Sim {
     }
     // Whatever stood on the column (flowers, a lily pad) goes with the change.
     if (this.props.at(x, z)) this.props.set(x, z, null);
-    // An Object over the column stands on the new ground.
+    // An Object over the column stands on the new ground, and anything nearby may now fall.
     if (w.objectAt[key]) this.objects.refresh(x, z);
+    this.physics.wakeNear(this.objects.list, x + 0.5, y + 0.5, z + 0.5, 1.5);
   }
 
   cropGrowth(crop: Crop): number {
@@ -363,6 +410,7 @@ export class Sim {
     for (const agent of this.agents) {
       // Bodies follow the ground: slopes while walking, edits while standing still.
       agent.y += (standY(this.world, agent.x, agent.z, agent.y) - agent.y) * 0.35;
+      if (this.down(agent)) continue;
       const current = agent.queue[0];
       if (!current) continue;
       try {
@@ -376,11 +424,171 @@ export class Sim {
       agent.queue.shift();
       agent.anim = Anim.Idle;
     }
+    this.stepBodies();
     this.rules.tick(this.tick, (this.tick + this.dayOffset) % TICKS_PER_DAY, TICKS_PER_DAY);
     if (this.tick % TICK_HZ === 0 && this.catalog.open().length) this.settleProposals();
   }
 
   private farmers: Farmer[] = [];
+  private movers: Mover[] = [];
+  /** Where each villager and animal stood last tick, for their velocity. */
+  private lastAt = new Float64Array(0);
+
+  /** Whether `agent` is knocked over this tick (sliding, then getting up); their job waits. */
+  private down(agent: Agent): boolean {
+    if (agent.downUntil === undefined) return false;
+    if (this.tick >= agent.downUntil) {
+      agent.anim = agent.resume ?? Anim.Idle;
+      delete agent.downUntil, delete agent.resume, delete agent.knock;
+      return false;
+    }
+    agent.anim = Anim.Fall;
+    const left = agent.downUntil - this.tick;
+    if (agent.knock && left > DOWN_TICKS - 10) {
+      // Knocked back half a block over the first half second, if there's ground to slide onto.
+      const nx = agent.x + agent.knock[0] * 0.05, nz = agent.z + agent.knock[1] * 0.05;
+      const w = this.world, tx = Math.floor(nx), tz = Math.floor(nz);
+      const same = tx === Math.floor(agent.x) && tz === Math.floor(agent.z);
+      const level = levelAt(w, Math.floor(agent.x), Math.floor(agent.z), agent.y);
+      if (same || (level >= 0 && stepTo(w, level, tx, tz) >= 0)) agent.x = nx, agent.z = nz;
+    }
+    return true;
+  }
+
+  /** The Object `agent` carries overhead, if any. */
+  carried(agent: Agent): WorldObject | undefined {
+    return this.objects.list.find((o) => o.held === agent.id);
+  }
+
+  /** Hold a carried Object over its villager's head, turning with them. */
+  private holdUp(agent: Agent, o: WorldObject) {
+    const rot = yawQuatOf(agent.yaw);
+    o.rot = quatMul(rot, o.heldTurn ?? [0, 0, 0, 1]);
+    const c = this.physics.center({ ...o, pos: [0, 0, 0] });
+    const low = this.physics.lowest(o.design, o.rot);
+    // Its lowest point just over the head (and hat), centered over the villager.
+    o.pos = [agent.x - c[0], agent.y + 2.2 - low - c[1], agent.z - c[2]];
+    o.vel = [0, 0, 0], o.spin = [0, 0, 0];
+  }
+
+  /** Let go of a carried Object where it is, moving as the villager was. */
+  release(agent: Agent, o: WorldObject, why?: string) {
+    delete o.held, delete o.heldTurn;
+    o.asleep = false;
+    o.mover = agent.name;
+    this.physics.wake(o);
+    this.objects.raster(o);
+    this.objects.version++;
+    if (why) {
+      const name = this.catalog.get(o.design)?.name ?? "Object";
+      this.events.push({ type: "physics", agent: agent.id, text: `dropped the ${name} (${why})` });
+    }
+  }
+
+  /** Bodies: carried ones ride overhead, the rest fall, collide and settle; then their effects. */
+  private stepBodies() {
+    const objects = this.objects, list = objects.list;
+    if (!list.length) return;
+    const agents = this.agents, animals = this.animals, n = agents.length + animals.length;
+    if (this.lastAt.length !== n * 3) {
+      this.lastAt = new Float64Array(n * 3);
+      agents.forEach((a, i) => this.lastAt.set([a.x, a.y, a.z], i * 3));
+      animals.forEach((a, i) => this.lastAt.set([a.x, a.y, a.z], (agents.length + i) * 3));
+    }
+    const movers = this.movers;
+    movers.length = n;
+    const put = (
+      i: number,
+      x: number,
+      y: number,
+      z: number,
+      r: number,
+      top: number,
+      shove: number,
+    ) => {
+      const m = movers[i] ??= {
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        radius: 0,
+        bottom: 0,
+        top: 0,
+        shove: 0,
+        ignore: 0,
+      };
+      const l = this.lastAt;
+      m.vx = (x - l[i * 3]) * TICK_HZ, m.vy = (y - l[i * 3 + 1]) * TICK_HZ;
+      m.vz = (z - l[i * 3 + 2]) * TICK_HZ;
+      m.x = x, m.y = y, m.z = z, m.radius = r, m.bottom = 0.15, m.top = top, m.shove = shove;
+      l[i * 3] = x, l[i * 3 + 1] = y, l[i * 3 + 2] = z;
+    };
+    agents.forEach((a, i) => {
+      put(i, a.x, a.y, a.z, 0.3, a.anim === Anim.Fall ? 0.7 : 1.75, 4);
+      movers[i].ignore = a.pushing ?? 0;
+    });
+    animals.forEach((a, i) => {
+      put(agents.length + i, a.x, a.y, a.z, 0.35, 1, 4);
+      movers[agents.length + i].ignore = 0;
+    });
+    for (const a of agents) {
+      const o = this.carried(a);
+      if (o) this.holdUp(a, o), this.posesVersion++;
+    }
+    const physics = this.physics;
+    physics.step(list, movers, 1 / TICK_HZ);
+    if (physics.moved.length) this.posesVersion++;
+    for (const o of physics.moved) {
+      // Moving bodies re-mark their tiles now and then (spread over ticks), resting ones at once.
+      if (o.asleep || (this.tick + o.id) % 8 === 0) objects.raster(o as WorldObject);
+    }
+    for (const hit of physics.hits) this.hit(hit.body as WorldObject, hit);
+    for (const { body } of physics.landings) {
+      const o = body as WorldObject;
+      if (o.quiet) continue; // Rules don't trigger Rules
+      const c = physics.center(o);
+      const by = agents.find((a) => a.name === o.mover) ?? null;
+      const name = this.catalog.get(o.design)?.name ?? "Object";
+      this.fire("landed", by, Math.floor(c[0]), Math.floor(c[1]), Math.floor(c[2]), name);
+    }
+  }
+
+  /** A body hit a villager or an animal: hard enough, and they're knocked over or bolt. */
+  private hit(
+    o: WorldObject,
+    h: { mover: number; speed: number; momentum: number; nx: number; nz: number },
+  ) {
+    const name = this.catalog.get(o.design)?.name ?? "Object";
+    if (h.mover >= this.agents.length) {
+      const a = this.animals[h.mover - this.agents.length];
+      if (a && h.momentum >= KNOCK_MOMENTUM / 2 && h.speed >= KNOCK_SPEED / 2) {
+        a.mode = AnimalMode.Flee;
+        a.tx = a.x + h.nx * 5, a.tz = a.z + h.nz * 5;
+      }
+      return;
+    }
+    const agent = this.agents[h.mover];
+    if (!agent || h.speed < KNOCK_SPEED || h.momentum < KNOCK_MOMENTUM) return;
+    // Your own push, or what you dropped, never bowls you over; nor does anything twice in a row.
+    if (agent.pushing === o.id || o.mover === agent.name || o.held) return;
+    if (agent.downUntil !== undefined || this.tick < (agent.graceUntil ?? 0)) return;
+    agent.resume = agent.anim;
+    agent.downUntil = this.tick + DOWN_TICKS;
+    agent.graceUntil = this.tick + DOWN_TICKS + GRACE_TICKS;
+    agent.knock = [h.nx, h.nz];
+    agent.anim = Anim.Fall;
+    const held = this.carried(agent);
+    if (held) this.release(agent, held);
+    const by = o.mover ? `${o.mover}'s ${name}` : `a ${name}`;
+    agent.notes.push(
+      `Knocked over by ${by}! You were back on your feet after a moment${
+        held ? ", but dropped what you carried" : ""
+      }.`,
+    );
+    this.events.push({ type: "physics", agent: agent.id, text: `was knocked over by ${by}` });
+  }
 
   private stepAnimals() {
     const f = this.farmers;
@@ -446,6 +654,7 @@ export class Sim {
     if (data.catalog) sim.catalog = Catalog.load(data.catalog);
     sim.props.catalog = sim.catalog;
     sim.objects.catalog = sim.catalog;
+    sim.physics.catalog = sim.catalog;
     for (const [id, stat] of data.ruleStats ?? []) sim.rules.stats.set(id, structuredClone(stat));
     sim.dayOffset = data.dayOffset;
     const w = sim.world;

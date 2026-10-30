@@ -2,6 +2,7 @@ import {
   AGENT_STRIDE,
   type AgentProfile,
   ANIMAL_STRIDE,
+  BODY_STRIDE,
   type FromWorker,
   type TickMessage,
   type ToWorker,
@@ -25,6 +26,18 @@ export interface AgentView {
   color: number;
   /** The Design they look like; null for the default farmer. */
   body: number | null;
+  /** Holding something overhead. */
+  carrying: boolean;
+  /** Ticks left lying down after being knocked over (0: on their feet). */
+  down: number;
+}
+
+/** Where an Object is drawn this frame: its Design's origin and turn. */
+export interface BodyPose {
+  pos: [number, number, number];
+  rot: [number, number, number, number];
+  /** The frame it was last updated in (gone from the world if not this one). */
+  frame: number;
 }
 
 export interface AnimalView {
@@ -86,6 +99,12 @@ export class SimClient {
   /** Fish schools, straight from the last tick (they drift too slowly to need interpolation). */
   schools: Float32Array<ArrayBuffer> = new Float32Array(0);
   private currAt = 0;
+  private prevBodies: Float32Array<ArrayBuffer> = new Float32Array(0);
+  private currBodies: Float32Array<ArrayBuffer> = new Float32Array(0);
+  private bodiesAt = 0;
+  private prevIndex = new Map<number, number>();
+  private bodyViews = new Map<number, BodyPose>();
+  private frame = 0;
   private interval = 50;
   private pending = new Map<number, (r: ToolResult) => void>();
   private nextCall = 1;
@@ -127,6 +146,8 @@ export class SimClient {
         stride: 0,
         color: 0,
         body: null,
+        carrying: false,
+        down: 0,
       };
       v.id = c[i];
       v.name = this.profiles[j]?.name ?? "?";
@@ -134,8 +155,40 @@ export class SimClient {
       v.x = mix(p, c, i + 1, t), v.y = mix(p, c, i + 2, t), v.z = mix(p, c, i + 3, t);
       v.yaw = p[i + 4] + dyaw * t, v.anim = c[i + 5], v.stride = mix(p, c, i + 6, t);
       v.color = c[i + 7];
+      v.carrying = c[i + 8] > 0;
+      v.down = mix(p, c, i + 9, t);
     }
     return views;
+  }
+
+  /** Objects' poses interpolated for render time `now` (ms), by id. The map is reused. */
+  bodies(now: number): Map<number, BodyPose> {
+    const t = Math.min(1, Math.max(0, (now - this.bodiesAt) / this.interval));
+    const c = this.currBodies, p = this.prevBodies, out = this.bodyViews;
+    const prevAt = this.prevIndex;
+    prevAt.clear();
+    for (let i = 0; i < p.length; i += BODY_STRIDE) prevAt.set(p[i], i);
+    const frame = ++this.frame;
+    for (let i = 0; i < c.length; i += BODY_STRIDE) {
+      const id = c[i], j = prevAt.get(id) ?? i, src = prevAt.has(id) ? p : c;
+      let v = out.get(id);
+      if (!v) out.set(id, v = { pos: [0, 0, 0], rot: [0, 0, 0, 1], frame });
+      v.frame = frame;
+      for (let k = 0; k < 3; k++) v.pos[k] = src[j + 1 + k] + (c[i + 1 + k] - src[j + 1 + k]) * t;
+      // nlerp, the short way round.
+      let dot = 0;
+      for (let k = 0; k < 4; k++) dot += src[j + 4 + k] * c[i + 4 + k];
+      const sgn = dot < 0 ? -1 : 1;
+      let l = 0;
+      for (let k = 0; k < 4; k++) {
+        v.rot[k] = src[j + 4 + k] * sgn + (c[i + 4 + k] - src[j + 4 + k] * sgn) * t;
+        l += v.rot[k] * v.rot[k];
+      }
+      l = Math.sqrt(l) || 1;
+      for (let k = 0; k < 4; k++) v.rot[k] /= l;
+    }
+    for (const [id, v] of out) if (v.frame !== frame) out.delete(id);
+    return out;
   }
 
   /** Animals interpolated for render time `now` (ms). The returned views are reused. */
@@ -180,6 +233,7 @@ export class SimClient {
       this.world = world;
       this.prev = this.curr = new Float32Array(0);
       this.prevAnimals = this.currAnimals = new Float32Array(0);
+      this.prevBodies = this.currBodies = new Float32Array(0);
       this.crops = new Float32Array(0);
       this.cropsVersion++;
       this.onReady(world, msg.caughtUp);
@@ -223,6 +277,14 @@ export class SimClient {
     }
     if (this.world) applyEdits(this.world, msg.edits);
     if (msg.objects && this.objects) this.objects.reset(msg.objects);
+    if (msg.bodies) {
+      this.prevBodies = this.currBodies.length ? this.currBodies : msg.bodies;
+      this.currBodies = msg.bodies;
+      this.bodiesAt = now;
+    } else if (this.currBodies !== this.prevBodies) {
+      // Nothing moved this tick: hold the last pose.
+      this.prevBodies = this.currBodies;
+    }
     for (const event of msg.events) this.onEvent(event);
     this.resolve(msg.results);
   }

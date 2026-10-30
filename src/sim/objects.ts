@@ -1,26 +1,32 @@
 import type { Catalog, DesignContent, DesignPart, Vec3 } from "./catalog.ts";
+import { type BodyState, poseBoxes, type Quat, yawQuat } from "./physics.ts";
 import type { World } from "./world.ts";
 
 /**
- * Objects: Designs built from Parts, standing on the tile grid. An Object is anchored at its
- * Design's first cell, turned in quarter turns, and costs each part's volume in that part's
- * Material. For walking (physics phase 1) every part is rasterized to the tiles it covers: a low
- * top (up to a block above the ground) is stood on, anything taller is walked around, and parts
- * two blocks or more above the ground leave room to walk underneath.
+ * Objects: Designs built from Parts. An Object is built at its Design's first cell, turned in
+ * quarter turns, and costs each part's volume in that part's Material; from then on it is a rigid
+ * body (physics.ts) and rests in any pose. For walking every part is rasterized to the tiles it
+ * covers, whatever its pose: a low top (up to a block above the ground) is stood on, anything
+ * taller is walked around, and parts two blocks or more above the ground leave room to walk
+ * underneath. Bodies stacked on one column add up.
  */
 
-export interface WorldObject {
-  id: number;
-  /** The Design entry it was built from. */
-  design: number;
-  /** West-north corner of the turned Design, and the height its bottom (y = 0) stands at. */
+/**
+ * A built Object: a rigid body (physics.ts) that remembers where it was built. `x`, `y`, `z` and
+ * `turn` are where `build` put it up (so building again there knows it's done); `pos` and `rot`
+ * are where it is now.
+ */
+export interface WorldObject extends BodyState {
+  /** West-north corner of the turned Design when built, and the height its bottom stood at. */
   x: number;
   y: number;
   z: number;
-  /** Quarter turns clockwise seen from above (east toward south), 0-3. */
+  /** Quarter turns clockwise seen from above (east toward south) it was built with, 0-3. */
   turn: number;
   /** Who built it. */
   by: string;
+  /** While carried: how it's turned relative to the villager carrying it. */
+  heldTurn?: Quat;
 }
 
 /** Tops lower than this over the ground are flat (a rug): no lift, nothing in the way. */
@@ -111,9 +117,18 @@ type Box = [number, number, number, number, number, number];
 
 export class Objects {
   readonly list: WorldObject[] = [];
+  /** Bumps when Objects are added or removed (the page gets the list again). */
   version = 0;
   private boxes = new Map<number, Box[]>();
   private tiles = new Map<number, number[]>();
+  /** Column → ids of the Objects over it. */
+  private columns = new Map<number, number[]>();
+
+  /**
+   * Whether `o` stays put under a villager's feet (fixed, or heavy). Others are walked around:
+   * stepping onto a light crate would just kick it away. The sim sets this from physics.
+   */
+  steady: (o: WorldObject) => boolean = () => true;
 
   constructor(readonly world: World, public catalog: Catalog) {}
 
@@ -121,12 +136,35 @@ export class Objects {
     return this.list.find((o) => o.id === id);
   }
 
-  /** The Object covering tile (x, z), if any. */
+  /** The Object covering tile (x, z) (the highest one, if several are stacked), if any. */
   at(x: number, z: number): WorldObject | undefined {
     const w = this.world;
     if (x < 0 || z < 0 || x >= w.sizeX || z >= w.sizeZ) return undefined;
     const id = w.objectAt[z * w.sizeX + x];
     return id ? this.get(id) : undefined;
+  }
+
+  /** Every Object over tile (x, z), highest first. */
+  allAt(x: number, z: number): WorldObject[] {
+    const w = this.world;
+    if (x < 0 || z < 0 || x >= w.sizeX || z >= w.sizeZ) return [];
+    const ids = this.columns.get(z * w.sizeX + x) ?? [];
+    const top = (id: number) => Math.max(...(this.boxes.get(id) ?? []).map((b) => b[3]));
+    return ids.map((id) => this.get(id)!).filter(Boolean).sort((a, b) => top(b.id) - top(a.id));
+  }
+
+  /** The top of the highest Object over tile (x, z), other than `except`; -Infinity if none. */
+  topAt(x: number, z: number, except = 0): number {
+    const w = this.world;
+    if (x < 0 || z < 0 || x >= w.sizeX || z >= w.sizeZ) return -Infinity;
+    let top = -Infinity;
+    for (const id of this.columns.get(z * w.sizeX + x) ?? []) {
+      if (id === except) continue;
+      for (const b of this.boxes.get(id) ?? []) {
+        if (b[1] > x && b[0] < x + 1 && b[5] > z && b[4] < z + 1) top = Math.max(top, b[3]);
+      }
+    }
+    return top;
   }
 
   design(o: WorldObject): DesignContent | null {
@@ -170,6 +208,12 @@ export class Objects {
     return [...keys];
   }
 
+  /** Where a Design built at (x, y, z) turned `turn` has its origin, and how it's turned. */
+  static buildPose(d: DesignContent, x: number, y: number, z: number, turn: number) {
+    const [tx, tz] = turnPoint(0, 0, turn, designSpan(d));
+    return { pos: [x + tx, y, z + tz] as Vec3, rot: yawQuat(-turn * Math.PI / 2) };
+  }
+
   add(o: WorldObject) {
     this.list.push(o);
     this.raster(o);
@@ -184,19 +228,23 @@ export class Objects {
     this.version++;
   }
 
-  /** The ground under column (x, z) changed: re-rasterize the Object standing there. */
-  refresh(x: number, z: number) {
-    const o = this.at(x, z);
-    if (!o) return;
-    this.clear(o);
-    this.raster(o);
-  }
-
   /** Replace everything (load, or the page mirroring the worker's list). */
   reset(list: WorldObject[]) {
     for (const o of [...this.list]) this.clear(o);
     this.list.length = 0;
-    for (const o of list) this.list.push({ ...o }), this.raster(this.list[this.list.length - 1]);
+    for (const o of list) {
+      const copy = { ...o };
+      if (!copy.pos || !copy.rot) {
+        // Saved before Objects moved: where it was built, settling from there.
+        const d = this.catalog.get(o.design)?.content as DesignContent | undefined;
+        const pose = d?.parts
+          ? Objects.buildPose(d, o.x, o.y, o.z, o.turn)
+          : { pos: [o.x, o.y, o.z] as Vec3, rot: yawQuat(0) };
+        Object.assign(copy, pose, { vel: [0, 0, 0], spin: [0, 0, 0], asleep: false });
+      }
+      this.list.push(copy);
+      this.raster(copy);
+    }
     this.version++;
   }
 
@@ -204,40 +252,68 @@ export class Objects {
     return this.list.reduce((m, o) => Math.max(m, o.id), 0) + 1;
   }
 
-  private clear(o: WorldObject) {
-    const w = this.world;
-    for (const key of this.tiles.get(o.id) ?? []) {
-      if (w.objectAt[key] !== o.id) continue;
-      w.objectAt[key] = 0, w.objSolid[key] = 0, w.objLift[key] = 0;
-    }
-    this.tiles.delete(o.id);
-    this.boxes.delete(o.id);
-  }
-
-  /** Mark the tiles `o` covers: stood on (lift), in the way (solid), or just under it. */
-  private raster(o: WorldObject) {
+  /** Mark the tiles `o` covers where it is now (none while it's carried). */
+  raster(o: WorldObject) {
+    this.clear(o);
     const d = this.design(o);
-    if (!d) return;
-    const w = this.world;
-    const boxes = Objects.boxes(d, o.x, o.y, o.z, o.turn);
-    const keys = Objects.cover(w, boxes);
+    if (!d || o.held) return;
+    const boxes = poseBoxes(d, o.pos, o.rot) as Box[];
+    const keys = Objects.cover(this.world, boxes);
     this.boxes.set(o.id, boxes);
     this.tiles.set(o.id, keys);
     for (const key of keys) {
-      const tx = key % w.sizeX, tz = Math.floor(key / w.sizeX);
-      const ground = w.top[key] + 1;
-      let top = -Infinity;
-      for (const b of boxes) {
+      let ids = this.columns.get(key);
+      if (!ids) this.columns.set(key, ids = []);
+      ids.push(o.id);
+      this.column(key);
+    }
+  }
+
+  /** The ground under column (x, z) changed: re-mark what stands there. */
+  refresh(x: number, z: number) {
+    const w = this.world;
+    if (x < 0 || z < 0 || x >= w.sizeX || z >= w.sizeZ) return;
+    this.column(z * w.sizeX + x);
+  }
+
+  private clear(o: WorldObject) {
+    const keys = this.tiles.get(o.id);
+    this.tiles.delete(o.id);
+    this.boxes.delete(o.id);
+    for (const key of keys ?? []) {
+      const ids = this.columns.get(key);
+      if (!ids) continue;
+      const i = ids.indexOf(o.id);
+      if (i >= 0) ids.splice(i, 1);
+      if (!ids.length) this.columns.delete(key);
+      this.column(key);
+    }
+  }
+
+  /** One column from every Object over it: stood on (lift), in the way (solid), or just under. */
+  private column(key: number) {
+    const w = this.world, ids = this.columns.get(key);
+    if (!ids?.length) {
+      w.objectAt[key] = 0, w.objSolid[key] = 0, w.objLift[key] = 0;
+      return;
+    }
+    const tx = key % w.sizeX, tz = Math.floor(key / w.sizeX);
+    const ground = w.top[key] + 1;
+    let top = -Infinity, topId = ids[0], loose = false;
+    for (const id of ids) {
+      const o = this.get(id);
+      for (const b of this.boxes.get(id) ?? []) {
         const [x0, x1, y0, y1, z0, z1] = b;
         if (x1 <= tx || x0 >= tx + 1 || z1 <= tz || z0 >= tz + 1) continue;
         if (y0 - ground >= HEADROOM || y1 <= ground) continue; // overhead, or buried
-        top = Math.max(top, y1);
+        if (y1 > top) top = y1, topId = id;
+        if (y1 - ground > FLAT && o && !this.steady(o)) loose = true;
       }
-      const lift = top - ground;
-      w.objectAt[key] = o.id;
-      w.objSolid[key] = lift > 1 ? 1 : 0;
-      w.objLift[key] = lift > FLAT && lift <= 1 ? lift : 0;
     }
+    const lift = top - ground;
+    w.objectAt[key] = topId;
+    w.objSolid[key] = lift > 1 || loose ? 1 : 0;
+    w.objLift[key] = lift > FLAT && lift <= 1 ? lift : 0;
   }
 }
 

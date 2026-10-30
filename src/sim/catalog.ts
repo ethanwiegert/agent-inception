@@ -106,6 +106,8 @@ export interface DesignContent {
   habitat?: Habitat;
   /** "blades": a crop drawn as a swaying field of stalks (wheat) instead of its own parts. */
   look?: "blades";
+  /** Its Object stays where it's built (a signpost, a statue): no falling, pushing or carrying. */
+  anchored?: boolean;
 }
 
 /** Relations the world will enforce; any other type is a free label that records knowledge. */
@@ -625,7 +627,7 @@ function vec(v: unknown, min: number, max: number, where: string): Vec3 {
 }
 
 function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
-  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat", "look"], "design");
+  onlyKeys(o, ["blocks", "parts", "joints", "mark", "habitat", "look", "anchored"], "design");
   const S = LIMITS.designSize;
   let blocks: DesignContent["blocks"] = null;
   if (o.blocks !== undefined && o.blocks !== null) {
@@ -715,6 +717,10 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
   if (o.look !== undefined) {
     if (o.look !== "blades") throw new Error('look is "blades" (a swaying field, like wheat).');
     out.look = "blades";
+  }
+  if (o.anchored !== undefined) {
+    if (typeof o.anchored !== "boolean") throw new Error("anchored is true or false.");
+    if (o.anchored) out.anchored = true;
   }
   return out;
 }

@@ -293,7 +293,7 @@ Deno.test("playtest 0004: targets match what things give, and refusals say what 
   add(sim, "design", "statue", { parts: [post(0.5, 0.5, 2, "stone")] });
   fern.inventory.stone = 1;
   ok(run(sim, "a", "build", { design: "statue", x: x + 5, z: z + 5 }));
-  err(run(sim, "a", "walk_to", { x: x + 5, z: z + 5 }), "the statue stands there, too tall");
+  err(run(sim, "a", "walk_to", { x: x + 5, z: z + 5 }), "the statue stands there, in the way");
   // Object marks never reuse a plant's, wherever the plant is.
   const look = ok(run(sim, "a", "look", { radius: 12 }));
   const mark = /Objects: (\S) statue/.exec(look)?.[1];

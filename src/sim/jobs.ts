@@ -4,12 +4,15 @@ import { type Agent, Anim, type Job, type Sim, TICK_HZ } from "./sim.ts";
 /** Building blocks for tool handlers: walking, reaching, working and the inventory. */
 
 const WALK_SPEED = 2.2 / TICK_HZ; // blocks per tick: an unhurried stroll
+/** Share of walking pace while carrying something overhead. */
+const CARRY_PACE = 0.75;
 
 export type Args = Record<string, unknown>;
 export type Handler = (sim: Sim, agent: Agent, args: Args) => string | Job;
 
 export const num = (v: unknown, name: string): number => {
-  const n = Number(v);
+  // Number(null), Number("") and Number(true) are numbers too; none of them is meant as one.
+  const n = typeof v === "number" || (typeof v === "string" && v.trim()) ? Number(v) : NaN;
   if (!Number.isFinite(n)) throw new Error(`"${name}" must be a number.`);
   return Math.floor(n);
 };
@@ -35,7 +38,8 @@ export function* walk(
       const dx = tx - agent.x, dz = tz - agent.z;
       const d = Math.hypot(dx, dz);
       if (d < 1e-3) break;
-      const s = Math.min(WALK_SPEED, d);
+      // Something heavy overhead slows you down.
+      const s = Math.min(WALK_SPEED * (sim.carried(agent) ? CARRY_PACE : 1), d);
       agent.x += (dx / d) * s;
       agent.z += (dz / d) * s;
       agent.stride += s;
