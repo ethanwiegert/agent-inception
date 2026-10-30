@@ -446,9 +446,12 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const left = () => cells.filter((c) => sim.world.get(...at(c)) !== c.id);
     const name = `"${design.name}"`;
     const place = `at x=${x0} y=${base} z=${z0}${turn ? ` turned ${turn * 90}°` : ""}`;
+    // Its Object built here and still standing about where it went up (not pushed away).
+    const pose = Objects.buildPose(content, x0, base, z0, turn);
     const builtHere = () =>
       sim.objects.list.find((o) =>
-        o.design === design.id && o.x === x0 && o.z === z0 && o.turn === turn
+        o.design === design.id && o.x === x0 && o.z === z0 && o.turn === turn && !o.held &&
+        Math.hypot(o.pos[0] - pose.pos[0], o.pos[2] - pose.pos[2]) < 0.5
       );
     const partsLeft = content.parts.length > 0 && !builtHere();
     const todo = left();

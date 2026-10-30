@@ -49,6 +49,8 @@ export const KNOCK_MOMENTUM = 0.12;
 /** Ticks a knocked-over villager stays down, and after that can't be knocked over again. */
 export const DOWN_TICKS = 40;
 export const GRACE_TICKS = 200;
+/** Objects at least this heavy (tonnes) stay put when stood on; lighter ones are walked around. */
+export const STEADY_MASS = 0.6;
 
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
@@ -183,6 +185,10 @@ export class Sim {
     this.props = new Props(this.world, seed, this.catalog);
     this.objects = new Objects(this.world, this.catalog);
     this.physics = new Physics(this.world, this.catalog);
+    this.objects.steady = (o) => {
+      const shape = this.physics.shape(o.design);
+      return !shape || shape.fixed || shape.mass >= STEADY_MASS;
+    };
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
@@ -460,8 +466,8 @@ export class Sim {
     o.rot = quatMul(rot, o.heldTurn ?? [0, 0, 0, 1]);
     const c = this.physics.center({ ...o, pos: [0, 0, 0] });
     const low = this.physics.lowest(o.design, o.rot);
-    // Its lowest point just over the head, centered over the villager.
-    o.pos = [agent.x - c[0], agent.y + 2 - low - c[1], agent.z - c[2]];
+    // Its lowest point just over the head (and hat), centered over the villager.
+    o.pos = [agent.x - c[0], agent.y + 2.2 - low - c[1], agent.z - c[2]];
     o.vel = [0, 0, 0], o.spin = [0, 0, 0];
   }
 
@@ -520,7 +526,7 @@ export class Sim {
       l[i * 3] = x, l[i * 3 + 1] = y, l[i * 3 + 2] = z;
     };
     agents.forEach((a, i) => {
-      put(i, a.x, a.y, a.z, 0.3, a.anim === Anim.Fall ? 0.7 : 1.75, 8);
+      put(i, a.x, a.y, a.z, 0.3, a.anim === Anim.Fall ? 0.7 : 1.75, 4);
       movers[i].ignore = a.pushing ?? 0;
     });
     animals.forEach((a, i) => {

@@ -256,6 +256,8 @@ Deno.test("carry lifts a light Object overhead and put_down sets it anywhere, at
   // Stack it on the other crate, turned 45°.
   ok(run(sim, "a", "put_down", { x: x + 5, z: z + 5, turn: 45 }));
   assert(!a.held && !sim.carried(fern));
+  // Turned 45° from how it was built, whichever way the carrier faced.
+  assert(Math.abs(Math.abs(a.rot[1]) - Math.sin(Math.PI / 8)) < 0.01, `turned 45°: ${a.rot}`);
   steps(sim, 80);
   assert(Math.abs(a.pos[1] - (b.pos[1] + 0.6)) < 0.06, `stacked: ${a.pos[1] - b.pos[1]}`);
   assert(lean(a.rot) < 0.1, "upright");
@@ -393,4 +395,30 @@ Deno.test("500 awake bodies stay inside the tick budget", () => {
   console.log(`500 bodies (${awake} awake): ${ms.toFixed(2)} ms per tick`);
   assert(awake > 400, "they're still moving");
   assert(ms < 40, `${ms} ms`);
+});
+
+Deno.test("villagers walk around light Objects instead of kicking them, and stand on heavy ones", () => {
+  const { sim, fern, x, z, g } = site();
+  const crate = design(sim, "small crate", [box("planks", [0.6, 0.6, 0.6])]);
+  const a = spawn(sim, crate, [x + 3.2, g, z + 3.2]);
+  const b = spawn(sim, crate, [x + 3.2, g + 0.62, z + 3.2]);
+  steps(sim, 40);
+  const before = JSON.stringify([a.pos, b.pos].map((p) => p.map((v) => v.toFixed(2))));
+  ok(run(sim, "a", "walk_to", { x: x, z: z + 3 }));
+  ok(run(sim, "a", "walk_to", { x: x + 7, z: z + 3 }));
+  steps(sim, 20);
+  const after = JSON.stringify([a.pos, b.pos].map((p) => p.map((v) => v.toFixed(2))));
+  assert(before === after, `the stack stood: ${before} → ${after}`);
+  err(run(sim, "a", "walk_to", { x: x + 3, z: z + 3 }), "light enough to kick away");
+  // A heavy stone slab is stood on, and doesn't budge.
+  const slab = design(sim, "slab", [box("stone", [1, 0.3, 1])]);
+  const s = spawn(sim, slab, [x + 5, g, z + 6]);
+  steps(sim, 30);
+  ok(run(sim, "a", "walk_to", { x: x + 5, z: z + 6 }));
+  steps(sim, 20);
+  assert(Math.abs(fern.y - (g + 0.3)) < 0.06, `on the slab: ${fern.y - g}`);
+  assert(
+    Math.abs(s.pos[0] - (x + 5)) < 0.05 && Math.abs(s.pos[2] - (z + 6)) < 0.05,
+    "it stayed put",
+  );
 });

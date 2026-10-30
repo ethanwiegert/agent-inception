@@ -1,11 +1,12 @@
 import { identity, mat4, rotateY, scale, translate } from "../math.ts";
 import type { Catalog, DesignContent } from "../sim/catalog.ts";
-import { designSpan, type Objects, turnPoint } from "../sim/objects.ts";
 import { CROP_STRIDE } from "../sim/protocol.ts";
 import type { Props } from "../sim/props.ts";
+import type { Objects } from "../sim/objects.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { World } from "../sim/world.ts";
 import { ANCHOR, meshDesign } from "./designs.ts";
+import type { BodyPose } from "../simclient.ts";
 import type { InstanceBatch, MeshLibrary } from "./meshes.ts";
 
 /** Water surfaces sit this far below the top of their water block (see water.ts). */
@@ -114,7 +115,6 @@ export function buildProps(
   out: InstanceBatch,
   small: InstanceBatch,
   models: FloraModels,
-  objects: Objects | null = null,
   crops?: { data: Float32Array; looks: CropLooks; age: number },
 ) {
   out.clear();
@@ -129,17 +129,6 @@ export function buildProps(
     translate(m, c[k] + 0.5, c[k + 1], c[k + 2] + 0.5);
     rotateY(m, hash2(c[k], c[k + 2], 4) * Math.PI * 2);
     scale(m, size, size, size);
-    out.add(tid, m, 1, 1, 1, 1);
-  }
-  // Built Objects: exactly where and as turned as they were built.
-  for (const o of objects?.list ?? []) {
-    const d = objects!.design(o);
-    const tid = d ? models.stillTemplate(props.catalog, o.design) : -1;
-    if (!d || tid < 0) continue;
-    const [ax, az] = turnPoint(ANCHOR[0], ANCHOR[2], o.turn, designSpan(d));
-    identity(m);
-    translate(m, o.x + ax, o.y, o.z + az);
-    rotateY(m, -o.turn * Math.PI / 2);
     out.add(tid, m, 1, 1, 1, 1);
   }
   const w = world.sizeX;
@@ -164,6 +153,31 @@ export function buildProps(
     rotateY(m, hash2(tx, tz, 4) * Math.PI * 2);
     scale(m, size, size * (big ? tall : 1), size);
     (info.small ? small : out).add(tid, m, 1, 1, 1, 1);
+  }
+}
+
+/** Built Objects, wherever physics has them: their Design's origin at `pos`, turned `rot`. */
+export function buildObjects(
+  objects: Objects,
+  poses: Map<number, BodyPose>,
+  out: InstanceBatch,
+  models: FloraModels,
+) {
+  for (const o of objects.list) {
+    const pose = poses.get(o.id);
+    const tid = pose ? models.stillTemplate(objects.catalog, o.design) : -1;
+    if (tid < 0) continue;
+    const [x, y, z, w] = pose!.rot;
+    // translate(pos) · R(rot) · translate(ANCHOR): the template's origin is the Design's anchor.
+    m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y + z * w), m[2] = 2 * (x * z - y * w);
+    m[3] = 0;
+    m[4] = 2 * (x * y - z * w), m[5] = 1 - 2 * (x * x + z * z), m[6] = 2 * (y * z + x * w);
+    m[7] = 0;
+    m[8] = 2 * (x * z + y * w), m[9] = 2 * (y * z - x * w), m[10] = 1 - 2 * (x * x + y * y);
+    m[11] = 0;
+    m[12] = pose!.pos[0], m[13] = pose!.pos[1], m[14] = pose!.pos[2], m[15] = 1;
+    translate(m, ANCHOR[0], ANCHOR[1], ANCHOR[2]);
+    out.add(tid, m, 1, 1, 1, 1);
   }
 }
 

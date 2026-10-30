@@ -1,6 +1,6 @@
 import { identity, mat4, rotateX, rotateY, scale, translate } from "../math.ts";
 import type { Catalog, DesignContent, DesignPart, Role, Vec3 } from "../sim/catalog.ts";
-import { Anim } from "../sim/sim.ts";
+import { Anim, DOWN_TICKS } from "../sim/sim.ts";
 import type { AgentView } from "../simclient.ts";
 import { ANCHOR, jointOf, meshDesign } from "./designs.ts";
 import type { InstanceBatch, MeshLibrary, Rgb } from "./meshes.ts";
@@ -181,9 +181,22 @@ export function buildBodies(
       }
     }
 
+    // Something carried overhead: both arms up, holding it.
+    if (a.carrying && a.anim !== Anim.Fall) armL = armR = -2.9;
+    // Knocked over: topple backward, lie a moment, get up.
+    let fall = 0;
+    if (a.anim === Anim.Fall || a.down > 0) {
+      const p = 1 - Math.min(1, a.down / DOWN_TICKS);
+      fall = p < 0.2 ? p / 0.2 : p < 0.7 ? 1 : (1 - p) / 0.3;
+      fall = 1.45 * fall * fall * (3 - 2 * fall);
+      armL = -1.6 * fall / 1.45, armR = -1.6 * fall / 1.45, legSwing = 0, headPitch = 0;
+      lean = 0, bob = 0;
+    }
+
     identity(root);
     translate(root, a.x, a.y + bob - crouch, a.z);
     rotateY(root, a.yaw);
+    if (fall) rotateX(root, -fall);
 
     // Legs pivot at the hips; crouching bends them forward a little.
     for (const [side, role] of [[-1, "left leg"], [1, "right leg"]] as const) {

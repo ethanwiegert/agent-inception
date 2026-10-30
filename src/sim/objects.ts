@@ -124,6 +124,12 @@ export class Objects {
   /** Column → ids of the Objects over it. */
   private columns = new Map<number, number[]>();
 
+  /**
+   * Whether `o` stays put under a villager's feet (fixed, or heavy). Others are walked around:
+   * stepping onto a light crate would just kick it away. The sim sets this from physics.
+   */
+  steady: (o: WorldObject) => boolean = () => true;
+
   constructor(readonly world: World, public catalog: Catalog) {}
 
   get(id: number): WorldObject | undefined {
@@ -293,18 +299,20 @@ export class Objects {
     }
     const tx = key % w.sizeX, tz = Math.floor(key / w.sizeX);
     const ground = w.top[key] + 1;
-    let top = -Infinity, topId = ids[0];
+    let top = -Infinity, topId = ids[0], loose = false;
     for (const id of ids) {
+      const o = this.get(id);
       for (const b of this.boxes.get(id) ?? []) {
         const [x0, x1, y0, y1, z0, z1] = b;
         if (x1 <= tx || x0 >= tx + 1 || z1 <= tz || z0 >= tz + 1) continue;
         if (y0 - ground >= HEADROOM || y1 <= ground) continue; // overhead, or buried
         if (y1 > top) top = y1, topId = id;
+        if (y1 - ground > FLAT && o && !this.steady(o)) loose = true;
       }
     }
     const lift = top - ground;
     w.objectAt[key] = topId;
-    w.objSolid[key] = lift > 1 ? 1 : 0;
+    w.objSolid[key] = lift > 1 || loose ? 1 : 0;
     w.objLift[key] = lift > FLAT && lift <= 1 ? lift : 0;
   }
 }

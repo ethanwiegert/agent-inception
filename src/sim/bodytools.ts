@@ -1,7 +1,7 @@
 import { type Handler, num, reach, walk, work } from "./jobs.ts";
 import type { WorldObject } from "./objects.ts";
 import { octile } from "./path.ts";
-import { lean, quatConj, quatMul, yawQuat } from "./physics.ts";
+import { Kind, lean, type Quat, quatConj, quatMul, yawQuat } from "./physics.ts";
 import { COMPASS } from "./rules.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -23,7 +23,7 @@ const PUSH_SPEED = 1.2;
 const MAX_TILES = 8;
 
 const int = (description: string) => ({ type: "integer", description });
-const kg = (t: number) =>
+export const kg = (t: number) =>
   t >= 1 ? `${(Math.round(t * 10) / 10)} t` : `${Math.round(t * 100) * 10} kg`;
 
 export const BODY_TOOL_DEFS: ToolDef[] = [
@@ -204,8 +204,9 @@ export const BODY_HANDLERS: Record<string, Handler> = {
           const along = o.vel[0] * dx + o.vel[2] * dz;
           const f = Math.min(PUSH_FORCE, Math.max(0, shape.mass * (PUSH_SPEED - along) * TICK_HZ));
           if (f > 0) {
-            // At its middle, or chest height if that's lower: tall, narrow things topple.
-            const py = Math.min(agent.y + 1.1, c[1]);
+            // Low on it, or chest height if that's lower: crates slide, tall narrow things topple.
+            const low = c[1] + sim.physics.lowest(o.design, o.rot);
+            const py = Math.min(agent.y + 1.1, low + 0.6 * (c[1] - low));
             sim.physics.applyForce(o, c[0] - dx * ext, py, c[2] - dz * ext, dx * f, 0, dz * f);
           }
           yield;
@@ -222,8 +223,11 @@ export const BODY_HANDLERS: Record<string, Handler> = {
         : `You pushed the ${name} ${moved.toFixed(1)} tiles ${toward}`;
       if (why) text += ` (${why})`;
       const after: string[] = [];
-      if (Math.hypot(o.vel[0], o.vel[2]) > 0.6) after.push("it rolls on");
+      const round = shape.parts.some((p) => p.r || p.kind === Kind.Cylinder);
+      const going = Math.hypot(o.vel[0], o.vel[2]) > 0.6;
+      if (going && round) after.push("it rolls on");
       else if (lean(o.rot) > leaned + 0.6) after.push("it toppled over");
+      else if (going) after.push("it slides on");
       if (after.length) text += `; ${after.join(", ")}`;
       return `${text}. It's at x=${Math.floor(c[0])} z=${Math.floor(c[2])} and weighs about ${
         kg(shape.mass)
@@ -291,9 +295,10 @@ export const BODY_HANDLERS: Record<string, Handler> = {
       if (sim.carried(agent) !== o) throw new Error(`You dropped the ${name} on the way.`);
       yield* work(agent, Anim.Build, 10);
       if (sim.carried(agent) !== o) throw new Error(`You dropped the ${name} on the way.`);
+      // `turn` is its heading on the ground, like build's: keep any tilt, replace the heading.
       const rot = turn === undefined
         ? o.rot
-        : quatMul(yawQuat(-turn * Math.PI / 180), o.heldTurn ?? [0, 0, 0, 1]);
+        : quatMul(yawQuat(-turn * Math.PI / 180), unturned(o.rot));
       // Over the tile, its lowest point just above the ground or what's stacked there.
       const low = sim.physics.lowest(o.design, rot);
       const c = sim.physics.center({ ...o, pos: [0, 0, 0], rot });
@@ -315,6 +320,14 @@ export const BODY_HANDLERS: Record<string, Handler> = {
     })();
   },
 };
+
+/** `q` without its heading: the same tilt, facing as built. */
+function unturned(q: Quat): Quat {
+  // Heading of its x axis seen from above (yawQuat's sense).
+  const x = q[0], y = q[1], z = q[2], w = q[3];
+  const ax = 1 - 2 * (y * y + z * z), az = 2 * (x * z - y * w);
+  return quatMul(quatConj(yawQuat(Math.atan2(-az, ax))), q);
+}
 
 /** Whether `agent` can stand at (x, z) from where they are: the same tile, or one step away. */
 function standable(sim: Sim, agent: Agent, x: number, z: number): boolean {

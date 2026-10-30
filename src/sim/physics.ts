@@ -21,7 +21,9 @@ const ITERATIONS = 8;
 /** Points are spread over part surfaces at about this spacing (blocks). */
 const SPACING = 0.7;
 const MAX_POINTS = 200;
+/** Between bodies; and against the ground, grippy enough that a box stays put on a 45° slope. */
 const FRICTION = 0.6;
+const GROUND_FRICTION = 1.1;
 /** Penetration left alone, and how fast the rest is corrected. */
 const SLOP = 0.01;
 const BAUMGARTE = 0.3;
@@ -447,7 +449,7 @@ class Contacts {
   b: (Rt | null)[] = [];
   mover = new Int32Array(0);
   f = new Float64Array(0);
-  static readonly F = 64;
+  static readonly F = 65;
   ensure(n: number) {
     if (n <= this.cap) return;
     this.cap = Math.max(n, this.cap * 2, 256);
@@ -461,7 +463,16 @@ class Contacts {
 }
 // Field offsets in Contacts.f: the point, normal, depth, a mover's velocity, then per direction
 // (normal, tangent, tangent) a row of d, rA × d, I⁻¹(rA × d), rB × d, I⁻¹(rB × d), mass, impulse.
-const PX = 0, NX = 3, DEPTH = 6, KV = 7, BIAS = 10, CAP = 11, APPROACH = 12, DIR = 13, ROW = 17;
+const PX = 0,
+  NX = 3,
+  DEPTH = 6,
+  KV = 7,
+  BIAS = 10,
+  CAP = 11,
+  APPROACH = 12,
+  DIR = 13,
+  ROW = 17,
+  MU = 64;
 
 const dist2 = (f: Float64Array, a: number, b: number) =>
   (f[a] - f[b]) ** 2 + (f[a + 1] - f[b + 1]) ** 2 + (f[a + 2] - f[b + 2]) ** 2;
@@ -913,6 +924,7 @@ export class Physics {
     f[o + DEPTH] = src[s + 6];
     f[o + KV] = kvx, f[o + KV + 1] = kvy, f[o + KV + 2] = kvz;
     f[o + CAP] = cap;
+    f[o + MU] = mover >= 0 ? FRICTION / 2 : b ? FRICTION : GROUND_FRICTION;
   }
 
   /** Whether voxel (x, y, z) is solid; below the world is bedrock, beyond its edges is open. */
@@ -1539,7 +1551,7 @@ export class Physics {
       const total = Math.min(f[o + CAP], Math.max(0, old + f[qn + 15] * (f[o + BIAS] - vn)));
       f[qn + 16] = total;
       if (total !== old) this.push(v, k, qn, total - old);
-      const limit = FRICTION * total * (c.mover[k] >= 0 ? 0.5 : 1);
+      const limit = f[o + MU] * total;
       for (let d = 1; d < 3; d++) {
         const q = qn + d * ROW;
         const was = f[q + 16];

@@ -4,8 +4,13 @@ import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent } from "./sim.ts";
 import type { WorldData } from "./world.ts";
 
-/** Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color. */
-export const AGENT_STRIDE = 8;
+/**
+ * Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color, whether they
+ * carry something overhead (1), and ticks left lying down after being knocked over.
+ */
+export const AGENT_STRIDE = 10;
+/** Floats per Object in `TickMessage.bodies`: id, then its origin x, y, z and turn as a quaternion. */
+export const BODY_STRIDE = 8;
 /** Floats per animal in `TickMessage.animals`: id, species, x, y, z, yaw, anim, stride, flags. */
 export const ANIMAL_STRIDE = 9;
 /** Animal flag: its product (wool, milk, egg) is ready to collect. */
@@ -71,8 +76,10 @@ export interface TickMessage {
   edits: Int32Array<ArrayBuffer>;
   /** All prop differences from generation, sent when props change. */
   props?: PropDiff;
-  /** Every Object, sent when one is built or taken apart. */
+  /** Every Object, sent when one is built, taken apart, picked up or put down. */
   objects?: WorldObject[];
+  /** Where every Object is now (BODY_STRIDE each), sent when any moved. */
+  bodies?: Float32Array<ArrayBuffer>;
   catalog?: CatalogDelta;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;
