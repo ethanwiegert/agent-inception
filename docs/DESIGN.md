@@ -210,7 +210,8 @@ agent ──POST /mcp──▶ bridge (dev) / relay (hosted) ──ws──▶ g
   WebGPU on the cloud VM.
 - Sim tick < 2 ms without bodies; < 4 ms with 500 awake rigid bodies (M9 measured ~3.7 ms of physics
   for 500 bodies tumbling apart and ~6-9 ms for 500 crates piling onto each other, on the 2.1 GHz
-  cloud VM; see playtest 0006). No per-frame allocations in hot paths.
+  cloud VM; see playtest 0006). Joints (M10): 50 running windmills ~0.9 ms (playtest 0007). No
+  per-frame allocations in hot paths.
 - Measured on the RTX 2070 Super: ~2.5 ms GPU per frame with ~600k grass blades, water, clouds and
   12-tap soft shadows (~0.75 ms of that is MSAA resolve + post at the harness size). Before the
   2026-10-28 overhaul; not yet remeasured on hardware (see `playtests/0003-overhaul.md` for the

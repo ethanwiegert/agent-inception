@@ -100,7 +100,7 @@ shader has a WGSL mirror of `slopeDrop` that must stay identical.
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M9 are done; M10, joints, is next. The
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M10 are done; M11, fields, is next. The
 hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report

@@ -59,6 +59,10 @@ Saves may break freely until M14; save versioning and migrations come last befor
 - **M9 — rigid bodies.** Built Objects fall, stack, topple, roll, float or sink by Material density;
   `push`, `carry`, `put_down`; knockdowns with grace and blame; `pushed`/`carried`/`landed` triggers
   and an `impulse` effect; playtest [0006](playtests/0006-m9.md).
+- **M10 — joints.** Hinge, axle, slider and motor Parts join a Design's pieces, each its own body;
+  `use` swings doors and sliders and switches motors; a closed door is a wall; `used` and `switch`
+  for Rules; a garden gate, hand cart and windmill as worked examples; playtest
+  [0007](playtests/0007-m10.md).
 
 ## V1
 
@@ -356,7 +360,7 @@ Decided in the build (M9):
 - **Page**: the worker streams every Object's pose (8 floats) whenever one moved; the page
   interpolates and draws Objects per frame instead of in the GPU-culled prop batch.
 
-M10 grill outcome (2026-10-30):
+M10 is done (playtest [0007](playtests/0007-m10.md)). Grill outcome (2026-10-30):
 
 - **Joints are Parts.** Nature adds four engine Parts: `hinge`, `axle`, `slider` and `motor`. Any
   part of a Design may name the `piece` it belongs to (parts without one are the `main` piece, and
@@ -373,6 +377,35 @@ M10 grill outcome (2026-10-30):
   closed door blocks the doorway and paths go around it; `use` opens it and the doorway is free.
 - **Cargo only.** Carts, wagons and boats carry Objects put down on them; villagers walk beside.
   Riding is on the roadmap (below), not in M10.
+
+Decided in the build and the gate (M10):
+
+- **Pieces are bodies.** A jointed Object keeps its other pieces' poses (`pieces`) and its joints'
+  state (`joints`: a motor's on, where a hinge or slider is sent and where it is). Every piece's
+  pose is its Design origin as that piece carries it, so the page draws each piece from its own
+  template. Joints are constraint rows in the contact solver: the pin stays together, the axis stays
+  lined up (a slider can't turn), stops at the limits, a servo for hinges and sliders with limits
+  (up to 12, 1.6 rad/s), a motor (up to 12, its speed), friction in free hinges (a little) and axles
+  (rolling resistance, so a parked cart stays put). Pieces of one Object never collide with each
+  other and sleep and wake together; a running motor, or a door short of where it was sent, keeps it
+  awake. Motors are built off.
+- **Hinges and sliders with limits are held** where `use` last sent them (as built at first): a shut
+  door stays shut against a shove. Hinges without limits swing free; axles spin free.
+- **Walking.** Moving pieces are never stood on. Joint parts (pins, rails) aren't rasterized at all.
+  A thin piece on a tile's edge (an open door against its wall) is in the way on the side that's
+  already walled, so a door hung at its jamb swings clear of its doorway. Objects under a roof are
+  measured from the floor they stand on (before, anything under a roof was ignored for walking).
+- **`use`** takes the nearest usable joint within 2 tiles of the tile (its pin or the piece it
+  moves), switches all of an Object's motors together, works from where you stand when it's within
+  reach (else walks up, clear of the swing), waits up to 4 s for a hinge or slider, and says what
+  stopped it: who is touching it, too heavy for its joint, or blocked. Doors and sliders never knock
+  anyone over.
+- **`build`** raises a Design's parts from outside its footprint when it can, so a door never shuts
+  its builder in. Carried jointed Objects fold back as built; push moves the root and the rest
+  follows on its joints, and the pusher may stand on tiles only the pushed Object covers; carry and
+  push limits use the whole mass. Rules: `used` matches "<Design> <piece>", `switch` reaches ≤ 16
+  Objects (±4 of the event, or everywhere on a timer).
+- Worlds saved before M10 gain nature's new entries on load.
 
 ### M12 — Village Life
 
@@ -420,6 +453,8 @@ agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is
   the proposal itself is allowed.
 - Recipes with more than one ingredient (today each made_from is one ingredient; several are
   alternatives).
+- From playtest 0007: motors driven by M11's signals; joints on body Designs could animate (today a
+  body moves by role and its joints hold still).
 - From playtest 0005: say in `harvest` (and the crop docs) that a crop gives only its drops, so an
   invented crop needs a seed drop to be replanted without crafting.
 - terraform shapes beyond rectangles (a circle or an outline), for ponds and paths.
@@ -446,6 +481,11 @@ Pick these up in the gate of whichever milestone touches them.
   together (both tried in M9 without enough gain to keep), or Zig→WASM for the solver.
 - From playtest 0006: an Object covering two tiles shows as two marks on the look map; the look map
   stops at radius 12.
+- From playtest 0007: `push` on a loaded cart's tile pushes the load (the top of the stack), so
+  carts are pushed from a tile only they cover; `look` could say what rests on what ("crate on the
+  hand cart"). Riding a cart or boat (`ride`/`get_off`) was left out of M10 by the grill.
+- 100 hand carts dropped at once (500 bodies, 400 axles) cost 5-6 ms a tick while they settle;
+  measure with the pile budget below.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.
