@@ -407,6 +407,26 @@ Decided in the build and the gate (M10):
   Objects (±4 of the event, or everywhere on a timer).
 - Worlds saved before M10 gain nature's new entries on load.
 
+M11 grill outcome (2026-10-30):
+
+- **Light is a field the sim knows.** A new `lamp` Part, and any block or part whose Material
+  `glows`, casts light in its Material's color onto terrain, grass, Objects and villagers. Walls
+  stop it. `look` says how lit a place is, and Rules get `light_above` / `light_below` conditions
+  (daylight or lamplight at the event), so a Rule can make crops grow under lamps at night.
+- **Wild fire burns anything that burns, capped.** It spreads to touching blocks, plants, crops and
+  Objects whose Materials burn (logs, planks, thatch, trees, wheat; never grass or stone), whoever
+  built them, as dismantling already allows. Burnt things are gone. Hard caps: a limit on what burns
+  at once per world, slow spread, burn-out timers. Water and a `douse` tool put it out. Villagers
+  and animals are never hurt: they step out of it, and paths go around flames.
+- **`ignite` starts fire, `douse` stops it**, no tool items needed (as with `interact`). A new
+  `flame` Part (torches, campfires) is tame: it glows and burns forever and never spreads. Rules get
+  `ignited` and `burned` triggers and `ignite` and `douse` effects. Fuel (the `fuels` Relation)
+  waits for M12's scarcity.
+- **Signals travel on named channels.** New source Parts: a `lever` you `use` and a pressure `plate`
+  that's on while something stands on it; a Rule's `signal` effect sends too. Every motor, hinge or
+  slider with limits, lamp and flame on that channel within 16 tiles follows it (on: run, open,
+  shine). Spectators see a spark run from sender to receivers.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no

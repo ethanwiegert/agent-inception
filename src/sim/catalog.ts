@@ -44,12 +44,28 @@ export const JOINT_SHAPES: Record<JointKind, PartShapeName> = {
   slider: "box",
   motor: "cylinder",
 };
+/**
+ * Fields (physics phase 4): a lamp shines, a flame is tame fire, a lever is flipped by `use` and
+ * a plate is pressed while something stands on it. Levers and plates send signals on a channel;
+ * lamps, flames and joints with a channel follow them.
+ */
+export const DEVICES = ["lamp", "flame", "lever", "plate"] as const;
+export type DeviceKind = (typeof DEVICES)[number];
+/** The shape each device is drawn and collides as. */
+export const DEVICE_SHAPES: Record<DeviceKind, PartShapeName> = {
+  lamp: "sphere",
+  flame: "cone",
+  lever: "box",
+  plate: "box",
+};
 /** The piece of a Design its parts belong to unless they name another (and its blocks always). */
 export const MAIN_PIECE = "main";
 export interface PartContent {
   shape: PartShapeName;
   /** A mechanism: it joins two pieces of a Design and lets them move about its axis. */
   joint?: JointKind;
+  /** A light, a tame fire, or a signal source. */
+  device?: DeviceKind;
 }
 
 export type Vec3 = [number, number, number];
@@ -74,6 +90,11 @@ export interface DesignPart {
   limits?: [number, number];
   /** Motor: degrees per second while it's on (negative turns the other way). */
   speed?: number;
+  /**
+   * The signal channel it sends on (levers, plates) or follows (lamps, flames, motors, hinges and
+   * sliders with limits).
+   */
+  channel?: string;
 }
 
 /** Moving pieces of a body. Legs and arms swing from the top, heads turn on the neck. */
@@ -135,7 +156,13 @@ export interface DesignContent {
 
 /** The shape a Design's part is drawn and collides as, by its Part's name. */
 export function shapeOf(part: string): PartShapeName {
-  return (JOINT_SHAPES as Record<string, PartShapeName>)[part] ?? part as PartShapeName;
+  return (JOINT_SHAPES as Record<string, PartShapeName>)[part] ??
+    (DEVICE_SHAPES as Record<string, PartShapeName>)[part] ?? part as PartShapeName;
+}
+
+/** The device a Part is, by name, if it's one. */
+export function deviceKind(part: string): DeviceKind | null {
+  return (DEVICES as readonly string[]).includes(part) ? part as DeviceKind : null;
 }
 
 /** The joint a Part is, by name, if it's one. */
@@ -563,19 +590,26 @@ export class Catalog {
 
   /**
    * Add nature's entries a world was saved without (Parts and examples added since), so an older
-   * world gains what a new one starts with. Relations are left out: they name entries by id.
+   * world gains what a new one starts with. Relations name entries by id, so theirs are matched
+   * by name here.
    */
   addMissingNature(tick: number) {
-    for (const e of natureCatalog().entries) {
-      if (!e.name || e.kind === "relation" || this.byName(e.name)) continue;
+    const nature = natureCatalog();
+    for (const e of nature.entries) {
+      if (!e.name || this.byName(e.name)) continue;
+      let content = e.content;
+      if (e.kind === "relation") {
+        const r = e.content as RelationContent;
+        const from = this.byName(nature.get(r.from)!.name),
+          to = this.byName(nature.get(r.to)!.name);
+        if (!from || !to) continue;
+        content = { ...r, from: from.id, to: to.id };
+      }
       try {
-        this.add(
-          { kind: e.kind, name: e.name, description: e.description, content: e.content },
-          NATURE,
-          tick,
-        );
+        this.add({ kind: e.kind, name: e.name, description: e.description, content }, NATURE, tick);
       } catch {
-        // Something it builds on was retired or renamed in this world: it stays out.
+        // Something it builds on was retired or renamed in this world, or the Relation is there
+        // already: it stays out.
       }
     }
   }
@@ -708,12 +742,16 @@ function validateMaterial(o: Record<string, unknown>, author: string): MaterialC
 }
 
 function validatePart(o: Record<string, unknown>): PartContent {
-  onlyKeys(o, ["shape", "joint"], "part");
+  onlyKeys(o, ["shape", "joint", "device"], "part");
   if (!PART_SHAPES.includes(o.shape as PartShapeName)) throw new Error("unknown shape");
   const out: PartContent = { shape: o.shape as PartShapeName };
   if (o.joint !== undefined) {
     if (!JOINTS.includes(o.joint as JointKind)) throw new Error("unknown joint");
     out.joint = o.joint as JointKind;
+  }
+  if (o.device !== undefined) {
+    if (!DEVICES.includes(o.device as DeviceKind)) throw new Error("unknown device");
+    out.device = o.device as DeviceKind;
   }
   return out;
 }
@@ -728,6 +766,24 @@ function pieceName(v: unknown, where: string): string {
     );
   }
   return s;
+}
+
+/** A signal channel's name: 1-24 letters, digits, spaces, ' _ -, any case ("north gate"). */
+export function channelName(v: unknown, where: string): string {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, " ") : "";
+  if (!s || s.length > 24 || !PIECE_RE.test(s)) {
+    throw new Error(
+      `${where} names a signal channel: 1-24 letters, digits, spaces, ' _ - ("gate", ` +
+        '"street lamps").',
+    );
+  }
+  return s;
+}
+
+/** Whether a Design's part takes a `channel`: devices, motors, hinges and sliders with limits. */
+export function hasChannel(p: DesignPart): boolean {
+  const j = jointKind(p.part);
+  return !!deviceKind(p.part) || j === "motor" || ((j === "hinge" || j === "slider") && !!p.limits);
 }
 
 /** A joint part's own fields: what it joins, how far it may move, how fast a motor turns. */
@@ -821,6 +877,9 @@ function checkPieces(d: DesignContent) {
     }
   }
   if (rig.joints.length && d.habitat) throw new Error("Plants can't have joints.");
+  if (d.habitat && d.parts.some((p) => deviceKind(p.part))) {
+    throw new Error("Plants can't have lamps, flames, levers or plates (a glowing Material can).");
+  }
 }
 
 function vec(v: unknown, min: number, max: number, where: string): Vec3 {
@@ -895,6 +954,7 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
           "joins",
           "limits",
           "speed",
+          "channel",
         ],
         where,
       );
@@ -919,6 +979,15 @@ function validateDesign(o: Record<string, unknown>, c: Catalog): DesignContent {
           const piece = pieceName(p.piece, `${where}.piece`);
           if (piece !== MAIN_PIECE) part.piece = piece;
         }
+      }
+      if (p.channel !== undefined) {
+        if (!hasChannel(part)) {
+          throw new Error(
+            `${where}: only lamps, flames, levers, plates, motors, and hinges or sliders with ` +
+              "limits take a channel.",
+          );
+        }
+        part.channel = channelName(p.channel, `${where}.channel`);
       }
       parts.push(part);
     });

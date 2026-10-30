@@ -89,14 +89,16 @@ Deno.test("block ids follow the Catalog: built-ins fixed, new block Materials ap
   const v = reg.version;
   add(sim, "material", "basalt", { color: "#333333", pattern: "stone", density: 3, hardness: 7 });
   add(sim, "material", "honey", { form: "item", color: "#e8a020" });
-  // Nature's own extra blocks (fieldstone) come first, then villagers' in Catalog order.
+  // Nature's own extra blocks (fieldstone, lantern glass) come first, then villagers' in Catalog
+  // order.
   assertEquals(sim.blocks.byName("fieldstone")?.id, FIRST_CUSTOM_BLOCK);
-  assertEquals(sim.blocks.byName("basalt")?.id, FIRST_CUSTOM_BLOCK + 1);
+  assertEquals(sim.blocks.byName("lantern glass")?.id, FIRST_CUSTOM_BLOCK + 1);
+  assertEquals(sim.blocks.byName("basalt")?.id, FIRST_CUSTOM_BLOCK + 2);
   assertEquals(sim.blocks.byName("honey"), undefined);
   assert(sim.blocks.version > v);
   // A page mirroring the same Catalog gets the same ids.
   const page = new BlockRegistry().sync(Catalog.load(sim.catalog.save()));
-  assertEquals(page.byName("basalt")?.id, FIRST_CUSTOM_BLOCK + 1);
+  assertEquals(page.byName("basalt")?.id, FIRST_CUSTOM_BLOCK + 2);
   bad(sim, "material", { form: "liquid", color: "#336699" }, "Only nature makes liquids");
   bad(sim, "material", { form: "gas", color: "#336699" }, "form must be");
 });

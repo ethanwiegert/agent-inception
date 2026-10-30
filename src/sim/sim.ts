@@ -14,7 +14,9 @@ import {
   type Entry,
   type MaterialContent,
 } from "./catalog.ts";
+import { Fire, type FireSave } from "./fire.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
+import { daylight, LightField, lightSources } from "./light.ts";
 import { perlin2 } from "./noise.ts";
 import { Objects, type WorldObject } from "./objects.ts";
 import { levelAt, standY, step as stepTo } from "./path.ts";
@@ -22,6 +24,7 @@ import { foldPieces, type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "
 import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
+import { Signals } from "./signals.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
 
@@ -107,7 +110,9 @@ export type SimEvent =
   /** Catalog news: entries added, proposals opened, votes, outcomes. */
   | { type: "catalog"; agent: number; text: string }
   /** Something physical happened to a villager: knocked over, dropped what they carried. */
-  | { type: "physics"; agent: number; text: string };
+  | { type: "physics"; agent: number; text: string }
+  /** A signal ran from a sender (or a Rule's event) to receivers (flat x, y, z). */
+  | { type: "signal"; from: [number, number, number]; to: number[]; on: boolean };
 
 export interface CallResult {
   callId: number;
@@ -137,6 +142,8 @@ export interface SaveData {
   /** Missing in saves from before the Catalog: those worlds get nature's entries. */
   catalog?: CatalogSave;
   ruleStats?: [number, RuleStat][];
+  /** What's burning, and the fires it belongs to. */
+  fire?: FireSave;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
 }
@@ -179,6 +186,13 @@ export class Sim {
   weatherOverride: { clouds: number; until: number } | null = null;
   agentsVersion = 0;
   readonly rng: Rng;
+  /** Light from lamps, flames, fire and glowing blocks (daylight is worked out on its own). */
+  readonly light: LightField;
+  /** Block indices of glowing blocks (only villagers' blocks glow, so they're all edits). */
+  readonly glowing = new Set<number>();
+  /** Wild fire: what burns now. */
+  readonly wildfire: Fire = new Fire(this);
+  readonly signals: Signals = new Signals(this);
 
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
@@ -192,6 +206,7 @@ export class Sim {
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
+    this.light = new LightField(this.world);
   }
 
   /** Block ids for the Catalog's Materials, kept in step with the Catalog. */
@@ -227,7 +242,11 @@ export class Sim {
     const w = this.world;
     if (!w.inBounds(x, y, z)) return;
     w.set(x, y, z, block);
-    this.edits.set(w.index(x, y, z), block);
+    const index = w.index(x, y, z);
+    this.edits.set(index, block);
+    if (this.blocks.get(block)?.glows) this.glowing.add(index);
+    else this.glowing.delete(index);
+    this.light.blockChanged(x, y, z);
     this.pendingEdits.push(x, y, z, block);
     const key = z * w.sizeX + x;
     if (this.crops.has(key) && w.get(x, w.heightAt(x, z), z) !== Block.Farmland) {
@@ -425,6 +444,8 @@ export class Sim {
       agent.anim = Anim.Idle;
     }
     this.stepBodies();
+    this.wildfire.step();
+    this.signals.step();
     this.rules.tick(this.tick, (this.tick + this.dayOffset) % TICKS_PER_DAY, TICKS_PER_DAY);
     if (this.tick % TICK_HZ === 0 && this.catalog.open().length) this.settleProposals();
   }
@@ -453,6 +474,42 @@ export class Sim {
       if (same || (level >= 0 && stepTo(w, level, tx, tz) >= 0)) agent.x = nx, agent.z = nz;
     }
     return true;
+  }
+
+  /**
+   * How lit cell (x, y, z) is, 0-1: daylight (dimmed under a roof and by clouds) or the light of
+   * lamps, flames, fire and glowing blocks, whichever is brighter.
+   */
+  lightAt(x: number, y: number, z: number): number {
+    this.updateLight();
+    const day = daylight(this.world, this.timeOfDay(), this.clouds(), x, y, z);
+    return Math.max(day, this.light.at(x, y, z));
+  }
+
+  /** Bring the light field up to date with every source in the world. */
+  updateLight() {
+    const fire = this.wildfire;
+    this.light.update(lightSources({
+      catalog: this.catalog,
+      objects: this.objects.list,
+      world: this.world,
+      blocks: this.blocks,
+      glowing: this.glowing,
+      fires: [...fire.burning].map(([key, b]) => {
+        const [x0, x1, y0, y1, z0, z1] = fire.box(b);
+        return { key, x: (x0 + x1) / 2, y: y0 + (y1 - y0) * 0.6, z: (z0 + z1) / 2 };
+      }),
+    }));
+  }
+
+  /** Take an Object out of the world for good (burnt, or taken apart). */
+  removeObject(o: WorldObject) {
+    if (o.held) {
+      const by = this.agents.find((a) => a.id === o.held);
+      if (by) this.release(by, o);
+    }
+    this.objects.remove(o);
+    this.physics.forget(o.id);
   }
 
   /** The Object `agent` carries overhead, if any. */
@@ -647,6 +704,7 @@ export class Sim {
       weatherOverride: this.weatherOverride,
       catalog: this.catalog.save(),
       ruleStats: structuredClone([...this.rules.stats]),
+      fire: this.wildfire.save(),
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, notes: _n, ...rest }) =>
         structuredClone(rest)
@@ -677,6 +735,7 @@ export class Sim {
     }
     if (data.props) sim.props.applyDiff(data.props);
     if (data.objects) sim.objects.reset(data.objects);
+    sim.wildfire.load(data.fire);
     if (data.animals) sim.animals = structuredClone(data.animals);
     // Saves from before a placement change get fresh schools.
     if (data.schools?.every((f) => schoolFits(sim.world, f))) {
