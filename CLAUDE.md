@@ -74,6 +74,7 @@ src/agentlink.ts    page ↔ relay WebSocket: hello with the tools and the slot'
                     messages, auto-reconnect (a tab another tab replaced waits to be looked at
                     again), renew
 src/connect.ts      the landing/connect card (first visit, and the panel's "connect an agent")
+src/support.ts      corner links, top left: GitHub, and Support (a short note and the Ko-fi link)
 src/prefs.ts        guarded localStorage (active slot, link secrets, welcomed)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, weather, sound, Notice Board, agents
