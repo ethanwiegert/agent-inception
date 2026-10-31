@@ -2,11 +2,13 @@ import { SPECIES } from "./animals.ts";
 import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
 import {
   angleDiff,
+  areaArgs,
   type Args,
   clock,
   give,
   type Handler,
   inventoryText,
+  MAX_AREA,
   num,
   reach,
   solidProp,
@@ -19,12 +21,14 @@ import { MAKE_HANDLERS, MAKE_TOOL_DEFS } from "./maketools.ts";
 import { BODY_HANDLERS, BODY_TOOL_DEFS, CARRY_MAX, kg, PUSH_MAX } from "./bodytools.ts";
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { JOINT_HANDLERS, JOINT_TOOL_DEFS, mechanismsText } from "./jointtools.ts";
+import { FIRE_HANDLERS, FIRE_TOOL_DEFS, fireText } from "./firetools.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
 import { partBounds } from "./objects.ts";
 import { habitatRefusal, plantInfo } from "./props.ts";
 import { type Agent, Anim, type Job, type Sim, TICK_HZ, TICKS_PER_DAY } from "./sim.ts";
 import { Block } from "./world.ts";
+import { daylight } from "./light.ts";
 
 /**
  * The agent-facing API. Every game action is a tool; definitions are plain
@@ -44,7 +48,6 @@ export interface ToolDef {
 
 /** A body Design fits in this box (x, height, z), in blocks. */
 export const BODY_SIZE = [1.2, 2.4, 1.2] as const;
-const MAX_AREA = 16;
 const CAST_RANGE = 4;
 const int = (description: string) => ({ type: "integer", description });
 const area = {
@@ -124,6 +127,7 @@ export const TOOL_DEFS: ToolDef[] = [
   ...MAKE_TOOL_DEFS,
   ...BODY_TOOL_DEFS,
   ...JOINT_TOOL_DEFS,
+  ...FIRE_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -260,7 +264,10 @@ function join(sim: Sim, session: string, args: Args): string {
     "sink, and you can push them along or carry light ones and put_down them anywhere (mind " +
     "anyone standing downhill of a rolling boulder). Designs can have moving pieces on hinges, " +
     "axles, sliders and motors (doors, carts, windmills): use opens a door or switches a " +
-    "motor, and a closed door is a wall. People are watching " +
+    "motor, and a closed door is a wall. Lamps and glowing Materials light the night, a flame " +
+    "part is a tame fire, and levers and pressure plates send signals on named channels to " +
+    "doors, motors and lamps (use flips a lever, or tunes a channel). ignite starts a wild fire " +
+    "that spreads to what burns and burns it away, and douse puts it out. People are watching " +
     "you live here, so take your time and narrate now and then with say. Choose how you look " +
     "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
@@ -279,8 +286,12 @@ const HANDLERS: Record<string, Handler> = {
   ...MAKE_HANDLERS,
   ...BODY_HANDLERS,
   ...JOINT_HANDLERS,
-  look: (sim, agent, args) =>
-    describe(sim, agent, Math.min(12, Math.max(3, Number(args.radius ?? 6) | 0))),
+  ...FIRE_HANDLERS,
+  look(sim, agent, args) {
+    const want = Number(args.radius ?? 6) | 0, r = Math.min(12, Math.max(3, want));
+    const text = describe(sim, agent, r);
+    return r === want ? text : `(radius is 3-12: mapping ${r}.)\n${text}`;
+  },
 
   walk_to(sim, agent, args) {
     const x = num(args.x, "x"), z = num(args.z, "z");
@@ -491,12 +502,7 @@ function eachTile(
   ticks: number,
   action: TileAction,
 ): Job {
-  const x0 = num(args.x, "x"), z0 = num(args.z, "z");
-  const width = Math.max(1, num(args.width ?? 1, "width"));
-  const depth = Math.max(1, num(args.depth ?? 1, "depth"));
-  if (width * depth > MAX_AREA) {
-    throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
-  }
+  const { x0, z0, width, depth } = areaArgs(args);
   return (function* () {
     let done = 0;
     const skipped: string[] = [];
@@ -641,9 +647,9 @@ const NATURAL_MARKS: Record<number, string> = {
   [Block.Clay]: ":",
 };
 /** Marks the legend already means something by (villagers are digits). */
-const FIXED_MARKS = "@.,swWd#:~≈ft+";
+const FIXED_MARKS = "@.,swWd#:~≈ft+^";
 /** For built blocks once their names' letters are all taken. */
-const SPARE_MARKS = "$=^!?;<>";
+const SPARE_MARKS = "$=!?;<>";
 
 /** Height marks: "=" level with you, 1-9 higher, a-i lower. */
 function heightMark(dh: number): string {
@@ -697,7 +703,15 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       objMarks.set(o.design, m = { mark, name, how: "" });
     }
     const key = z * w.sizeX + x;
-    const how = w.objSolid[key] ? "in the way" : w.objLift[key] ? "stand on" : "walk under";
+    // Not in the way and not lifting anyone: flat on the ground (a plate), or high overhead.
+    const flat = sim.objects.topAt(x, z) < w.heightAt(x, z) + 1.5;
+    const how = w.objSolid[key]
+      ? "in the way"
+      : w.objLift[key]
+      ? "stand on"
+      : flat
+      ? "walk over"
+      : "walk under";
     if (!m.how.includes(how)) m.how = m.how ? `${m.how}/${how}` : how;
     return m.mark;
   };
@@ -744,6 +758,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       }
       const animal = sim.animals.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (animal) c = SPECIES[animal.species].mark;
+      if (w.fire[z * w.sizeX + x]) c = "^";
       const other = others.find((a) => Math.floor(a.x) === x && Math.floor(a.z) === z);
       if (other) c = others.indexOf(other) < 9 ? String(others.indexOf(other) + 1) : "+";
       if (x === ax && z === az) c = "@";
@@ -753,15 +768,26 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     heights.push(hrow);
   }
 
+  const light = sim.lightAt(ax, Math.floor(agent.y + 0.05), az);
+  const day = daylight(w, t, sim.clouds(), ax, Math.floor(agent.y + 0.05), az);
+  const how = light < 0.08
+    ? "dark"
+    : light > day + 1e-6
+    ? "lamplight"
+    : day < 0.6 && w.heightAt(ax, az) >= Math.floor(agent.y + 0.05)
+    ? "under a roof"
+    : "daylight";
   const lines = [
-    `${agent.name} — Day ${sim.day()}, ${clock(t)} (${partOfDay(t)}).`,
+    `${agent.name} — Day ${sim.day()}, ${clock(t)} (${partOfDay(t)}). Light here: ${
+      light.toFixed(2)
+    } (${how}).`,
     `You stand at x=${ax} z=${az}, ground level ${ah}. ${inventoryText(agent)}`,
     "",
     `Map: x ${ax - r}..${
       ax + r
     } left→right (east), z top→bottom (south). Height vs. you on the right.`,
     `Legend: @ you  . grass  , farmland  s seedling  w growing crop  W ripe crop  d dirt  # stone  ` +
-    `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  f fish school  ${
+    `: sand/gravel  ~ shallow water (wade)  ≈ deep water (swim, slow)  f fish school  ^ fire  ${
       SPECIES.map((d) => `${d.mark} ${d.name}`).join("  ")
     }  1-9 other villagers | height = same, 1-9 higher, a-i lower`,
     ...(built.size
@@ -783,6 +809,50 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       : []),
     ...tiles.map((row, i) => `${row}   ${heights[i]}`),
   ];
+  // Ground worth digging (the map draws sand, gravel and clay alike), a rock to break for stone,
+  // and water: the nearest of each.
+  const beyond: string[] = [];
+  const want = new Map<number, string>([
+    [Block.Sand, "sand"],
+    [Block.Clay, "clay"],
+    [Block.Gravel, "gravel"],
+    [Block.Stone, "stone"],
+  ]);
+  const stony = new Map<number, boolean>();
+  let water = false, rock = false;
+  const away = (d: number) => `${d} tile${d === 1 ? "" : "s"}`;
+  const visit = (x: number, z: number, d: number) => {
+    const h = w.heightAt(x, z);
+    if (h < 0) return;
+    const prop = rock ? undefined : sim.props.at(x, z);
+    if (prop) {
+      let gives = stony.get(prop.design);
+      if (gives === undefined) {
+        const e = sim.catalog.get(prop.design);
+        stony.set(prop.design, gives = !!e && sim.drops(e).some(([m]) => m === "stone"));
+      }
+      if (gives) {
+        rock = true;
+        const name = sim.catalog.get(prop.design)!.name;
+        beyond.push(`a ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
+      }
+    }
+    if (w.waterTop[z * w.sizeX + x] >= 0) {
+      if (!water) water = true, beyond.push(`water at x=${x} z=${z} (${away(d)})`);
+      return;
+    }
+    const b = w.get(x, h, z), name = want.get(b);
+    if (!name) return;
+    want.delete(b);
+    beyond.push(`${name} at x=${x} z=${z} (${away(d)})`);
+  };
+  for (let d = 1; d <= 40 && (want.size || !water || !rock); d++) {
+    for (let i = -d; i <= d; i++) {
+      visit(ax + i, az - d, d), visit(ax + i, az + d, d);
+      if (i > -d && i < d) visit(ax - d, az + i, d), visit(ax + d, az + i, d);
+    }
+  }
+  if (beyond.length) lines.push("", `Nearest within 40 tiles: ${beyond.join(", ")}.`);
   if (ripe || growing) {
     const soon = growing ? `; next ripens in ~${gameDuration(soonest)}` : "";
     lines.push("", `Crops in view: ${ripe} ripe, ${growing} growing${soon}.`);
@@ -844,14 +914,24 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);
   }
-  // Doors, gates, wheels and windmills: what each joint is doing and where to use it.
+  // Doors, gates, wheels, windmills, lamps and levers: what each does now and where to use it.
   const mechanisms = mechanismsText(sim, agent.x, agent.z, r * 1.5);
   if (mechanisms.length) {
     lines.push(
       "",
-      "Mechanisms (joints):",
+      "Mechanisms:",
       ...mechanisms,
-      "  (use swings a hinge with limits or a slider to its other end, and switches motors.)",
+      "  (use swings a hinge with limits or a slider to its other end, switches motors, lamps " +
+        'and flames, and flips levers; use with channel "name" tunes one.)',
+    );
+  }
+  const fires = fireText(sim, agent.x, agent.z, r * 1.5);
+  if (fires.length) {
+    lines.push(
+      "",
+      `Fire! Burning within ${Math.round(r * 1.5)} tiles (^ marks it on the map):`,
+      ...fires,
+      "  (Fire spreads to touching things that burn; douse x z puts it out. Paths go round it.)",
     );
   }
   // Things of yours that rolled, slid or floated out of view, so they're never simply lost.

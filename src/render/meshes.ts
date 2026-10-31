@@ -3,7 +3,11 @@ import type { Mat4 } from "../math.ts";
 /** Linear RGB, 0-1. Stored as sRGB bytes so darks keep their precision. */
 export type Rgb = readonly [number, number, number];
 
-/** Bytes per vertex: position f32×3, normal snorm8×4, sRGB color + sway unorm8×4. */
+/**
+ * Bytes per vertex: position f32×3, normal + glow snorm8×4, sRGB color + sway unorm8×4. Glow is
+ * how bright a vertex shines by itself: positive always (a glowing Material), negative only while
+ * its Object's lights are on (a lamp).
+ */
 export const VERTEX_BYTES = 20;
 /** Floats per instance: model matrix (16) + linear tint rgb and wind weight (4). */
 export const INSTANCE_FLOATS = 20;
@@ -18,6 +22,8 @@ export interface Style {
   sway?: number | readonly [number, number];
   ao?: number;
   jitter?: number;
+  /** Shines by itself (see VERTEX_BYTES): 0-1 always, or -1-0 while lit. */
+  glow?: number;
 }
 
 export interface SphereOptions {
@@ -46,6 +52,7 @@ export class MeshBuilder {
   readonly normals: number[] = [];
   readonly colors: number[] = [];
   readonly sways: number[] = [];
+  readonly glows: number[] = [];
   readonly indices: number[] = [];
 
   get vertexCount() {
@@ -241,6 +248,7 @@ export class MeshBuilder {
     this.normals.push(...other.normals);
     this.colors.push(...other.colors);
     this.sways.push(...other.sways);
+    this.glows.push(...other.glows);
     for (const i of other.indices) this.indices.push(base + i);
     return this;
   }
@@ -277,6 +285,7 @@ export class MeshBuilder {
         const k = (1 - ao * (1 - t)) * (1 + jitter * (hash3(px, py, pz) * 2 - 1));
         this.colors.push(style.color[0] * k, style.color[1] * k, style.color[2] * k);
         this.sways.push(s0 + (s1 - s0) * t);
+        this.glows.push(style.glow ?? 0);
       },
     };
   }
@@ -350,6 +359,7 @@ export class MeshLibrary {
         view.setFloat32(o + 4, y, true);
         view.setFloat32(o + 8, z, true);
         for (let c = 0; c < 3; c++) view.setInt8(o + 12 + c, snorm(m.normals[i * 3 + c]));
+        view.setInt8(o + 15, snorm(m.glows[i] ?? 0));
         for (let c = 0; c < 3; c++) view.setUint8(o + 16 + c, srgb(m.colors[i * 3 + c]));
         view.setUint8(o + 19, Math.round(Math.max(0, Math.min(1, m.sways[i])) * 255));
       }

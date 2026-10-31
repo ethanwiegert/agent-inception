@@ -3,6 +3,7 @@ import {
   type Catalog,
   type DesignContent,
   type DesignPart,
+  deviceKind,
   type MaterialContent,
   type Role,
   shapeOf,
@@ -55,6 +56,8 @@ export function meshDesign(
   let drawn = 0;
   design.parts.forEach((p, i) => {
     if (o.only ? !o.only(p, i) : o.role !== null && p.role !== o.role) return;
+    // Flames are drawn as fire (render/particles.ts), not as their Material.
+    if (deviceKind(p.part) === "flame") return;
     const mat = catalog.byName(p.material)?.content as MaterialContent | undefined;
     if (!mat) return;
     meshPart(b, p, i, mat, o.colors?.get(p.material), origin, o.sway === false ? 0 : top);
@@ -100,6 +103,8 @@ function meshPart(
     sway: [lo * bend, hi * bend],
     ao: lumpy ? 0.45 : rocky ? 0.3 : 0.25,
     jitter: mat.pattern === "leaves" ? 0.12 : lumpy ? 0.06 : rocky ? 0.1 : 0,
+    // A lamp shines while its Object's lights are on; a glowing Material always does.
+    glow: deviceKind(p.part) === "lamp" ? -Math.max(0.8, mat.glows ?? 0) : mat.glows ?? 0,
   };
 
   identity(m);

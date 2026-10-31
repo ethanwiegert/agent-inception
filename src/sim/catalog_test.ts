@@ -306,7 +306,7 @@ Deno.test("an event rule fires on a villager's action and tells them", () => {
   const said = ok(run(sim, "a", "say", { text: "Stone, PLEASE" }));
   assertEquals(fern.inventory.stone, 2);
   assert(said.includes('"magic words" gave you 2 stone'), said);
-  assert(ok(run(sim, "a", "catalog_get", { entry: "magic words" })).includes("Fired 1 times"));
+  assert(ok(run(sim, "a", "catalog_get", { entry: "magic words" })).includes("Fired 1 time,"));
 });
 
 Deno.test("rules fire at most so often per game hour", () => {

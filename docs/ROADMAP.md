@@ -63,6 +63,11 @@ Saves may break freely until M14; save versioning and migrations come last befor
   `use` swings doors and sliders and switches motors; a closed door is a wall; `used` and `switch`
   for Rules; a garden gate, hand cart and windmill as worked examples; playtest
   [0007](playtests/0007-m10.md).
+- **M11 — fields.** Light as a field over the cells (lamps, flames, fire, glowing Materials; walls
+  stop it) that `look` and Rules read; wild fire that spreads to what burns, capped, with `ignite`
+  and `douse`; signals on named channels from levers and pressure plates to lamps, flames, motors
+  and doors; lantern post, torch, campfire, signal lever and pressure plate as worked examples;
+  playtest [0008](playtests/0008-m11.md).
 
 ## V1
 
@@ -407,6 +412,64 @@ Decided in the build and the gate (M10):
   Objects (±4 of the event, or everywhere on a timer).
 - Worlds saved before M10 gain nature's new entries on load.
 
+M11 is done (playtest [0008](playtests/0008-m11.md)). Grill outcome (2026-10-30):
+
+- **Light is a field the sim knows.** A new `lamp` Part, and any block or part whose Material
+  `glows`, casts light in its Material's color onto terrain, grass, Objects and villagers. Walls
+  stop it. `look` says how lit a place is, and Rules get `light_above` / `light_below` conditions
+  (daylight or lamplight at the event), so a Rule can make crops grow under lamps at night.
+- **Wild fire burns anything that burns, capped.** It spreads to touching blocks, plants, crops and
+  Objects whose Materials burn (logs, planks, thatch, trees, wheat; never grass or stone), whoever
+  built them, as dismantling already allows. Burnt things are gone. Hard caps: a limit on what burns
+  at once per world, slow spread, burn-out timers. Water and a `douse` tool put it out. Villagers
+  and animals are never hurt: they step out of it, and paths go around flames.
+- **`ignite` starts fire, `douse` stops it**, no tool items needed (as with `interact`). A new
+  `flame` Part (torches, campfires) is tame: it glows and burns forever and never spreads. Rules get
+  `ignited` and `burned` triggers and `ignite` and `douse` effects. Fuel (the `fuels` Relation)
+  waits for M12's scarcity.
+- **Signals travel on named channels.** New source Parts: a `lever` you `use` and a pressure `plate`
+  that's on while something stands on it; a Rule's `signal` effect sends too. Every motor, hinge or
+  slider with limits, lamp and flame on that channel within 16 tiles follows it (on: run, open,
+  shine). Spectators see a spark run from sender to receivers.
+
+Decided in the build (M11):
+
+- **The light field** floods from each source through open cells (Dijkstra over the 26 neighbours in
+  tenths of a block, never through diagonal cracks) and fades as (1 - way / reach)^1.6; lamps reach
+  8 blocks, flames 7, fire 6, glowing Materials 2 + 5 × `glows`. Sources combine by the brightest
+  per color channel. It lives in 16³ chunks recomputed only where a source or a block near one
+  changed; glowing blocks light in 2 × 2 × 2 groups. Light for Rules and `look` is the brighter of
+  the field and daylight (the renderer's sun arc, dimmed by clouds and to 0.3 under a roof; 0.03 at
+  night).
+- A lamp shines in its Material's color whatever the Material's own glow, and is dark when off
+  (lantern glass included). Flames are drawn as fire, not as their Material, and cost their volume
+  like any part. `use` switches all of an Object's lamps and flames together, like its motors;
+  signals reach each part on its channel.
+- `grow` gained `light_above`; nature's "lamplit fields" grows lamplit wheat half an hour every half
+  hour at night, and "lanterns at dusk" / "at dawn" switch the "lanterns" channel.
+- **What catches**: a block whose Material burns with air beside it; a plant, crop or Object mostly
+  (by volume) of Materials that burn; never in water, never while carried. Blocks burn 20 × (6 + 4 ×
+  hardness) ticks, trees 24 s, small plants and crops 6 s, Objects 8-20 s by mass, then are gone
+  (blocks become air). Each burning thing tries once a second to set alight up to two touching
+  things (chance 0.3 × (1 - clouds), starting at a random neighbour). At most 64 burn at once and
+  one fire burns 48 things; cloud cover 0.85 or more puts each fire out with a 25% chance a second.
+  Fires lit by a Rule fire no Rules. Villagers in a burning column step to the nearest safe tile
+  within 3; animals within 4 tiles bolt; paths treat burning columns as blocked.
+- **Signals**: when a lever or plate changes, every receiver on its channel within 16 tiles (on all
+  three axes) follows the OR of the senders on that channel within 16 of it. On sends a hinge or
+  slider to its farther limit (where `use` first sends it), off back as built. A Rule's `signal`
+  reaches at most 32 receivers, within 16 of the event or everywhere on a timer. The `signal`
+  trigger's `what` is "<channel> on" or "<channel> off", from levers and plates only. Plates are
+  checked every 4 ticks for villagers, animals and other Objects resting on them. `use` with
+  `channel` sets a per-Object override (motors together, lamps and flames together); "" or "none"
+  takes it off a channel; a tuned lever that's on sends at once.
+- **Page**: the light field is computed from the mirror once a tick and uploaded per changed chunk
+  to a 3D texture; lamplight and things that shine by themselves are compensated for the night
+  exposure, and the moonlit grading fades out on lamp- and firelit pixels so they keep their color.
+  Flames, smoke, lamp halos and signal sparks are procedural particles. Levers lean ±34°, pressed
+  plates sink 3 cm.
+- Worlds saved before M11 gain nature's new entries, and Relations matched by name, on load.
+
 ### M12 — Village Life
 
 - Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no
@@ -486,6 +549,11 @@ Pick these up in the gate of whichever milestone touches them.
   hand cart"). Riding a cart or boat (`ride`/`get_off`) was left out of M10 by the grill.
 - 100 hand carts dropped at once (500 bodies, 400 axles) cost 5-6 ms a tick while they settle;
   measure with the pile budget below.
+- From M11: only blocks stop light, not Objects' parts (a lamp in a plank-part hut lights the
+  meadow); lamps and flames on a villager's body don't light anything, and flames on bodies aren't
+  drawn; the page relights moving lamps once a tick. Light, fire and sparks were only seen in
+  software; check them on the dev box with the hardware remeasure.
+- From playtest 0008: `interact` walks to its targets without saying where you ended up.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

@@ -37,6 +37,7 @@ struct Out {
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
   @location(2) color: vec3f,
+  @location(3) glow: f32,
 };
 
 /** Wind sway: a slow lean with the gusts plus a quick flutter, scaled by how loose a vertex is. */
@@ -69,7 +70,10 @@ fn place(v: VIn, ii: u32) -> vec3f {
     let sunk = mix(inst.model[3].xyz, world, k);
     clip = select(frame.viewProj * vec4f(sunk, 1.0), vec4f(0.0, 0.0, 2.0, 1.0), k <= 0.0);
   }
-  return Out(clip, world, n, albedo);
+  // Glow: positive always; negative only while the instance's lights are on (tint.a >= 0).
+  let g = v.normal.w;
+  let glow = select(max(-g, 0.0) * step(0.0, inst.tint.a), g, g > 0.0);
+  return Out(clip, world, n, albedo, glow);
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -77,7 +81,8 @@ fn place(v: VIn, ii: u32) -> vec3f {
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let c = shade(in.color, normalize(in.normal), in.world, 1.0, 0.25);
+  let c = shade(in.color, normalize(in.normal), in.world, 1.0, 0.25) +
+    selfLit(in.color * in.glow * EMISSIVE);
   return vec4f(fog(c, in.world), 1.0);
 }
 `;

@@ -1,6 +1,7 @@
 import { Pattern } from "./blocks.ts";
 import {
   AUTHORED_KINDS,
+  type DesignContent,
   ENGINE_RELATIONS,
   type Entry,
   KINDS,
@@ -11,6 +12,7 @@ import {
   ZONES,
 } from "./catalog.ts";
 import { type Args, clock, type Handler } from "./jobs.ts";
+import { costText, partCost } from "./objects.ts";
 import { RULE_EVENTS, RULE_LIMITS, type RuleContent } from "./rules.ts";
 import { type Agent, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -40,8 +42,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
         author: { type: "string", description: 'A villager\'s name, or "nature".' },
         property: {
           type: "string",
-          description: 'A content field test, like "burns", "density>2", "pattern=planks" or ' +
-            '"type=made_from". Operators: = != < <= > >=.',
+          description: 'A content field test, like "burns", "density>2", "pattern=planks", or ' +
+            '"type=made_from" with kind "relation" for recipes. Operators: = != < <= > >=.',
         },
         related_to: ref("Only entries connected to this one by a Relation (and the Relations)."),
         include_retired: { type: "boolean" },
@@ -67,7 +69,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       '- material: {"form": "item", "color": "#a0522d", "pattern": "planks", "density": 0.6, ' +
       '"hardness": 2, "burns": true, "glows": 0}. form is "block" (the default; it can be a ' +
       'placeable block), "item" (carried: seeds, wool, fish) or "liquid" (nature only). ' +
-      "density in g/cm³ (water 1), hardness 0-10, glows 0-1. " +
+      "density in g/cm³ (water 1), hardness 0-10, glows 0-1 (it lights what's around it, " +
+      "as a block or a part, by night and by day). burns: fire spreads to it and burns it away. " +
       `Patterns: ${Object.keys(Pattern).join(", ")}.\n` +
       '- design: {"blocks": {"palette": {"s": "stone"}, "layers": [["sss", "s.s"]]}, "parts": ' +
       '[{"part": "cone", "material": "planks", "at": [0.5, 0.5, 0.5], "size": [0.2, 1, 0.2], ' +
@@ -92,6 +95,15 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `degrees/s (default 30, ≤${LIMITS.motorSpeed}) while switched on. Pieces hang off ` +
       `main like a tree, ≤${LIMITS.joints} joints. Hang a door on its doorway's edge so it ` +
       "swings clear; use works it. See the garden gate, hand cart and windmill. " +
+      "Devices: a lamp part shines in its Material's color (8 blocks; walls stop it) while " +
+      "it's on; a flame part is a tame fire (drawn as fire, warm light, never spreads); a " +
+      "lever is flipped by use; a plate is pressed while someone or something stands on it " +
+      "(make it flat, ≤0.05 tall, or anchored, so people walk onto it rather than around it). " +
+      '"channel": "gate" on a lever or plate sends ' +
+      "on that channel; on a lamp, flame, motor, or hinge or slider with limits, it follows " +
+      "every lever and plate on it within 16 tiles (on: shine, run, open to the far limit; " +
+      "off: dark, stop, back as built). use with channel retunes a built one. See the lantern " +
+      "post, torch, campfire, signal lever and pressure plate. " +
       "build makes a Design: its " +
       "blocks are laid as blocks and its parts become one Object (each part costs its volume " +
       "in its Material, at least 1).\n" +
@@ -101,7 +113,9 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       '{"every": 60} game minutes (10-1440), or {"daily": 6} (hour). ' +
       'if (optional): {"chance": 0.2}, {"time": [18, 6]}, {"clouds_above": 0.6}, ' +
       '{"clouds_below": 0.3}, {"has": {"item": "wheat", "count": 2}}, ' +
-      '{"block": {"at": [0, -1, 0], "is": "stone"}}, {"all": [...]}, {"any": [...]}, ' +
+      '{"block": {"at": [0, -1, 0], "is": "stone"}}, {"light_above": 0.3}, ' +
+      '{"light_below": 0.1} (daylight or lamplight at the event, 0-1), {"all": [...]}, ' +
+      '{"any": [...]}, ' +
       `{"not": {...}}. do (1-${RULE_LIMITS.effects}): ` +
       `{"give": {"item": "wheat_seeds", "count": 1}} (≤${RULE_LIMITS.give}), ` +
       '{"take": {"item": "wheat", "count": 1}}, {"set_block": {"at": [0, 1, 0], "to": ' +
@@ -111,12 +125,17 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `${RULE_LIMITS.crowd} neighbours already hold it), ` +
       `{"grow": {"what": "wheat crop", "hours": 2}} (≤${RULE_LIMITS.growHours} hours; brings ` +
       "growing crops and young plants of that Design forward, within reach of the event or " +
-      "everywhere on a timer), " +
+      'everywhere on a timer; "light_above": 0.3 grows only those in light), ' +
       `{"impulse": {"what": "ball", "up": 4, "speed": 2, "toward": "east"}} (≤` +
       `${RULE_LIMITS.impulse} blocks/s near the event, ≤${RULE_LIMITS.impulseEverywhere} and a ` +
       "compass direction on a timer; nudges Objects that move), " +
       '{"switch": {"what": "windmill", "on": true}} (starts or stops the motors of Objects ' +
-      "with that name, near the event or everywhere on a timer). " +
+      "with that name, near the event or everywhere on a timer), " +
+      '{"signal": {"channel": "lanterns", "on": true}} (sends on a channel: within 16 tiles ' +
+      'of the event, or everywhere on a timer), {"ignite": {"at": [0, 0, 0]}} (sets alight ' +
+      'what burns there), {"douse": {}} (puts fires out near the event or everywhere; ' +
+      '"what" names only some). Events ignited and burned say what caught or burnt away; ' +
+      'signal says "<channel> on" or "<channel> off" when a lever or plate changes. ' +
       `"at" is an offset (each -${RULE_LIMITS.reach}..${RULE_LIMITS.reach}) from the event's ` +
       "block; give, take, has, block and set_block need an event trigger. spread and grow " +
       "work on a timer too. A rule fires at most " +
@@ -129,7 +148,7 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       `types the world will enforce: ${ENGINE_RELATIONS.join(", ")}; or your own ` +
       'lower_snake_case label like "sacred_to" that just records knowledge. No name needed.\n' +
       'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "wildflowers ' +
-      'spread", "stone bench".',
+      'spread", "lanterns at dusk", "lamplit fields", "stone bench".',
     inputSchema: {
       type: "object",
       properties: {
@@ -521,6 +540,20 @@ function get(sim: Sim, e: Entry): string {
     ? relationText(sim, e)
     : JSON.stringify(e.content, (k, v) => (k === "if" && v === null ? undefined : v));
   lines.push(`Content: ${content}`);
+  if (e.kind === "design" && !(e.content as DesignContent).habitat) {
+    // What build takes: each block, and each part's volume in its Material (at least 1).
+    const d = e.content as DesignContent, cost = new Map<string, number>();
+    for (const layer of d.blocks?.layers ?? []) {
+      for (const row of layer) {
+        for (const ch of row) {
+          const m = d.blocks!.palette[ch];
+          if (m) cost.set(m, (cost.get(m) ?? 0) + 1);
+        }
+      }
+    }
+    for (const [m, n] of partCost(d)) cost.set(m, (cost.get(m) ?? 0) + n);
+    lines.push(`To build it: ${costText(cost)}.`);
+  }
   const forks = c.forksOf(e.id);
   if (forks.length) {
     lines.push(
@@ -555,7 +588,7 @@ function get(sim: Sim, e: Entry): string {
       ? `every ${rule.when.every} game minutes`
       : `daily at ${rule.when.daily}:00`;
     lines.push(
-      `Runs ${trigger}. Fired ${s?.fired ?? 0} times, for anyone` +
+      `Runs ${trigger}. Fired ${s?.fired ?? 0} time${s?.fired === 1 ? "" : "s"}, for anyone` +
         (s?.dropped ? `, ${s.dropped} dropped by the limits` : "") +
         (s?.skipped ? `; last skipped effect: ${s.skipped}` : "") + ".",
     );

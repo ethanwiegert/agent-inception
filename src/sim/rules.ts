@@ -1,8 +1,16 @@
-import type { Catalog, DesignContent, Entry, MaterialContent, Vec3 } from "./catalog.ts";
+import {
+  type Catalog,
+  channelName,
+  type DesignContent,
+  type Entry,
+  type MaterialContent,
+  type Vec3,
+} from "./catalog.ts";
+import { daylight } from "./light.ts";
 import { GROWN, habitatRefusal, plantInfo } from "./props.ts";
 import { hash2 } from "./rng.ts";
 import type { Agent, Sim } from "./sim.ts";
-import { Block } from "./world.ts";
+import { Block, solid } from "./world.ts";
 
 /**
  * Rules (ADR 0004): JSON trees of when (a trigger) → if (conditions) → do (effects). Effects act
@@ -26,6 +34,9 @@ export const RULE_EVENTS = [
   "carried",
   "landed",
   "used",
+  "ignited",
+  "burned",
+  "signal",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -38,6 +49,8 @@ export type Condition =
   | { clouds_below: number }
   | { has: { item: string; count: number } }
   | { block: { at: Vec3; is: string } }
+  | { light_above: number }
+  | { light_below: number }
   | { all: Condition[] }
   | { any: Condition[] }
   | { not: Condition };
@@ -49,9 +62,12 @@ export type Effect =
   | { say: string }
   | { weather: { clouds: number; hours: number } }
   | { spread: { what: string; count: number } }
-  | { grow: { what: string; hours: number } }
+  | { grow: { what: string; hours: number; light_above?: number } }
   | { impulse: Impulse }
-  | { switch: { what: string; on: boolean } };
+  | { switch: { what: string; on: boolean } }
+  | { ignite: { at: Vec3 } }
+  | { douse: { what?: string } }
+  | { signal: { channel: string; on: boolean } };
 
 /** A nudge to bodies: up and sideways speeds (blocks/s), optionally only those named `what`. */
 export interface Impulse {
@@ -120,6 +136,8 @@ const CONDITIONS = [
   "clouds_below",
   "has",
   "block",
+  "light_above",
+  "light_below",
   "all",
   "any",
   "not",
@@ -134,6 +152,9 @@ const EFFECTS = [
   "grow",
   "impulse",
   "switch",
+  "ignite",
+  "douse",
+  "signal",
 ];
 
 // ---------------------------------------------------------------- validation
@@ -296,6 +317,12 @@ function condition(v: unknown, c: Check, depth: number, where: string): Conditio
       if (!known) throw new Error(`${at}.is must be "air" or a material, like "stone".`);
       return { block: { at: offset(o.at, `${at}.at`), is } };
     }
+    case "light_above":
+    case "light_below": {
+      needsPlace(c, at);
+      const v = num(val, 0, 1, at);
+      return k === "light_above" ? { light_above: v } : { light_below: v };
+    }
     case "all":
     case "any": {
       if (!Array.isArray(val) || !val.length || val.length > 8) {
@@ -355,19 +382,39 @@ function effect(v: unknown, c: Check, where: string): Effect {
       };
     }
     case "grow": {
-      const o = fields(val, ["what", "hours"], at);
-      return {
-        grow: {
-          what: plantDesign(c.catalog, o.what, `${at}.what`).name,
-          // On a timer it reaches every plant in the world, so it moves them gently.
-          hours: num(
-            o.hours ?? 1,
-            0.1,
-            c.local ? RULE_LIMITS.growHours : RULE_LIMITS.growHoursEverywhere,
-            `${at}.hours`,
-          ),
-        },
+      const o = fields(val, ["what", "hours", "light_above"], at);
+      const grow: { what: string; hours: number; light_above?: number } = {
+        what: plantDesign(c.catalog, o.what, `${at}.what`).name,
+        // On a timer it reaches every plant in the world, so it moves them gently.
+        hours: num(
+          o.hours ?? 1,
+          0.1,
+          c.local ? RULE_LIMITS.growHours : RULE_LIMITS.growHoursEverywhere,
+          `${at}.hours`,
+        ),
       };
+      if (o.light_above !== undefined) {
+        grow.light_above = num(o.light_above, 0, 1, `${at}.light_above`);
+      }
+      return { grow };
+    }
+    case "ignite": {
+      needsPlace(c, at);
+      const o = fields(val, ["at"], at);
+      return { ignite: { at: offset(o.at ?? [0, 0, 0], `${at}.at`) } };
+    }
+    case "douse": {
+      const o = fields(val ?? {}, ["what"], at);
+      if (o.what === undefined) return { douse: {} };
+      if (typeof o.what !== "string" || !o.what.trim() || o.what.length > 40) {
+        throw new Error(`${at}.what is a name to match (1-40 characters), e.g. "oak".`);
+      }
+      return { douse: { what: o.what.trim().toLowerCase() } };
+    }
+    case "signal": {
+      const o = fields(val, ["channel", "on"], at);
+      if (typeof o.on !== "boolean") throw new Error(`${at}.on is true (on) or false (off).`);
+      return { signal: { channel: channelName(o.channel, `${at}.channel`), on: o.on } };
     }
     case "impulse": {
       const o = fields(val, ["what", "up", "speed", "toward"], at);
@@ -580,6 +627,12 @@ export class Rules {
       const [dx, dy, dz] = c.block.at;
       return sim.blocks.name(sim.world.get(ctx.x + dx, ctx.y + dy, ctx.z + dz)) === c.block.is;
     }
+    if ("light_above" in c || "light_below" in c) {
+      // At the event's cell, or the open cell over it when the event was a block (a tilled one).
+      const y = solid(sim.world.get(ctx.x, ctx.y, ctx.z)) ? ctx.y + 1 : ctx.y;
+      const l = sim.lightAt(ctx.x, y, ctx.z);
+      return "light_above" in c ? l > c.light_above : l < c.light_below;
+    }
     if ("all" in c) return c.all.every((x) => this.test(x, ctx));
     if ("any" in c) return c.any.some((x) => this.test(x, ctx));
     return !this.test(c.not, ctx);
@@ -599,9 +652,27 @@ export class Rules {
       return;
     }
     if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);
-    if ("grow" in fx) return this.grow(fx.grow.what, fx.grow.hours, ctx === NO_PLACE ? null : ctx);
+    if ("grow" in fx) {
+      return this.grow(
+        fx.grow.what,
+        fx.grow.hours,
+        ctx === NO_PLACE ? null : ctx,
+        fx.grow.light_above,
+      );
+    }
     if ("impulse" in fx) return this.impulse(fx.impulse, ctx === NO_PLACE ? null : ctx);
     if ("switch" in fx) return this.switch(fx.switch, ctx === NO_PLACE ? null : ctx);
+    if ("douse" in fx) return this.douse(fx.douse.what, ctx === NO_PLACE ? null : ctx);
+    if ("signal" in fx) {
+      const near = ctx === NO_PLACE ? null : [ctx.x, ctx.y, ctx.z] as [number, number, number];
+      const n = sim.signals.send(fx.signal.channel, fx.signal.on, near);
+      if (!n) return `nothing on channel "${fx.signal.channel}" ${near ? "nearby" : "anywhere"}`;
+      return;
+    }
+    if ("ignite" in fx) {
+      const [dx, dy, dz] = fx.ignite.at;
+      return this.ignite(ctx.x + dx, ctx.y + dy, ctx.z + dz, agent);
+    }
     if (!agent) return "no villager to act on";
     if ("give" in fx) {
       const name = sim.produce(fx.give.item);
@@ -735,12 +806,52 @@ export class Rules {
     if (!placed) return why;
   }
 
+  /** Set alight whatever burns at cell (x, y, z), or on its tile. Its fire doesn't fire Rules. */
+  private ignite(x: number, y: number, z: number, agent: Agent | null): string | void {
+    const sim = this.sim, fire = sim.wildfire;
+    const targets = [...fire.targetsAt(x, z, y), ...fire.targetsAt(x, z)];
+    let why = "nothing there burns";
+    for (const t of targets) {
+      const no = fire.light(t, agent?.name ?? null, true);
+      if (!no) return;
+      if (!no.includes("doesn't burn")) why = no;
+    }
+    return why;
+  }
+
+  /** Put out the fires near the event (±4), or every one on a timer; only `what`, if named. */
+  private douse(what: string | undefined, near: RuleCtx | null): string | void {
+    const sim = this.sim, fire = sim.wildfire, r = RULE_LIMITS.reach + 0.5;
+    let n = 0;
+    for (const [k, b] of [...fire.burning]) {
+      if (what && !saysWords(fire.nameOf(b), what)) continue;
+      if (near) {
+        const [x0, x1, y0, y1, z0, z1] = fire.box(b);
+        const cx = (x0 + x1) / 2 - near.x - 0.5, cy = (y0 + y1) / 2 - near.y - 0.5;
+        const cz = (z0 + z1) / 2 - near.z - 0.5;
+        if (Math.abs(cx) > r + (x1 - x0) / 2 || Math.abs(cy) > r + (y1 - y0) / 2) continue;
+        if (Math.abs(cz) > r + (z1 - z0) / 2) continue;
+      }
+      fire.out(k);
+      n++;
+    }
+    if (!n) return `no ${what ?? "fire"} burning ${near ? "nearby" : "anywhere"}`;
+  }
+
   /**
    * Bring growing crops and young plants of `what` (following replaced_by) forward by `hours`:
-   * near the event, or everywhere for a timer. Returns why nothing grew.
+   * near the event, or everywhere for a timer; only where light is above `lit`, if given.
+   * Returns why nothing grew.
    */
-  private grow(what: string, hours: number, near: RuleCtx | null): string | void {
-    const sim = this.sim, c = sim.catalog, size = sim.world.sizeX;
+  private grow(what: string, hours: number, near: RuleCtx | null, lit?: number): string | void {
+    const sim = this.sim, c = sim.catalog, size = sim.world.sizeX, w = sim.world;
+    if (lit !== undefined) sim.updateLight();
+    const t = sim.timeOfDay(), clouds = sim.clouds();
+    const bright = (key: number) => {
+      if (lit === undefined) return true;
+      const x = key % size, z = Math.floor(key / size), y = w.heightAt(x, z) + 1;
+      return Math.max(daylight(w, t, clouds, x, y, z), sim.light.at(x, y, z)) > lit;
+    };
     const named = c.byName(what);
     const design = named && c.current(named);
     if (!design) return `${what} is retired`;
@@ -755,17 +866,22 @@ export class Rules {
     };
     let n = 0;
     for (const [key, crop] of sim.crops) {
-      if (!close(key) || !live(crop.design) || sim.cropGrowth(crop) >= 1) continue;
+      if (!close(key) || !live(crop.design) || sim.cropGrowth(crop) >= 1 || !bright(key)) continue;
       crop.planted -= ticks;
       n++;
     }
     if (n) sim.cropsVersion++;
     for (const [key, p] of sim.props.map) {
       if (!close(key) || !live(p.design) || sim.props.growth(p, sim.tick) >= 1) continue;
+      if (!bright(key)) continue;
       sim.props.set(key % size, Math.floor(key / size), { ...p, planted: p.planted - ticks });
       n++;
     }
-    if (!n) return `no growing ${design.name} ${near ? "nearby" : "anywhere"}`;
+    if (!n) {
+      return `no growing ${design.name} ${near ? "nearby" : "anywhere"}${
+        lit !== undefined ? " in the light" : ""
+      }`;
+    }
   }
 
   /** Place one copy beside the plant at `key`. A new tile key, or why this source couldn't. */

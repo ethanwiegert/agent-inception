@@ -35,6 +35,19 @@ export interface WorldObject extends BodyState {
   by: string;
   /** While carried: how it's turned relative to the villager carrying it. */
   heldTurn?: Quat;
+  /**
+   * Its devices' state, by part index in its Design: a lamp or flame shines unless `on` is false;
+   * a lever or plate is on only when `on` is true.
+   */
+  devices?: Record<number, DeviceState>;
+  /** Channels its parts were tuned to with `use`, by part index; otherwise its Design's. */
+  channels?: Record<number, string>;
+}
+
+export interface DeviceState {
+  on: boolean;
+  /** Who flipped the lever or stands on the plate. */
+  by?: string;
 }
 
 /** Tops lower than this over the ground are flat (a rug): no lift, nothing in the way. */
@@ -290,6 +303,8 @@ export class Objects {
       const copy = { ...o };
       if (o.pieces) copy.pieces = structuredClone(o.pieces);
       if (o.joints) copy.joints = structuredClone(o.joints);
+      if (o.devices) copy.devices = structuredClone(o.devices);
+      if (o.channels) copy.channels = { ...o.channels };
       if (!copy.pos || !copy.rot) {
         // Saved before Objects moved: where it was built, settling from there.
         const d = this.catalog.get(o.design)?.content as DesignContent | undefined;

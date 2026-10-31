@@ -120,6 +120,7 @@ struct Out {
   @location(2) color: vec3f,
   @location(3) t: f32,
   @location(4) light: f32,
+  @location(5) lamp: vec3f,
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
@@ -156,6 +157,7 @@ struct Out {
   out.normal = normalize(vec3f(0.0, 0.75, 0.0) + facing * 0.45);
   out.t = t;
   out.light = fl.y;
+  out.lamp = lampLight(p, vec3f(0.0, 1.0, 0.0));
   // Dense grass shades its own roots.
   out.color = color * mix(1.0, mix(0.35, 1.0, t), frame.groundAmbient.w);
   return out;
@@ -163,7 +165,7 @@ struct Out {
 
 @fragment fn fs(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
   let n = select(in.normal * vec3f(-1.0, 1.0, -1.0), in.normal, front);
-  var c = shadeWith(in.color, n, in.light, 1.0, 0.5);
+  var c = shadeWith(in.color, n, in.light, 1.0, 0.5) + in.color * in.lamp;
   // Light through the blade tips when looking toward the sun.
   let view = normalize(frame.cameraPos.xyz - in.world);
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0);

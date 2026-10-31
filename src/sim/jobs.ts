@@ -15,8 +15,24 @@ export const num = (v: unknown, name: string): number => {
   // Number(null), Number("") and Number(true) are numbers too; none of them is meant as one.
   const n = typeof v === "number" || (typeof v === "string" && v.trim()) ? Number(v) : NaN;
   if (!Number.isFinite(n)) throw new Error(`"${name}" must be a number.`);
-  return Math.floor(n);
+  // Tiles and counts are whole: 1.5 would quietly mean 1, somewhere you didn't ask for.
+  if (!Number.isInteger(n)) throw new Error(`"${name}" must be a whole number, not ${n}.`);
+  return n;
 };
+
+/** Tiles an area tool covers at most (width × depth). */
+export const MAX_AREA = 16;
+
+/** An area tool's x, z, width and depth: width and depth 1 or more, at most MAX_AREA tiles. */
+export function areaArgs(args: Args): { x0: number; z0: number; width: number; depth: number } {
+  const x0 = num(args.x, "x"), z0 = num(args.z, "z");
+  const width = num(args.width ?? 1, "width"), depth = num(args.depth ?? 1, "depth");
+  if (width < 1 || depth < 1) throw new Error("width and depth are 1 or more (tiles).");
+  if (width * depth > MAX_AREA) {
+    throw new Error(`At most ${MAX_AREA} tiles per call (width × depth, like 4 × 4).`);
+  }
+  return { x0, z0, width, depth };
+}
 
 export function* walk(
   sim: Sim,

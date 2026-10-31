@@ -50,6 +50,8 @@ export class World {
   readonly objSolid: Uint8Array;
   /** How far an Object's low top lifts a body standing on the column (0-1 block). */
   readonly objLift: Float32Array;
+  /** 1 where something burns over the column; set by `Fire`. Paths keep out. */
+  readonly fire: Uint8Array;
   readonly chunksX: number;
   readonly chunksZ: number;
   readonly chunkVersion: Uint32Array;
@@ -69,6 +71,7 @@ export class World {
     this.objectAt = new Int32Array(sizeX * sizeZ);
     this.objSolid = new Uint8Array(sizeX * sizeZ);
     this.objLift = new Float32Array(sizeX * sizeZ);
+    this.fire = new Uint8Array(sizeX * sizeZ);
     this.chunksX = Math.ceil(sizeX / CHUNK);
     this.chunksZ = Math.ceil(sizeZ / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksZ);
@@ -197,10 +200,10 @@ export class World {
     return -1;
   }
 
-  /** Whether a body can't stand on column (x, z): a tree, a rock, or a tall Object. */
+  /** Whether a body can't stand on column (x, z): a tree, a rock, a tall Object, or fire. */
   blocked(x: number, z: number): boolean {
     const key = z * this.sizeX + x;
-    return this.propSolid[key] === 1 || this.objSolid[key] === 1;
+    return this.propSolid[key] === 1 || this.objSolid[key] === 1 || this.fire[key] === 1;
   }
 
   /** Water standing above the floor at `floor`, in blocks (0 if dry). */

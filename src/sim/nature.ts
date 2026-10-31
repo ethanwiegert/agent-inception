@@ -26,7 +26,17 @@ const material = (
   hardness: number,
   burns: boolean,
   description: string,
-) => add("material", name, description, { form, color, pattern, density, hardness, burns });
+  glows = 0,
+) =>
+  add("material", name, description, {
+    form,
+    color,
+    pattern,
+    density,
+    hardness,
+    burns,
+    ...(glows ? { glows } : {}),
+  });
 
 // Blocks: the terrain and what villagers build with.
 material("grass", "block", "#4a8a2a", "grass", 1.3, 1, false, "Meadow ground.");
@@ -647,6 +657,115 @@ add(
     ],
   },
 );
+
+// ---------------------------------------------------------------- fields (M11)
+// Appended after everything older, so a saved world's entry ids stay where they were.
+
+material(
+  "lantern glass",
+  "block",
+  "#ffd98a",
+  "plain",
+  2.5,
+  1,
+  false,
+  "Warm glowing glass blown from sand: lamps, and blocks that light a room.",
+  0.8,
+);
+add("part", "lamp", "A light: shines in its Material's color while it's on (use or a signal).", {
+  shape: "sphere",
+  device: "lamp",
+});
+add("part", "flame", "A tame fire (torches, campfires): glows warm and never spreads.", {
+  shape: "cone",
+  device: "flame",
+});
+add("part", "lever", "use flips it on or off, and it sends that on its channel.", {
+  shape: "box",
+  device: "lever",
+});
+add("part", "plate", "A pressure plate: on while someone or something stands on it.", {
+  shape: "box",
+  device: "plate",
+});
+
+/** A device part on a signal channel. */
+const wired = (p: ReturnType<typeof part>, channel: string) => ({ ...p, channel });
+
+add(
+  "design",
+  "lantern post",
+  'A post with a glass lamp, on the "lanterns" channel (nature lights them at dusk).',
+  {
+    anchored: true,
+    parts: [
+      part("box", "planks", [0.5, 1.1, 0.5], [0.16, 2.2, 0.16]),
+      part("box", "planks", [0.5, 2.6, 0.5], [0.36, 0.06, 0.36]),
+      wired(part("lamp", "lantern glass", [0.5, 2.38, 0.5], [0.3, 0.36, 0.3]), "lanterns"),
+    ],
+  },
+);
+add("design", "torch", "A stick with a small tame flame: warm light that never spreads.", {
+  anchored: true,
+  parts: [
+    part("cylinder", "planks", [0.5, 0.5, 0.5], [0.09, 1, 0.09]),
+    part("flame", "planks", [0.5, 1.12, 0.5], [0.18, 0.3, 0.18]),
+  ],
+});
+add("design", "campfire", "Logs in a ring of cobble with a tame fire on them.", {
+  anchored: true,
+  parts: [
+    ...[0, 60, 120, 180, 240, 300].map((t) =>
+      part(
+        "box",
+        "cobble",
+        [0.5 + 0.38 * Math.sin(t * DEG), 0.08, 0.5 + 0.38 * Math.cos(t * DEG)],
+        [0.2, 0.16, 0.2],
+        t,
+      )
+    ),
+    part("cylinder", "log", [0.5, 0.1, 0.5], [0.12, 0.6, 0.12], 45, 90),
+    part("cylinder", "log", [0.5, 0.16, 0.5], [0.12, 0.6, 0.12], -45, 90),
+    part("flame", "log", [0.5, 0.42, 0.5], [0.42, 0.55, 0.42]),
+  ],
+});
+add(
+  "design",
+  "signal lever",
+  'A lever on a stone base. use flips it; it sends on the "gate" channel.',
+  {
+    anchored: true,
+    parts: [
+      part("box", "cobble", [0.5, 0.1, 0.5], [0.36, 0.2, 0.36]),
+      wired(part("lever", "planks", [0.5, 0.42, 0.5], [0.07, 0.5, 0.07]), "gate"),
+    ],
+  },
+);
+add(
+  "design",
+  "pressure plate",
+  'A plank plate flush with the ground: on while anyone stands on it ("gate" channel).',
+  {
+    anchored: true,
+    parts: [wired(part("plate", "planks", [0.5, 0.025, 0.5], [0.8, 0.05, 0.8]), "gate")],
+  },
+);
+
+rel("lantern glass", "made_from", "sand");
+
+add("rule", "lanterns at dusk", 'Nature lights the "lanterns" channel at nightfall.', {
+  when: { daily: 19 },
+  do: [{ signal: { channel: "lanterns", on: true } }],
+});
+add("rule", "lanterns at dawn", 'Nature puts out the "lanterns" channel in the morning.', {
+  when: { daily: 6.5 },
+  do: [{ signal: { channel: "lanterns", on: false } }],
+});
+add("rule", "lamplit fields", "At night, wheat that a lamp or fire lights keeps growing.", {
+  when: { every: 30 },
+  if: { time: [19, 6] },
+  do: [{ grow: { what: "wheat crop", hours: 0.5, light_above: 0.3 } }],
+});
 
 /** Add nature's entries to a new Catalog. */
 export function seedNature(c: Catalog) {

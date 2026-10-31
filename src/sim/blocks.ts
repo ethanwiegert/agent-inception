@@ -71,6 +71,9 @@ export interface BlockDef {
   /** sRGB 0xRRGGBB. */
   color: number;
   pattern: PatternName;
+  /** Light it gives off, 0-1. */
+  glows: number;
+  burns: boolean;
 }
 
 export const FIRST_CUSTOM_BLOCK = 64;
@@ -83,7 +86,15 @@ export const slopes = (b: BlockId) =>
 /** Everything but air and water occupies its cell. */
 export const solid = (b: BlockId) => b !== Block.Air && b !== Block.Water;
 
-const AIR: BlockDef = { id: 0, name: "air", entry: 0, color: 0, pattern: "plain" };
+const AIR: BlockDef = {
+  id: 0,
+  name: "air",
+  entry: 0,
+  color: 0,
+  pattern: "plain",
+  glows: 0,
+  burns: false,
+};
 
 /** Block ids for the Catalog's Materials, following the Catalog as it grows (append-only). */
 export class BlockRegistry {
@@ -121,6 +132,8 @@ export class BlockRegistry {
         entry: e.id,
         color: parseInt(m.color.slice(1), 16),
         pattern: m.pattern,
+        glows: m.glows ?? 0,
+        burns: m.burns,
       };
       this.defs[id] = def;
       this.names.set(e.name.toLowerCase(), def);

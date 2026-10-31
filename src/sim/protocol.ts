@@ -24,6 +24,12 @@ export const SCHOOL_STRIDE = 5;
  * (on the GPU for blade fields).
  */
 export const CROP_STRIDE = 8;
+/**
+ * Floats per burning thing in `TickMessage.fires`: its world box (x0, x1, y0, y1, z0, z1), what it
+ * is (0 block, 1 plant, 2 crop, 3 Object) and a number to vary its flames by.
+ */
+export const FIRE_STRIDE = 8;
+export const FIRE_KINDS = ["block", "plant", "crop", "object"] as const;
 
 export interface AgentProfile {
   name: string;
@@ -86,6 +92,8 @@ export interface TickMessage {
   catalog?: CatalogDelta;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;
+  /** Everything burning (FIRE_STRIDE each), sent when something catches, goes out or moves. */
+  fires?: Float32Array<ArrayBuffer>;
   events: SimEvent[];
   results: CallResult[];
 }
