@@ -27,6 +27,7 @@ import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
 import { Signals } from "./signals.ts";
 import { TICK_HZ, TICKS_PER_DAY } from "./time.ts";
 import { Village, type VillageSave } from "./village.ts";
+import { Board, type BoardSave } from "./board.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
 
@@ -121,6 +122,8 @@ export type SimEvent =
   | { type: "physics"; agent: number; text: string }
   /** Village Life news: the village grew, an errand was done, the spectator switched modes. */
   | { type: "village"; agent: number; text: string }
+  /** The Notice Board: a spectator pinned a Wish (agent 0), a villager replied or marked one done. */
+  | { type: "board"; agent: number; wish: number; text: string }
   /** A signal ran from a sender (or a Rule's event) to receivers (flat x, y, z). */
   | { type: "signal"; from: [number, number, number]; to: number[]; on: boolean };
 
@@ -156,6 +159,10 @@ export interface SaveData {
   fire?: FireSave;
   /** Village Life: on or Sandbox, points, level, errands. Missing before M12. */
   village?: VillageSave;
+  /** The Notice Board's Wishes. Missing before M13. */
+  board?: BoardSave;
+  /** Cloud cover a spectator holds the weather at, or null for natural. Missing before M13. */
+  spectatorClouds?: number | null;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
 }
@@ -206,6 +213,9 @@ export class Sim {
   readonly wildfire: Fire = new Fire(this);
   readonly signals: Signals = new Signals(this);
   readonly village: Village = new Village(this);
+  readonly board: Board = new Board(this);
+  /** Cloud cover a spectator holds the weather at (it wins over Rules), or null: natural. */
+  spectatorClouds: number | null = null;
 
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
@@ -235,13 +245,33 @@ export class Sim {
     return Math.floor((this.tick + this.dayOffset) / TICKS_PER_DAY) + 1;
   }
 
-  /** Cloud cover 0-1: slow natural drift over the days unless an agent set the weather. */
+  /**
+   * Cloud cover 0-1: slow natural drift over the days unless a spectator holds the weather, or an
+   * agent's Rule set it for a while.
+   */
   clouds(): number {
+    if (this.spectatorClouds !== null) return this.spectatorClouds;
     if (this.weatherOverride && this.tick < this.weatherOverride.until) {
       return this.weatherOverride.clouds;
     }
     const days = (this.tick + this.dayOffset) / TICKS_PER_DAY;
     return Math.min(1, Math.max(0, 0.35 + perlin2(days * 1.7, 0.5, this.seed + 3) * 0.9));
+  }
+
+  /** A spectator holds the sky at `clouds` (0-1), or lets the weather drift again (null). */
+  setWeather(clouds: number | null) {
+    const held = clouds === null || !Number.isFinite(clouds)
+      ? null
+      : Math.min(1, Math.max(0, clouds));
+    if (held === this.spectatorClouds) return;
+    this.spectatorClouds = held;
+    this.events.push({
+      type: "village",
+      agent: 0,
+      text: held === null
+        ? "the weather drifts on its own again"
+        : `a spectator set the sky to ${held < 0.2 ? "clear" : held < 0.7 ? "cloudy" : "overcast"}`,
+    });
   }
 
   setTimeOfDay(t: number) {
@@ -466,6 +496,7 @@ export class Sim {
     this.wildfire.step();
     this.signals.step();
     this.village.step();
+    this.board.step();
     this.rules.tick(this.tick, (this.tick + this.dayOffset) % TICKS_PER_DAY, TICKS_PER_DAY);
     if (this.tick % TICK_HZ === 0 && this.catalog.open().length) this.settleProposals();
   }
@@ -726,6 +757,8 @@ export class Sim {
       ruleStats: structuredClone([...this.rules.stats]),
       fire: this.wildfire.save(),
       village: this.village.save(),
+      board: this.board.save(),
+      spectatorClouds: this.spectatorClouds,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map((
         { queue: _q, anim: _a, stride: _s, notes: _n, pace: _p, sleeping: _z, ...rest },
@@ -758,6 +791,8 @@ export class Sim {
     if (data.objects) sim.objects.reset(data.objects);
     sim.wildfire.load(data.fire);
     sim.village.load(data.village);
+    sim.board.load(data.board);
+    sim.spectatorClouds = data.spectatorClouds ?? null;
     if (data.animals) sim.animals = structuredClone(data.animals);
     // Saves from before a placement change get fresh schools.
     if (data.schools?.every((f) => schoolFits(sim.world, f))) {

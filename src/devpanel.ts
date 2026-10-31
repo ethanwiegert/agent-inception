@@ -1,4 +1,5 @@
 import { LOOKS } from "./render/look.ts";
+import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
 import type { VillageStatus } from "./sim/village.ts";
 
@@ -10,6 +11,12 @@ export interface DevHandlers {
   follow: (agentId: number | null) => void;
   /** Village Life on, or the world a Sandbox. */
   villageLife: (on: boolean) => void;
+  /** Hold the sky at this cloud cover, or let the weather drift (null). */
+  weather: (clouds: number | null) => void;
+  /** Pin a Wish on the Notice Board, for anyone (null) or one villager by name. */
+  wish: (text: string, forName: string | null) => void;
+  unpin: (id: number) => void;
+  sound: (muted: boolean) => void;
 }
 
 export interface DevStatus {
@@ -23,12 +30,25 @@ export interface DevStatus {
   following: number | null;
   catalog: Catalog;
   village: VillageStatus | null;
+  clouds: number;
+  heldClouds: number | null;
+  board: Wish[];
+  boardVersion: number;
+  muted: boolean;
   stats: string[];
 }
 
 const BUTTON = "margin:2px 4px 0 0;padding:2px 8px;border-radius:6px;border:1px solid #445;" +
   "background:#1a2029;color:inherit;font:inherit;cursor:pointer";
 const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
+const WEATHER: [string, number | null][] = [
+  ["natural", null],
+  ["clear", 0.05],
+  ["cloudy", 0.5],
+  ["overcast", 0.92],
+];
+const INPUT = "width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;border-radius:6px;" +
+  "border:1px solid #445;background:#0e1319;color:inherit;font:inherit";
 
 /** Spectator/dev controls. Plain DOM, rebuilt only when its inputs change. */
 export function createDevPanel(on: DevHandlers) {
@@ -37,7 +57,8 @@ export function createDevPanel(on: DevHandlers) {
     "position:fixed;top:12px;right:12px;padding:12px 14px;background:rgba(10,14,18,.72);" +
     "backdrop-filter:blur(6px);border-radius:10px;font:12px/1.5 ui-monospace,monospace;" +
     "color:#d8dee9;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;width:250px;" +
-    "user-select:none";
+    // Clear of the camera buttons at the bottom; scrolls when the board grows.
+    "user-select:none;max-height:calc(100vh - 96px);overflow:auto;box-sizing:border-box";
   document.body.append(panel);
 
   const section = (label: string) => {
@@ -85,7 +106,32 @@ export function createDevPanel(on: DevHandlers) {
 
   const world = section("world");
   const seedButton = button("", () => on.seed((Math.random() * 1e6) | 0));
-  world.body.append(seedButton);
+  const weatherButtons = WEATHER.map(([label, c]) => button(label, () => on.weather(c)));
+  let muted = false;
+  const soundButton = button("", () => on.sound(!muted));
+  world.body.append(seedButton, document.createElement("br"), ...weatherButtons, soundButton);
+
+  // The Notice Board: spectators pin Wishes for villagers. Never orders, and never moves anyone.
+  const board = section("notice board");
+  const wishText = document.createElement("input");
+  wishText.maxLength = BOARD_LIMITS.text;
+  wishText.placeholder = "Pin a Wish (a suggestion, never an order)";
+  wishText.style.cssText = INPUT;
+  const wishFor = document.createElement("select");
+  wishFor.style.cssText = INPUT + ";width:auto;max-width:130px";
+  const pin = () => {
+    const text = wishText.value.trim();
+    if (!text) return;
+    on.wish(text, wishFor.value || null);
+    wishText.value = "";
+  };
+  wishText.onkeydown = (e) => e.key === "Enter" && pin();
+  const pinButton = button("pin", pin);
+  const wishes = document.createElement("div");
+  wishes.style.cssText = "max-height:140px;overflow:auto";
+  board.body.append(wishText, wishFor, pinButton, wishes);
+  let boardVersion = -1;
+  let forKey = "";
 
   const village = section("village");
   let life = true;
@@ -116,6 +162,59 @@ export function createDevPanel(on: DevHandlers) {
         String(Math.floor(minutes / 60)).padStart(2, "0")
       }:${String(minutes % 60).padStart(2, "0")}`;
       seedButton.textContent = `seed ${s.seed} — new world`;
+      weatherButtons.forEach((b, i) => mark(b, WEATHER[i][1] === s.heldClouds));
+      weatherButtons[0].title = `clouds ${Math.round(s.clouds * 100)}%`;
+      muted = s.muted;
+      soundButton.textContent = muted ? "sound off" : "sound on";
+      mark(soundButton, !muted);
+
+      const names = s.agents.map((a) => a.name);
+      if (names.join("\n") !== forKey) {
+        forKey = names.join("\n");
+        const was = wishFor.value;
+        wishFor.replaceChildren(
+          Object.assign(document.createElement("option"), { value: "", textContent: "anyone" }),
+          // Villagers' names go in as text, never HTML.
+          ...names.map((n) =>
+            Object.assign(document.createElement("option"), { value: n, textContent: n })
+          ),
+        );
+        wishFor.value = names.includes(was) ? was : "";
+      }
+      if (s.boardVersion !== boardVersion) {
+        boardVersion = s.boardVersion;
+        const open = s.board.filter((w) => !w.done).length;
+        board.head.textContent = `notice board · ${open}/${BOARD_LIMITS.open} open`;
+        wishes.replaceChildren(
+          ...[...s.board].reverse().map((w) => {
+            const el = document.createElement("div");
+            el.style.cssText = "margin-top:6px;opacity:" + (w.done ? ".6" : ".95");
+            const head = document.createElement("div");
+            const x = button("×", () => on.unpin(w.id));
+            x.title = "unpin";
+            x.style.cssText += ";float:right;padding:0 6px;margin:0";
+            // Spectators' and villagers' words are text, never HTML.
+            head.textContent = `#${w.id}${w.for ? ` → ${w.for}` : ""}${
+              w.done ? ` ✓ ${w.done.by}` : ""
+            }: ${w.text}`;
+            head.prepend(x);
+            el.append(head);
+            for (
+              const r of [
+                ...w.replies,
+                ...(w.done?.note ? [{ by: w.done.by, text: w.done.note }] : []),
+              ]
+            ) {
+              const line = document.createElement("div");
+              line.style.cssText = "padding-left:10px;color:#a9c48b";
+              line.textContent = `${r.by}: ${r.text}`;
+              el.append(line);
+            }
+            return el;
+          }),
+        );
+        if (!s.board.length) wishes.textContent = "no Wishes pinned";
+      }
       agents.head.textContent = `agents · bridge ${s.bridge ? "connected" : "offline"}`;
 
       const v = s.village;

@@ -286,6 +286,10 @@ Deno.test("playtest 0004: targets match what things give, and refusals say what 
     ok(run(sim, "a", "interact", { x, z, width: 3, target: "berries" })).includes("3 berries"),
   );
   err(run(sim, "a", "interact", { x: x + 3, z, target: "oak" }), "There's birch.");
+  // Playtest 0010: walk_to onto a tree said "in the way" twice.
+  const tree = run(sim, "a", "walk_to", { x: x + 3, z });
+  err(tree, "a birch stands there, in the way");
+  assert(!tree.text.includes("in the way, in the way"), tree.text);
   err(
     run(sim, "a", "interact", { x: x + 4, z: z + 4, target: "sheep" }),
     "The nearest sheep is at",

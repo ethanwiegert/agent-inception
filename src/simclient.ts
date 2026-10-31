@@ -13,6 +13,7 @@ import { glowingBlocks, LightField, lightSources } from "./sim/light.ts";
 import { Catalog } from "./sim/catalog.ts";
 import { Objects } from "./sim/objects.ts";
 import { Props } from "./sim/props.ts";
+import type { Wish } from "./sim/board.ts";
 import type { SimEvent } from "./sim/sim.ts";
 import type { VillageStatus } from "./sim/village.ts";
 import { World } from "./sim/world.ts";
@@ -74,6 +75,11 @@ export class SimClient {
   village: VillageStatus | null = null;
   speed = 1;
   clouds = 0.35;
+  /** The cloud cover the spectator holds the sky at, or null for natural weather. */
+  heldClouds: number | null = null;
+  /** The Notice Board as the worker last told it, and a counter that bumps when it changes. */
+  board: Wish[] = [];
+  boardVersion = 0;
   private registry = new BlockRegistry();
   /** Mirror of the sim's props: regenerated from the seed, patched with the streamed diff. */
   props: Props | null = null;
@@ -283,6 +289,11 @@ export class SimClient {
     this.timeOfDay = msg.timeOfDay;
     this.speed = msg.speed;
     this.clouds = msg.clouds;
+    this.heldClouds = msg.heldClouds;
+    if (msg.board) {
+      this.board = msg.board;
+      this.boardVersion++;
+    }
     if (msg.profiles) this.profiles = msg.profiles;
     if (msg.village) this.village = msg.village;
     if (msg.catalog) {
