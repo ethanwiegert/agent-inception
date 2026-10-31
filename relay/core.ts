@@ -312,7 +312,9 @@ export class Room {
       case "tools/call": {
         const name = String(msg.params?.name ?? "");
         const args = msg.params?.arguments ?? {};
-        if (!(await this.toolList()).some((t) => t.name === name)) {
+        // A room no tab has opened yet knows no tools: say the game isn't open, not "unknown".
+        const tools = await this.toolList();
+        if (tools.length && !tools.some((t) => t.name === name)) {
           throw rpcError(-32602, `Unknown tool: ${name}`);
         }
         if (!isObject(args)) {

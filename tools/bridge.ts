@@ -27,7 +27,7 @@ export function createBridge() {
           tools: code === LOCAL ? LOCAL_TOOLS : undefined,
           closedText: code === LOCAL
             ? undefined
-            : "This world's tab isn't open. Ask the human to open the game in the browser that made this link.",
+            : "No game tab is open for this link. Ask the human to open the game in the browser that made it. If they made a new link, this one is retired.",
         }),
       );
     }

@@ -249,7 +249,7 @@ export function createDevPanel(on: DevHandlers) {
       time.head.textContent = `time · day ${s.day}, ${
         String(Math.floor(minutes / 60)).padStart(2, "0")
       }:${String(minutes % 60).padStart(2, "0")}`;
-      worlds.head.textContent = `worlds · ${s.worldName}, seed ${s.seed}`;
+      worlds.head.textContent = `worlds · seed ${s.seed}`;
       weatherButtons.forEach((b, i) => mark(b, WEATHER[i][1] === s.heldClouds));
       weatherButtons[0].title = `clouds ${Math.round(s.clouds * 100)}%`;
       muted = s.muted;

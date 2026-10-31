@@ -326,7 +326,8 @@ function heldBy(sim: Sim, agent: Agent): string | null {
     }.`;
 }
 
-const minutes = (n: number) => n === 1 ? "1 game minute" : `${n} game minutes`;
+const minutes = (n: number) =>
+  n >= 90 ? `${Math.round(n / 60)} game hours` : n === 1 ? "1 game minute" : `${n} game minutes`;
 
 /** What join says about Village Life, or that the world is a Sandbox. */
 function villageIntro(sim: Sim): string {

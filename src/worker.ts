@@ -103,6 +103,9 @@ async function handle(msg: ToWorker) {
         sim.events.push({ type: "board", agent: 0, wish: 0, text });
       }
       break;
+    case "forgetSessions":
+      sim?.sessions.clear();
+      break;
     case "unpin":
       sim?.board.unpin(msg.id);
       break;
@@ -499,7 +502,14 @@ async function slotOp(req: number, op: SlotOp): Promise<SlotsReply> {
         if (bytes.length > MAX_FILE) return await reply({ error: "That file is too big." });
         // gzip starts 1f 8b; plain JSON is taken as it is.
         if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-          bytes = await pipe(bytes, new DecompressionStream("gzip"), MAX_FILE);
+          try {
+            bytes = await pipe(bytes, new DecompressionStream("gzip"), MAX_FILE);
+          } catch (e) {
+            const big = e instanceof Error && /too big/.test(e.message);
+            return await reply({
+              error: big ? e.message : "That file isn't a world (it couldn't be unpacked).",
+            });
+          }
         }
         let raw: unknown;
         try {

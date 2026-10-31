@@ -29,8 +29,8 @@ type Attached = WebSocket & {
 };
 declare const WebSocketPair: { new (): { 0: WebSocket; 1: WebSocket } };
 
-const CLOSED_TEXT = "This world's tab isn't open. Ask the human to open the game in the browser " +
-  "that made this link (it can sit in a background tab).";
+const CLOSED_TEXT = "No game tab is open for this link. Ask the human to open the game in the " +
+  "browser that made it (a background tab is fine). If they made a new link, this one is retired.";
 
 export default {
   fetch(req: Request, env: Env): Promise<Response> | Response {

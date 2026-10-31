@@ -25,10 +25,12 @@ const css = `
 .ai-connect .lead{margin:6px 0 14px;color:#3c4450}
 .ai-connect h2{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;
   color:#6b6556}
-.ai-connect .copy{display:flex;gap:6px;align-items:stretch;margin:4px 0}
+.ai-connect .copy{display:flex;gap:6px;align-items:flex-start;margin:4px 0}
 .ai-connect code,.ai-connect pre{flex:1;min-width:0;margin:0;padding:7px 9px;border-radius:7px;
-  background:#fff;border:1px solid #d6d0c1;font:12px/1.45 ui-monospace,monospace;overflow-x:auto;
-  white-space:pre;color:#1d232c}
+  background:#fff;border:1px solid #d6d0c1;font:12px/1.45 ui-monospace,monospace;
+  white-space:pre-wrap;overflow-wrap:anywhere;color:#1d232c}
+.ai-connect details{margin-top:8px}
+.ai-connect summary{font-size:12px;color:#6b6556;cursor:pointer}
 .ai-connect button{padding:5px 12px;border-radius:7px;border:1px solid #8a8576;background:#fff;
   font:inherit;font-size:13px;cursor:pointer;color:#1d232c}
 .ai-connect button.primary{background:#2f5d3a;border-color:#2f5d3a;color:#fff}
@@ -110,9 +112,10 @@ export function createConnectCard(
     ccLabel.className = "label";
     ccLabel.textContent = "Claude Code";
     const cc = copyRow(() => `claude mcp add --transport http agent-inception ${info().agentUrl}`);
-    const otherLabel = document.createElement("div");
-    otherLabel.className = "label";
-    otherLabel.textContent = "Other MCP clients (Streamable HTTP)";
+    const otherLabel = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Other MCP clients (Streamable HTTP)";
+    otherLabel.append(summary);
     const other = copyRow(
       () =>
         JSON.stringify(
@@ -125,8 +128,8 @@ export function createConnectCard(
 
     const h2 = document.createElement("h2");
     h2.textContent = "2 · Ask it to play";
+    otherLabel.append(other.row);
     const prompt = copyRow(() => PROMPT, true);
-    prompt.row.querySelector("pre")!.style.whiteSpace = "pre-wrap";
 
     const notes = document.createElement("small");
     const status = document.createElement("span");
@@ -167,7 +170,6 @@ export function createConnectCard(
       ccLabel,
       cc.row,
       otherLabel,
-      other.row,
       h2,
       prompt.row,
       notes,

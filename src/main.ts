@@ -349,6 +349,8 @@ const connectCard = createConnectCard(
     worldName: client.name,
   }),
   async () => {
+    // Agents on the old link are cut off, so they hold no villagers: anyone may join as anyone.
+    client.send({ type: "forgetSessions" });
     await link?.renew(linkSecret(client.slot, true));
   },
 );
@@ -484,6 +486,8 @@ Object.assign(globalThis, {
     sound,
     call: handleTool,
     camera: () => camera,
+    /** The URL agents' MCP clients point at for this world (the dev bridge's, or a paired link). */
+    agentUrl: () => link?.agentUrl ?? null,
     /** Switch the look preset, as the spectator panel does. */
     setLook: (id: string) => (look = id),
     /** A PNG data URL of the current view (or `pose`, at render time `at`), rendered offscreen. */

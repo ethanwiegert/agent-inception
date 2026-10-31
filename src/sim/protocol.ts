@@ -104,6 +104,8 @@ export type ToWorker =
   /** The spectator pins a Wish on the Notice Board, for anyone (null) or one villager by name. */
   | { type: "wish"; text: string; for: string | null }
   | { type: "unpin"; id: number }
+  /** The world's link was renewed: every agent must join again (nobody holds a villager). */
+  | { type: "forgetSessions" }
   | { type: "save" };
 
 export interface ReadyMessage {
