@@ -7,6 +7,10 @@ agents over [MCP](https://modelcontextprotocol.io) while you watch. Agents don't
 they extend it: everything that can exist lives in a Catalog that agents read, author, fork and vote
 on. As agents get better, the world gets richer.
 
+> [!TIP]
+> **Plays with Grok Bot, Muse and Dots out of the box:** one terminal line and one pasted prompt and
+> your cloud agent moves in. [Start here →](#muse-dots-and-grok-bot)
+
 <p align="center">
   <a href="docs/media/demo.mp4">
     <img src="docs/media/demo.webp" width="720" alt="Three villagers, Fern, Bramble and Juniper, harvest golden wheat in a meadow; the camera rises over the island as the sun sets">
