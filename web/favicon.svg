@@ -1,8 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <path fill="#8a5a33" d="M3 10.5 16 17v13L3 23.5z" />
-  <path fill="#6a4426" d="M29 10.5 16 17v13l13-6.5z" />
-  <path fill="#5da23a" d="M3 10.5 16 17v3.2L3 13.7z" />
-  <path fill="#4a8a2e" d="M29 10.5 16 17v3.2l13-6.5z" />
-  <path fill="#8fd05a" d="M16 4 29 10.5 16 17 3 10.5z" />
-  <path fill="#e8c35a" d="M14 9.2h1.2v3.4H14zm2.8-1.6H18V11h-1.2zm-5.6 0h1.2V11h-1.2z" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- A world trapped in a block: a floating island seen through a glass cube. -->
+  <defs>
+    <clipPath id="cube">
+      <path d="M32 4 56 17v30L32 60 8 47V17z" />
+    </clipPath>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fb0ee" />
+      <stop offset="1" stop-color="#cfeeff" />
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#cube)">
+    <rect width="64" height="64" fill="url(#sky)" />
+    <circle cx="45" cy="16" r="4" fill="#ffe08a" />
+    <path fill="#fff" fill-opacity=".9"
+      d="M45.5 29.5a2.2 2.2 0 0 1 .6-4.3 3 3 0 0 1 5.4-.4 2.4 2.4 0 0 1 2.2 4.7z" />
+    <path fill="#8a5a3a" d="M15 37c6 2 28 2 34 0-3 6-9 10-12 17-1 2-3 2-4 0-4-7-14-11-18-17z" />
+    <path fill="#6b4329" d="M32 38.5c5 0 12-.6 17-1.5-3 6-9 10-12 17-1 2-3 2-4 0z" />
+    <path fill="#3b8fd0" d="M34 46c1 3 1.5 6 1.2 9h-1.4c.3-3 0-6-.8-9z" />
+    <ellipse cx="32" cy="36" rx="17.5" ry="5" fill="#6cc24a" />
+    <path fill="#4b9a38"
+      d="M14.6 36.6c4 2.6 30 2.6 34.8 0-.4 1.6-2 2.6-4 3.2-8 1.6-19 1.6-27 0-2-.6-3.4-1.6-3.8-3.2z" />
+    <rect x="25" y="27" width="2.4" height="8.5" rx="1" fill="#7a5233" />
+    <circle cx="26.2" cy="24.5" r="5.4" fill="#2f7d3a" />
+    <path fill="#e8d6a8" d="M36 30.5h6v4.5h-6z" />
+    <path fill="#c0503a" d="M35 31l4-3.5 4 3.5z" />
+  </g>
+  <!-- The glass: a lit top, a shaded side, faint back edges, bright front edges, a glint. -->
+  <path fill="#fff" fill-opacity=".2" d="M32 4 56 17 32 30 8 17z" />
+  <path fill="#0b3550" fill-opacity=".1" d="M56 17v30L32 60V30z" />
+  <g fill="none" stroke="#fff" stroke-linecap="round">
+    <path stroke-opacity=".3" stroke-width="1" d="M32 4v30M8 47l24-13 24 13" />
+    <path stroke-opacity=".65" stroke-width="1.2" d="M8 17l24 13 24-13M32 30v30" />
+  </g>
+  <path fill="#fff" fill-opacity=".6" d="M11.5 21.5l2.4 1.3v12l-2.4-1.3z" />
+  <path fill="none" stroke="#3a7fae" stroke-width="2.4" stroke-linejoin="round"
+    d="M32 4 56 17v30L32 60 8 47V17z" />
 </svg>
