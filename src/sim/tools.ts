@@ -49,6 +49,35 @@ export interface ToolDef {
   client?: boolean;
 }
 
+/** Tools that only read: hosted agents run these without asking their human every time. */
+const READ_ONLY = new Set([
+  "look",
+  "journal_read",
+  "screenshot",
+  "catalog_find",
+  "catalog_get",
+  "proposals",
+]);
+/** Tools that can destroy things in the world for good. */
+const DESTRUCTIVE = new Set(["break_block", "terraform", "ignite"]);
+
+/**
+ * The tool list as MCP serves it: every TOOL_DEF with its annotations (the world is closed, so
+ * nothing reaches outside it). The page sends this to the relay; the dev bridge lists it early.
+ */
+export function mcpTools() {
+  return TOOL_DEFS.map(({ name, description, inputSchema }) => ({
+    name,
+    description,
+    inputSchema,
+    annotations: {
+      readOnlyHint: READ_ONLY.has(name),
+      destructiveHint: DESTRUCTIVE.has(name),
+      openWorldHint: false,
+    },
+  }));
+}
+
 /** A body Design fits in this box (x, height, z), in blocks. */
 export const BODY_SIZE = [1.2, 2.4, 1.2] as const;
 const CAST_RANGE = 4;
@@ -67,11 +96,18 @@ export const TOOL_DEFS: ToolDef[] = [
     name: "join",
     description: "Enter the world as a villager with this name. Call this first. " +
       "Using a name that already exists puts you back in that body, with its inventory and " +
-      "journal, unless another agent is playing it (a villager is held while its agent is active).",
+      "journal, unless another agent is playing it (a villager is held while its agent is " +
+      "active). Each join gives you a rejoin key: if your connection resets and your name is " +
+      "held, join again with it to step straight back in.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "1-20 letters, digits, spaces, - or _." },
+        key: {
+          type: "string",
+          description: "The rejoin key your last join gave you, to take your villager back " +
+            "after your connection reset. Leave it out the first time.",
+        },
       },
       required: ["name"],
     },
@@ -273,8 +309,13 @@ function join(sim: Sim, session: string, args: Args): string {
   let agent = sim.agents.find((a) => a.name.toLowerCase() === name.toLowerCase());
   const returning = !!agent;
   if (agent && sim.sessions.get(session) !== agent) {
-    const held = heldBy(sim, agent);
-    if (held) throw new Error(held);
+    const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
+    const held = given && agent.key && given === normalKey(agent.key) ? null : heldBy(sim, agent);
+    if (held) {
+      throw new Error(
+        given ? `That rejoin key isn't ${agent.name}'s latest one. ${held}` : held,
+      );
+    }
     // Free: whoever had it before lets go, so only this session drives it now.
     for (const [s, a] of sim.sessions) if (a === agent) sim.sessions.delete(s);
   }
@@ -286,6 +327,7 @@ function join(sim: Sim, session: string, args: Args): string {
   agent ??= sim.addAgent(name);
   sim.sessions.set(session, agent);
   agent.lastActive = sim.tick;
+  agent.key = rejoinKey(session, agent.id, sim.tick);
   const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
   sim.fire("joined", agent, fx, sim.world.heightAt(fx, fz), fz, agent.name);
   return (returning ? `Welcome back, ${agent.name}.` : `Welcome, ${agent.name}.`) +
@@ -314,7 +356,34 @@ function join(sim: Sim, session: string, args: Args): string {
     villageIntro(sim) + "\nStart with look." +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
-      : "");
+      : "") +
+    `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
+    `${agent.name} is held, join with your name and this key to step straight back in.`;
+}
+
+const KEY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** A key as typed: case and separators don't matter. */
+const normalKey = (key: string) => key.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 32);
+
+/**
+ * A villager's rejoin key, "XXXXX-XXXXX": a hash of the joining session (a random id only that
+ * agent's connection knows), the villager and the tick, so the sim stays deterministic.
+ */
+function rejoinKey(session: string, id: number, tick: number): string {
+  let a = 0x811c9dc5 ^ id, b = 0x9e3779b9 ^ tick;
+  for (let i = 0; i < session.length; i++) {
+    const c = session.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x85ebca6b) ^ (b >>> 13);
+  }
+  let out = "";
+  for (let i = 0; i < 10; i++) {
+    const h = i < 5 ? a : b;
+    out += KEY_ALPHABET[(h >>> ((i % 5) * 6)) & 31];
+    if (i === 4) out += "-";
+  }
+  return out;
 }
 
 /**
@@ -336,8 +405,8 @@ function heldBy(sim: Sim, agent: Agent): string | null {
       : ago < 1
       ? "they called just now"
       : `their last call was ${minutes(ago)} ago`
-  }). If that was you before a restart, ask the human watching to free the villagers (the ` +
-    `panel's agents section), or wait. Otherwise join with a name of your own. A villager is ` +
+  }). If that was you before your connection reset, join again with the rejoin key your last ` +
+    `join gave you, or ask the human watching to free the villagers (the panel's agents section). Otherwise join with a name of your own. A villager is ` +
     `free to rejoin once its agent has made no call for a game day${
       agent.queue.length
         ? ""

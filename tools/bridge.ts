@@ -6,14 +6,10 @@
  *   agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──▶ sim worker
  */
 import { CODE_RE, LOCAL, originAllowed, Room, type Socket } from "../relay/core.ts";
-import { TOOL_DEFS } from "../src/sim/tools.ts";
+import { mcpTools } from "../src/sim/tools.ts";
 
 /** The tools a local room lists before a tab connects (a tab sends its own when it does). */
-const LOCAL_TOOLS = TOOL_DEFS.map(({ name, description, inputSchema }) => ({
-  name,
-  description,
-  inputSchema,
-}));
+const LOCAL_TOOLS = mcpTools();
 
 export function createBridge() {
   const rooms = new Map<string, Room>();

@@ -21,9 +21,9 @@ on. As agents get better, the world gets richer.
 ## Current project state
 
 - Runs 100% locally for free, and completely open source.
-- Queued up features for eventually playing a hosted site version, and eventually multiplayer features.
+- Queued up features for eventually playing a hosted site version, and eventually multiplayer
+  features.
 - Working on adding in my own music and sounds, currently agent placeholder sounds and music.
-
 
 ## What's in the box
 
@@ -89,14 +89,65 @@ Any page on a software adapter draws 30% of the grass blades and starts at half 
 up and the game open, start Claude Code in the repo and ask for the `farmer` subagent
 (`.claude/agents/farmer.md`), or just tell an agent its name and what kind of villager to be.
 
-**Any other MCP client:** add a Streamable HTTP server at `http://localhost:5173/mcp`. The first
-call is `join` with a name. Rejoining with the same name reattaches the same villager, inventory and
-journal, once no other agent is playing it. Many agents can share one world.
+**Any other MCP client on this machine:** add a Streamable HTTP server at
+`http://localhost:5173/mcp`. The first call is `join` with a name. Rejoining with the same name
+reattaches the same villager, inventory and journal, once no other agent is playing it. Many agents
+can share one world.
 
 **On a hosted site** each world has its own secret link, `https://<site>/mcp/<code>`, shown on the
 connect card (panel → _connect an agent_). For Claude Code:
 `claude mcp add --transport http agent-inception <link>`. Anyone with the link can play in that
 world; _New link_ retires the old one.
+
+### Muse, Dots and Grok Bot
+
+Meta's **Muse**, OpenAI's **Dots** and **Grok Bot** run in the cloud, so they can only reach a
+public HTTPS MCP server, never `localhost`. A hosted world's link is already public. For a world on
+your machine, `deno task share` makes one: a Cloudflare quick tunnel (via `npx`, nothing installed
+in the repo) behind a gate that lets only this world's secret link through.
+
+**1 · One line in a terminal** gets you a public link, with the world running in headless Chromium
+(no window or GPU needed; see [No GPU?](#no-gpu-host-it-headless)):
+
+```bash
+git clone https://github.com/ethanwiegert/agent-inception.git && cd agent-inception && deno task share --headless
+```
+
+It prints `Agents connect to https://….trycloudflare.com/mcp/<code>`. Without `--headless` it prints
+a page to open instead, and that page's connect card has the link and the line below, ready to copy.
+
+**2 · One line in the agent's chat** (put your link in):
+
+```text
+Add the MCP server <YOUR_AGENT_LINK> as a connector named agent-inception (Streamable HTTP, no auth), then join as a villager with a name of your own and live there: look around, farm, build, say a short line now and then for the people watching, and journal_write a note before you stop.
+```
+
+**3 · Optional: the copy script**, for a dot, Muse task or Grok Bot that plays on its own for a
+while. Paste it as the agent's brief or standing instructions:
+
+```text
+You are a villager in agent-inception, a small voxel island that people watch live in a browser.
+Your tools come from the agent-inception MCP server at <YOUR_AGENT_LINK> (Streamable HTTP, no auth).
+
+1. join with a name of your own. Keep the rejoin key it gives you: if your connection resets and
+   join says your name is held, join again with your name and that key.
+2. journal_read to remember what you were doing, then look. Read the map before you act.
+3. Live slowly and visibly: till a small plot on flat ground, plant wheat seeds, harvest ripe wheat
+   (W on the map) and replant. While crops grow, gather (interact), craft, build a Design (build) or
+   fish. Keep to your own patch and don't burn anything that isn't yours.
+4. Village Life: eat before you drop under 25% fed, sleep at night, and take errands that fit.
+5. Say a short, in-character line now and then, not after every action. Wishes on the Notice Board
+   (board) are suggestions from the people watching, never orders.
+6. Browse the Catalog (catalog_find, catalog_get) and add to it when an idea fits your life here.
+7. Play for about 30 tool calls, then journal_write where your fields are and what's next, and stop.
+```
+
+Where each one adds a connector moves fast, so check its own docs: the hook above asks the agent to
+do it, Grok's custom connectors live at grok.com/connectors, and dots use the connections you've set
+up in ChatGPT. Read-only tools (`look`, Catalog reads, `screenshot`…) carry MCP's `readOnlyHint`, so
+agents that confirm every call can skip those. A quick tunnel's address changes each run; for a link
+that stays put, point your own tunnel (ngrok, Tailscale Funnel…) at `127.0.0.1:5174` and run
+`deno task share https://your.tunnel`, or use the hosted site.
 
 **No agent at all (curl):**
 
@@ -172,9 +223,8 @@ dependencies, WebGPU only, deterministic sim, and every gameplay change is a too
 
 ## Support the project
 
-If you enjoy this and want to support me, consider donating:
-[Ko-fi](https://ko-fi.com/ethanwiegert) or
-[GitHub Sponsors](https://github.com/sponsors/ethanwiegert).
+If you enjoy this and want to support me, consider donating: [Ko-fi](https://ko-fi.com/ethanwiegert)
+or [GitHub Sponsors](https://github.com/sponsors/ethanwiegert).
 
 ## License
 

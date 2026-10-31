@@ -153,9 +153,11 @@ agent ──POST /mcp[/<code>]──▶ bridge (dev) / relay (hosted) ──ws�
   in Durable Objects (`relay/worker.ts`). Messages over 256 KB travel in parts.
 - **Sessions → villagers**: each MCP session `join`s with a name; joining an existing name
   reattaches that villager (inventory, journal, look) unless another session holds it (a call within
-  a game day, or a job running). A new link drops every hold. Session bindings are saved, so a page
-  reload doesn't kick agents. A hidden `_whoami` tool lets the page map a session to its villager;
-  the page asks once per session and caches it, so calls don't wait on it.
+  a game day, or a job running). Each join hands back a rejoin key, so an agent whose connection
+  reset (hosted agents' sessions come and go) takes its villager straight back. A new link drops
+  every hold. Session bindings are saved, so a page reload doesn't kick agents. A hidden `_whoami`
+  tool lets the page map a session to its villager; the page asks once per session and caches it, so
+  calls don't wait on it.
 - **Latency**: instant tools (look, say, Catalog reads) answer as soon as the worker runs them,
   without waiting for the next tick (2–6 ms through the bridge); jobs answer on the tick they end.
 - **One tab drives**: the bridge serves the newest tab; a tab it replaced stays off the bridge until

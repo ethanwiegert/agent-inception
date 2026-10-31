@@ -277,7 +277,18 @@ Deno.test("relay: bad parts are dropped, never thrown", () => {
 
 Deno.test("relay: HTTP edges answer the way MCP clients expect", async () => {
   const room = new Room({ code: LOCAL, tools: TOOLS, origins: ["https://site.example"] });
-  assertEquals((await room.handleMcp(post({ jsonrpc: "2.0", id: 1, method: "ping" }))).status, 400);
+  // A call needs a session; listing doesn't (hosted connectors list tools before initializing).
+  const sessionless = await room.handleMcp(post({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+  assertEquals((await sessionless.json()).result.tools.length, 1);
+  assertEquals(
+    (await room.handleMcp(post({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "look", arguments: {} },
+    }))).status,
+    400,
+  );
   assertEquals(
     (await room.handleMcp(post({ jsonrpc: "2.0", id: 1, method: "ping" }, "bad id!"))).status,
     400,
@@ -310,6 +321,11 @@ Deno.test("relay: HTTP edges answer the way MCP clients expect", async () => {
     post({ jsonrpc: "2.0", id: 9, method: "teleport" }, session),
   );
   assertEquals((await missing.json()).error.code, -32601);
+  // Clients that list resources and prompts while connecting get empty lists, not errors.
+  for (const [method, key] of [["resources/list", "resources"], ["prompts/list", "prompts"]]) {
+    const res = await room.handleMcp(post({ jsonrpc: "2.0", id: 4, method }, session));
+    assertEquals((await res.json()).result, { [key]: [] });
+  }
   // A batch answers as a batch.
   const batch = await room.handleMcp(post([
     { jsonrpc: "2.0", id: 1, method: "ping" },
@@ -332,13 +348,24 @@ Deno.test("relay: a tab's tool list is cleaned and kept for after a restart", as
         { name: "nodesc", inputSchema: {} },
         "junk",
         { ...TOOLS[0], name: "extra", secret: "dropped" },
+        {
+          ...TOOLS[0],
+          name: "hinted",
+          annotations: { readOnlyHint: true, openWorldHint: "yes", script: "<x>", title: "Hi" },
+        },
       ],
     }),
   );
-  assertEquals((stored as { name: string }[]).map((t) => t.name), ["look", "extra"]);
+  assertEquals((stored as { name: string }[]).map((t) => t.name), ["look", "extra", "hinted"]);
   assert(!("secret" in (stored as object[])[1]));
+  // Annotations keep MCP's known hints, with the right types, and nothing else.
+  assertEquals((stored as Record<string, unknown>[])[2].annotations, {
+    title: "Hi",
+    readOnlyHint: true,
+  });
+  assert(!("annotations" in (stored as object[])[0]));
   const again = new Room({ code: LOCAL, loadTools: () => Promise.resolve(stored as never) });
   const session = await init(again);
   const res = await again.handleMcp(post({ jsonrpc: "2.0", id: 3, method: "tools/list" }, session));
-  assertEquals((await res.json()).result.tools.length, 2);
+  assertEquals((await res.json()).result.tools.length, 3);
 });
