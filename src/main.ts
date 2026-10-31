@@ -419,6 +419,11 @@ const panel = createDevPanel({
   speed: (speed) => client.send({ type: "speed", speed }),
   worlds: worldHandlers,
   connect: () => connectCard.show(),
+  freeVillagers: () => {
+    client.send({ type: "forgetSessions" });
+    sessionAgents.clear();
+    overlay.log("world", "the spectator freed every villager: agents join again by name");
+  },
   follow: toggleFollow,
   villageLife: (on) => client.send({ type: "villageLife", on }),
   weather: (clouds) => client.send({ type: "weather", clouds }),

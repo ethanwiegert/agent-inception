@@ -77,6 +77,13 @@ Saves may break freely until M14; save versioning and migrations come last befor
   done with `board`; never orders, never paid), panel weather and sound, synthesized positional
   audio with file slots for Ethan's soundtrack and voices, and the reverse CAPTCHA; playtest
   [0010](playtests/0010-m13.md).
+- **M14 — ship V1 (built, gate passed in software; two steps left for Ethan).** A relay with a
+  secret link per world (one Cloudflare Worker, a Durable Object per link), the connect card, world
+  slots with export and import, save version 3 with migrations, villagers held by the session
+  playing them, adaptive render scale; playtest [0011](playtests/0011-m14.md). Left:
+  `deno task
+  build && npx wrangler deploy` to a real Cloudflare account, and the 60 fps measure on
+  an integrated-GPU laptop at 1080p (with the standing hardware remeasure).
 
 ## V1
 
@@ -650,6 +657,9 @@ Decided in the build (M14):
   A save newer than the code is opened as a fresh island that isn't saved (the notice says why), so
   the newer version can still open it; one older than version 2 starts afresh, as before. Saves are
   checked (seed, clock, blocks, crops, villagers) before loading.
+- **Freeing villagers**: a restarted agent is a new session, so its own villager is held from it
+  (playtest 0011). The panel's **free villagers** button (and a new link) drops every hold; each
+  agent's next call says why and to join again by name. The refusal points a restarted agent at it.
 - **Render scale** adapts: two 2-second windows with most frames over 20 ms drop it 10% (to 50%),
   three with headroom (on time, GPU timer under 7 ms) raise it back; `?scale=` fixes it.
 
@@ -710,6 +720,14 @@ Pick these up in the gate of whichever milestone touches them.
 - From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
   (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
   all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
+- From playtest 0011: `look` says how many sheep have wool ready but not which; a tree on `look`'s
+  map at (142, 136) wasn't found by `interact` on that tile (a 3 × 3 area found it; not reproduced);
+  Catalog "Added" times use the clock's current offset, so the time slider moves old timestamps; the
+  join welcome is ~3000 characters every time. Lookalike names ("Nett1e") are allowed.
+- **M14, for Ethan:** deploy (`deno task build`, then `npx wrangler deploy`; ADR 0006) and check a
+  hosted link from Claude Code; the Durable Object's hibernation wake path (the tab's socket kept,
+  the Object's memory lost) only runs on Cloudflare, so try a world left quiet for a while. Measure
+  60 fps at 1080p on an integrated GPU (and whether the render scale steps in).
 - From playtest 0010: spectators can only unpin a whole Wish, not hide one villager's reply.
   `place_block` with `layers: 2` was seen laying one layer (not reproduced; check it). Listen to the
   synth sounds on the dev box (only built and played headless, with no ears on them).

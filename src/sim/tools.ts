@@ -222,8 +222,16 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
   try {
     if (name === "join") {
       const text = join(sim, session, args);
+      sim.released.delete(session);
       agent = sim.sessions.get(session)!;
       return done(text);
+    }
+    if (!agent && sim.released.has(session)) {
+      return done(
+        "Every villager was freed (a new link, or the human watching freed them), so join again " +
+          "with your name: your villager, inventory and journal are as you left them.",
+        true,
+      );
     }
     if (!agent) return done('Call "join" with your name first.', true);
     const handler = HANDLERS[name];
@@ -320,8 +328,9 @@ function heldBy(sim: Sim, agent: Agent): string | null {
       : ago < 1
       ? "they called just now"
       : `their last call was ${minutes(ago)} ago`
-  }). Join with a name of your own. A villager is free to rejoin once its agent has made no call ` +
-    `for a game day${
+  }). If that was you before a restart, ask the human watching to free the villagers (the ` +
+    `panel's agents section), or wait. Otherwise join with a name of your own. A villager is ` +
+    `free to rejoin once its agent has made no call for a game day${
       agent.queue.length
         ? ""
         : `: ${agent.name} is free in ${minutes(freeIn)} (${

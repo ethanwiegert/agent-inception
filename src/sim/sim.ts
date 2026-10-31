@@ -197,6 +197,8 @@ export class Sim {
   readonly ticksPerDay = TICKS_PER_DAY;
   readonly agents: Agent[] = [];
   readonly sessions = new Map<string, Agent>();
+  /** Sessions let go by `forgetSessions`, told why on their next call. Not saved. */
+  readonly released = new Set<string>();
   readonly crops = new Map<number, Crop>();
   /** Block index → block for every cell that differs from generation. */
   readonly edits = new Map<number, number>();
@@ -744,6 +746,12 @@ export class Sim {
       }
     }
     return [cx, cz];
+  }
+
+  /** Every session lets go of its villager (a new link, or the spectator freed them all). */
+  forgetSessions() {
+    for (const s of this.sessions.keys()) this.released.add(s);
+    this.sessions.clear();
   }
 
   save(savedAt: number): SaveData {

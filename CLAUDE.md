@@ -136,11 +136,12 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is in progress.
-The hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
-box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
-gate described there (tests, playtests with cost-effective agents including an adversary, a report
-in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is built and
+waits on Ethan's Cloudflare deploy and the integrated-GPU 60 fps measure. The hardware GPU
+remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev box). Each
+milestone opens with a short clarifying grill with Ethan and closes with the playtest gate described
+there (tests, playtests with cost-effective agents including an adversary, a report in
+`docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 

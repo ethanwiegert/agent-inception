@@ -19,6 +19,8 @@ export interface DevHandlers {
   };
   /** Show the connect card (the world's agent URL). */
   connect: () => void;
+  /** Let go of every villager's hold, so restarted agents can rejoin by name at once. */
+  freeVillagers: () => void;
   follow: (agentId: number | null) => void;
   /** Village Life on, or the world a Sandbox. */
   villageLife: (on: boolean) => void;
@@ -184,7 +186,10 @@ export function createDevPanel(on: DevHandlers) {
   const agents = section("agents");
   const connectButton = button("connect an agent", () => on.connect());
   connectButton.style.cssText += ";border-color:#9fd36b";
-  agents.head.after(connectButton);
+  const freeButton = button("free villagers", () => on.freeVillagers());
+  freeButton.title =
+    "Every agent joins again; a restarted agent can take its villager back at once";
+  agents.head.after(connectButton, freeButton);
   let agentsKey = "";
 
   const catalog = section("catalog");

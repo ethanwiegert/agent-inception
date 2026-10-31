@@ -104,7 +104,7 @@ async function handle(msg: ToWorker) {
       }
       break;
     case "forgetSessions":
-      sim?.sessions.clear();
+      sim?.forgetSessions();
       break;
     case "unpin":
       sim?.board.unpin(msg.id);

@@ -142,3 +142,21 @@ Deno.test("join: holds survive a save and reload", () => {
   callTool(loaded, "b", "join", { name: "Ash" }, 2);
   assert(loaded.results.splice(0)[0].isError);
 });
+
+Deno.test("join: freeing every villager lets a restarted agent back in, and tells the others why", () => {
+  const sim = new Sim(7);
+  callTool(sim, "before-restart", "join", { name: "Bramble" }, 1);
+  callTool(sim, "other", "join", { name: "Juniper" }, 2);
+  callTool(sim, "after-restart", "join", { name: "Bramble" }, 3);
+  const refused = results(sim)[2];
+  assert(refused.isError && /ask the human watching to free/.test(refused.text), refused.text);
+  sim.forgetSessions();
+  callTool(sim, "after-restart", "join", { name: "Bramble" }, 4);
+  assert(!results(sim)[0].isError);
+  callTool(sim, "other", "look", {}, 5);
+  const told = results(sim)[0];
+  assert(told.isError && /Every villager was freed/.test(told.text), told.text);
+  callTool(sim, "other", "join", { name: "Juniper" }, 6);
+  callTool(sim, "other", "look", {}, 7);
+  assert(results(sim).every((r) => !r.isError));
+});
