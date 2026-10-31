@@ -18,5 +18,13 @@
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }],
+  // Branch builds run `npx wrangler preview`. Previews don't inherit bindings (assets, migrations
+  // and compatibility do), so ROOMS is declared again; with no script_name each Preview gets its own
+  // RoomObject namespace, never production's rooms.
+  "previews": {
+    "durable_objects": {
+      "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
+    }
+  }
 }
