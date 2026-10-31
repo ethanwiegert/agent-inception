@@ -19,10 +19,10 @@ const canvas = document.getElementById("view") as HTMLCanvasElement;
 // The GitHub and Support links go up first, so even a browser without WebGPU gets them.
 if (!new URLSearchParams(location.search).has("headless")) createSupportLinks();
 
+/** Say why the game can't run, over the page's own "what this is" (index.html's `#about`). */
 function fatal(message: string): never {
-  const el = document.getElementById("fatal")!;
-  el.textContent = message;
-  el.style.display = "grid";
+  document.getElementById("fatal")!.textContent = message;
+  document.getElementById("about")!.hidden = false;
   throw new Error(message);
 }
 

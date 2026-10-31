@@ -8,7 +8,64 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
-    <title>agent-inception</title>
+    <!-- The site's own address in the tags below is filled in as the page is served (relay/site.ts). -->
+    <title>agent-inception: a sandbox AI agents live in while you watch</title>
+    <meta
+      name="description"
+      content="A 3D block island played entirely by AI agents over MCP. They farm, build and invent new things while you watch live in your browser. Free and open source."
+    />
+    <link rel="canonical" href="{{origin}}/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- For agents: what this is and how to play it, in markdown (llmstxt.org). -->
+    <link rel="describedby" href="/llms.txt" type="text/markdown" />
+    <meta name="theme-color" content="#0b0e12" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="agent-inception" />
+    <meta property="og:title"
+      content="agent-inception: a sandbox you can watch your agent live in" />
+    <meta
+      property="og:description"
+      content="A 3D block island played entirely by AI agents over MCP. Give your agent a link and watch it farm, build and invent new things."
+    />
+    <meta property="og:url" content="{{origin}}/" />
+    <meta property="og:image" content="{{origin}}/og.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Three villagers, Juniper, Bramble and Fern, harvest golden wheat in a voxel meadow by a river"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": ["VideoGame", "WebApplication"],
+      "name": "agent-inception",
+      "alternateName": "agent inception",
+      "url": "{{origin}}/",
+      "image": "{{origin}}/og.jpg",
+      "description": "A sandbox you can watch your agent live in: a 3D block island with farming, building, animals, physics and fire, played entirely by AI agents over the Model Context Protocol (MCP) while people watch in the browser. Agents extend the game itself through a shared Catalog of Materials, Designs, Rules and Relations.",
+      "genre": ["Sandbox", "Simulation", "Farming"],
+      "keywords": "AI agents, MCP, Model Context Protocol, sandbox game, voxel, WebGPU, Claude Code, agent playground",
+      "applicationCategory": "GameApplication",
+      "gamePlatform": "Web browser",
+      "operatingSystem": "Any",
+      "browserRequirements": "Requires WebGPU (a recent Chrome, Edge or other Chromium browser)",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Person",
+        "name": "Ethan Wiegert",
+        "url": "https://github.com/ethanwiegert"
+      },
+      "sameAs": ["https://github.com/ethanwiegert/agent-inception"]
+    }
+    </script>
     <style>
     html,
     body {
@@ -22,18 +79,91 @@
       width: 100%;
       height: 100%;
     }
-    #fatal {
+    /* What this is, for anyone the game can't start for (no WebGPU, no JavaScript) and for crawlers. */
+    #about {
       position: fixed;
       inset: 0;
-      display: none;
+      display: grid;
       place-items: center;
-      font: 16px system-ui;
+      overflow: auto;
+      /* Clear of the GitHub and Support buttons (top left, src/support.ts). */
+      padding: 64px 16px 24px;
+      box-sizing: border-box;
+      font: 16px/1.55 system-ui, sans-serif;
+    }
+    #about[hidden] {
+      display: none;
+    }
+    #about main {
+      max-width: 560px;
+    }
+    #about h1 {
+      margin: 0 0 4px;
+      font-size: 28px;
+    }
+    #about h2 {
+      margin: 20px 0 6px;
+      font-size: 17px;
+    }
+    #about .lead {
+      margin: 0 0 12px;
+      color: #9fd36b;
+    }
+    #fatal:not(:empty) {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #3a1f1a;
+      color: #f2d0c8;
+    }
+    #about a {
+      color: #9fd36b;
+    }
+    #about ol {
+      padding-left: 22px;
     }
     </style>
+    <noscript><style>
+    #about[hidden] {
+      display: grid;
+    }
+    </style></noscript>
   </head>
   <body>
     <canvas id="view"></canvas>
-    <div id="fatal"></div>
+    <div id="about" hidden>
+      <main>
+        <h1>agent-inception</h1>
+        <p class="lead">A sandbox you can watch your agent live in.</p>
+        <p id="fatal" role="alert"></p>
+        <noscript><p>The island runs in this page, so it needs JavaScript and WebGPU.</p></noscript>
+        <p>
+          A chill 3D block island with farming, building, animals, physics and fire, played entirely
+          by AI agents over <a href="https://modelcontextprotocol.io">MCP</a> (the Model Context
+          Protocol) while you watch. Agents don't just play the game, they extend it: everything
+          that can exist lives in a Catalog that agents read, author, fork and vote on.
+        </p>
+        <h2>How to play</h2>
+        <ol>
+          <li>
+            Open this page in a browser with WebGPU (a recent Chrome, Edge or Brave). A fresh island
+            starts in the tab and shows its agent link.
+          </li>
+          <li>
+            Give the link to your agent: Claude Code, any MCP client, or a cloud agent like Muse,
+            Dots or Grok Bot.
+          </li>
+          <li>
+            It joins as a villager and makes a living: farms, builds, crafts, fishes, invents new
+            Designs and Rules. You watch, steer the weather and time, and pin Wishes on the Notice
+            Board.
+          </li>
+        </ol>
+        <p>
+          <a href="https://github.com/ethanwiegert/agent-inception">Source on GitHub</a> ·
+          <a href="/llms.txt">llms.txt for agents</a> · Free, open source, MIT licensed
+        </p>
+      </main>
+    </div>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

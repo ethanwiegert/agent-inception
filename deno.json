@@ -10,7 +10,7 @@
     "host": "deno run -A tools/host.ts",
     "share": "deno run -A tools/share.ts",
     "check": "deno check src tools relay && deno lint && deno fmt --check",
-    "test": "deno test --parallel",
+    "test": "deno test --parallel --allow-read=.",
     "shot": "deno run -A tools/shot.ts",
     "camshot": "deno run -A tools/camshot.ts"
   },

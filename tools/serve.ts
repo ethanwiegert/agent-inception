@@ -1,12 +1,18 @@
 /** Static file server for `web/` with `dist/` layered on top. */
+import { SITE_PAGES, withOrigin } from "../relay/site.ts";
+
 const roots = ["web", "dist"];
 const types: Record<string, string> = {
-  html: "text/html",
+  html: "text/html; charset=utf-8",
   js: "text/javascript",
   map: "application/json",
   json: "application/json",
   wgsl: "text/plain",
+  txt: "text/plain; charset=utf-8",
+  xml: "application/xml",
+  svg: "image/svg+xml",
   png: "image/png",
+  jpg: "image/jpeg",
   bin: "application/octet-stream",
   ogg: "audio/ogg",
   opus: "audio/ogg",
@@ -62,13 +68,18 @@ export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr
     } catch {
       return new Response("bad path", { status: 400 });
     }
+    // Pages that name the site's own address get this server's, as the Worker does in production.
+    const site = SITE_PAGES.includes(path);
     if (path.endsWith("/")) path += "index.html";
     if (path.includes("..") || path.includes("\0")) {
       return new Response("bad path", { status: 400 });
     }
     for (const root of roots) {
       try {
-        const body = await Deno.readFile(root + path);
+        const file = await Deno.readFile(root + path);
+        const body = site
+          ? withOrigin(new TextDecoder().decode(file), new URL(req.url).origin)
+          : file;
         const ext = path.slice(path.lastIndexOf(".") + 1);
         return new Response(body, {
           headers: {

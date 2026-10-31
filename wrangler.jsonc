@@ -5,8 +5,13 @@
   "compatibility_date": "2025-09-01",
   "assets": {
     "directory": "./dist",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    // The pages that name the site's own address: the Worker fills it in (relay/site.ts).
+    "run_worker_first": ["/", "/robots.txt", "/sitemap.xml", "/llms.txt"]
   },
+  // Once a custom domain is on, pin it as the one canonical address (or turn off workers.dev with
+  // "workers_dev": false), so search engines don't see two copies of the site:
+  // "vars": { "SITE_URL": "https://your.domain" },
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
   },

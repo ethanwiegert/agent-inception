@@ -1,6 +1,7 @@
 dist/
 *.png
 !docs/playtests/*.png
+!web/*.png
 .wrangler/
 .host-profile/
 .env
