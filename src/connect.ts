@@ -16,11 +16,14 @@ export interface ConnectInfo {
 }
 
 const css = `
-.ai-connect{position:fixed;inset:0;display:grid;place-items:center;background:rgba(5,8,12,.35);
+.ai-connect{position:fixed;inset:0;display:grid;background:rgba(5,8,12,.35);
   z-index:19;font:14px/1.5 ui-sans-serif,system-ui,sans-serif;color:#1d232c;padding:16px;
-  box-sizing:border-box;overflow:auto}
-.ai-connect>div{width:min(520px,100%);background:#f6f4ee;border-radius:14px;padding:20px 22px 16px;
-  box-shadow:0 14px 48px rgba(0,0,0,.45);box-sizing:border-box}
+  padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right))
+  max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  box-sizing:border-box;overflow:auto;overscroll-behavior:contain}
+/* Auto margins center the card but, unlike place-items, never push its top out of reach. */
+.ai-connect>div{margin:auto;width:min(520px,100%);background:#f6f4ee;border-radius:14px;
+  padding:20px 22px 16px;box-shadow:0 14px 48px rgba(0,0,0,.45);box-sizing:border-box}
 .ai-connect h1{margin:0;font-size:20px;letter-spacing:-.01em}
 .ai-connect .lead{margin:6px 0 14px;color:#3c4450}
 .ai-connect h2{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;
@@ -41,7 +44,12 @@ const css = `
 .ai-connect .dot.on{background:#3f9a4f}
 .ai-connect .dot.off{background:#b4513b}
 .ai-connect .row{display:flex;justify-content:space-between;align-items:center;gap:8px;
-  margin-top:16px;flex-wrap:wrap}`;
+  margin-top:16px;flex-wrap:wrap}
+@media (pointer:coarse){.ai-connect button{min-height:40px;padding:8px 14px}
+  .ai-connect summary{padding:6px 0}}
+@media (max-width:520px){.ai-connect{padding:10px}.ai-connect>div{padding:16px 14px 14px}
+  .ai-connect h1{font-size:18px}.ai-connect .row>div{display:flex;gap:6px;width:100%}
+  .ai-connect .row>div>button{flex:1}}`;
 
 const PROMPT = "Join the island as a villager with a name of your own, look around, and make a " +
   "living there. Narrate now and then with say: people are watching.";

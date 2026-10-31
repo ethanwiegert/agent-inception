@@ -4,6 +4,7 @@ import { type SlotInfo, SLOTS } from "./sim/protocol.ts";
 import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
 import type { VillageStatus } from "./sim/village.ts";
+import { pref, setPref } from "./prefs.ts";
 
 export interface DevHandlers {
   look: (id: string) => void;
@@ -52,8 +53,6 @@ export interface DevStatus {
   stats: string[];
 }
 
-const BUTTON = "margin:2px 4px 0 0;padding:2px 8px;border-radius:6px;border:1px solid #445;" +
-  "background:#1a2029;color:inherit;font:inherit;cursor:pointer";
 const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
 const WEATHER: [string, number | null][] = [
   ["natural", null],
@@ -61,6 +60,13 @@ const WEATHER: [string, number | null][] = [
   ["cloudy", 0.5],
   ["overcast", 0.92],
 ];
+const LINK_DOT: Record<LinkState, string> = {
+  connecting: "",
+  connected: "on",
+  offline: "off",
+  replaced: "off",
+  refused: "off",
+};
 const LINK_TEXT: Record<LinkState, string> = {
   connecting: "linking…",
   connected: "link open",
@@ -68,41 +74,133 @@ const LINK_TEXT: Record<LinkState, string> = {
   replaced: "another tab has this world",
   refused: "link refused",
 };
-const INPUT = "width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;border-radius:6px;" +
-  "border:1px solid #445;background:#0e1319;color:inherit;font:inherit";
+/** Phones and short windows: the panel starts tucked away and opens as a full-width sheet. */
+const SMALL = "(max-width: 640px), (max-height: 500px)";
+
+const css = `
+.ai-panel{position:fixed;z-index:5;top:calc(12px + env(safe-area-inset-top));
+  right:calc(12px + env(safe-area-inset-right));width:250px;box-sizing:border-box;
+  display:flex;flex-direction:column;background:rgba(10,14,18,.72);backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);border-radius:10px;font:12px/1.5 ui-monospace,monospace;
+  color:#d8dee9;user-select:none;-webkit-user-select:none;
+  /* Clear of the camera buttons at the bottom; the body scrolls when the board grows. */
+  max-height:calc(100vh - 96px);max-height:calc(100dvh - 96px)}
+.ai-panel.closed{width:auto;max-width:calc(100vw - 120px)}
+.ai-panel-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;margin:0;
+  padding:4px 10px 4px 14px;border:0;background:none;color:inherit;font:inherit;cursor:pointer;
+  text-align:left;border-radius:10px;-webkit-tap-highlight-color:transparent}
+.ai-panel-bar .sum{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  opacity:.75}
+.ai-panel-bar .dot{width:7px;height:7px;border-radius:50%;background:#c9a13b;flex:none}
+.ai-panel-bar .dot.on{background:#7cc36b}
+.ai-panel-bar .dot.off{background:#c9604a}
+.ai-panel-bar .chev{flex:none;opacity:.75;transition:transform .15s}
+.ai-panel.closed .chev{transform:rotate(-90deg)}
+.ai-panel-bar:focus-visible{outline:2px solid #9fd36b;outline-offset:-2px}
+.ai-panel-body{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;overflow:auto;
+  padding:2px 14px 12px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.ai-panel.closed .ai-panel-body{display:none}
+.ai-panel-body button{margin:2px 4px 0 0;padding:2px 8px;border-radius:6px;border:1px solid #445;
+  background:#1a2029;color:inherit;font:inherit;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.ai-panel-body button.on,.ai-panel-body button.accent{border-color:#9fd36b}
+.ai-panel-body button.small{padding:0 6px;margin:0}
+.ai-panel-body .head{opacity:.6}
+.ai-panel-body input:not([type]),.ai-panel-body select{width:100%;box-sizing:border-box;
+  margin-top:4px;padding:3px 6px;border-radius:6px;border:1px solid #445;background:#0e1319;
+  color:inherit;font:inherit}
+.ai-panel-body select{width:auto;max-width:130px}
+.ai-panel-body input[type=range]{width:100%;margin:4px 0}
+@media (hover:hover){.ai-panel-body button:hover,.ai-panel-bar:hover{background:#232b36}}
+/* Fingers: bigger targets, and 16px fields so phones don't zoom in on focus. */
+@media (pointer:coarse){
+  .ai-panel{font-size:13px}
+  .ai-panel-bar{min-height:40px}
+  .ai-panel-body button{min-height:36px;padding:4px 12px;margin:3px 5px 0 0}
+  .ai-panel-body button.small{min-width:36px;min-height:32px;padding:0 8px}
+  .ai-panel-body input:not([type]),.ai-panel-body select{font-size:16px;min-height:38px}
+  .ai-panel-body input[type=range]{height:32px}
+}
+@media (max-width:640px){
+  .ai-panel:not(.closed){left:calc(8px + env(safe-area-inset-left));
+    right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));
+    width:auto;max-height:72vh;max-height:72dvh;background:rgba(10,14,18,.86)}
+}`;
 
 /** Spectator/dev controls. Plain DOM, rebuilt only when its inputs change. */
 export function createDevPanel(on: DevHandlers) {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.append(style);
   const panel = document.createElement("div");
-  panel.style.cssText =
-    "position:fixed;top:12px;right:12px;padding:12px 14px;background:rgba(10,14,18,.72);" +
-    "backdrop-filter:blur(6px);border-radius:10px;font:12px/1.5 ui-monospace,monospace;" +
-    "color:#d8dee9;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;width:250px;" +
-    // Clear of the camera buttons at the bottom; scrolls when the board grows.
-    "user-select:none;max-height:calc(100vh - 96px);overflow:auto;box-sizing:border-box";
+  panel.className = "ai-panel";
+  const bar = document.createElement("button");
+  bar.type = "button";
+  bar.className = "ai-panel-bar";
+  const dot = Object.assign(document.createElement("span"), { className: "dot" });
+  const summary = Object.assign(document.createElement("span"), {
+    className: "sum",
+    textContent: "spectator",
+  });
+  const chev = Object.assign(document.createElement("span"), {
+    className: "chev",
+    textContent: "▾",
+  });
+  chev.setAttribute("aria-hidden", "true");
+  bar.append(dot, summary, chev);
+  const body = document.createElement("div");
+  body.className = "ai-panel-body";
+  body.id = "ai-panel-body";
+  bar.setAttribute("aria-controls", body.id);
+  panel.append(bar, body);
   document.body.append(panel);
+
+  // Open on a laptop, tucked away on a phone, unless the spectator chose otherwise here before.
+  const small = matchMedia(SMALL);
+  let open = pref("panel") ? pref("panel") === "open" : !small.matches;
+  const setOpen = (on: boolean, remember = true) => {
+    open = on;
+    panel.classList.toggle("closed", !on);
+    bar.setAttribute("aria-expanded", String(on));
+    bar.title = on ? "Hide the panel" : "Show the panel";
+    if (remember) setPref("panel", on ? "open" : "closed");
+  };
+  setOpen(open, false);
+  bar.onclick = () => setOpen(!open);
+  // On a small screen the open panel is a sheet over the world: a tap on the world (not a drag
+  // to look around) puts it away again.
+  let press: { x: number; y: number; t: number } | null = null;
+  document.addEventListener("pointerdown", (e) => {
+    press = open && small.matches && !panel.contains(e.target as Node)
+      ? { x: e.clientX, y: e.clientY, t: e.timeStamp }
+      : null;
+  }, true);
+  document.addEventListener("pointerup", (e) => {
+    const p = press;
+    press = null;
+    if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10 || e.timeStamp - p.t > 400) return;
+    // Only taps on the world itself, not on the other cards and buttons over it.
+    if ((e.target as Element | null)?.tagName === "CANVAS") setOpen(false, false);
+  }, true);
 
   const section = (label: string) => {
     const el = document.createElement("div");
     const head = document.createElement("div");
-    head.style.opacity = "0.6";
+    head.className = "head";
     head.textContent = label;
-    const body = document.createElement("div");
-    el.append(head, body);
-    panel.append(el);
-    return { head, body };
+    const content = document.createElement("div");
+    el.append(head, content);
+    body.append(el);
+    return { head, body: content };
   };
   const button = (label: string, onclick: () => void) => {
     const b = document.createElement("button");
+    b.type = "button";
     b.textContent = label;
-    b.style.cssText = BUTTON;
     b.onclick = onclick;
     return b;
   };
-  const mark = (
-    b: HTMLButtonElement,
-    active: boolean,
-  ) => (b.style.borderColor = active ? "#9fd36b" : "#445");
+  const mark = (b: HTMLButtonElement, active: boolean) => b.classList.toggle("on", active);
 
   const looks = section("look");
   const lookButtons = Object.entries(LOOKS).map(([id, l]) => {
@@ -117,10 +215,10 @@ export function createDevPanel(on: DevHandlers) {
   slider.min = "0";
   slider.max = "1";
   slider.step = "0.001";
-  slider.style.width = "100%";
+  slider.setAttribute("aria-label", "time of day");
   let dragging = false;
   slider.onpointerdown = () => (dragging = true);
-  slider.onpointerup = () => (dragging = false);
+  slider.onpointerup = slider.onpointercancel = () => (dragging = false);
   slider.oninput = () => on.time(Number(slider.value));
   const speedButtons = SPEEDS.map(([label, s]) => button(label, () => on.speed(s)));
   time.body.append(slider, ...speedButtons);
@@ -158,9 +256,10 @@ export function createDevPanel(on: DevHandlers) {
   const wishText = document.createElement("input");
   wishText.maxLength = BOARD_LIMITS.text;
   wishText.placeholder = "Pin a Wish (a suggestion, never an order)";
-  wishText.style.cssText = INPUT;
+  wishText.enterKeyHint = "send";
+  wishText.setAttribute("aria-label", "Wish");
   const wishFor = document.createElement("select");
-  wishFor.style.cssText = INPUT + ";width:auto;max-width:130px";
+  wishFor.setAttribute("aria-label", "for whom");
   const pin = () => {
     const text = wishText.value.trim();
     if (!text) return;
@@ -173,7 +272,7 @@ export function createDevPanel(on: DevHandlers) {
   wishes.style.cssText = "max-height:140px;overflow:auto";
   board.body.append(wishText, wishFor, pinButton, wishes);
   let boardVersion = -1;
-  let forKey = "";
+  let forKey: string | null = null; // null: the "anyone" option isn't in yet
 
   const village = section("village");
   let life = true;
@@ -185,7 +284,7 @@ export function createDevPanel(on: DevHandlers) {
 
   const agents = section("agents");
   const connectButton = button("connect an agent", () => on.connect());
-  connectButton.style.cssText += ";border-color:#9fd36b";
+  connectButton.classList.add("accent");
   const freeButton = button("free villagers", () => on.freeVillagers());
   freeButton.title =
     "Every agent joins again; a restarted agent can take its villager back at once";
@@ -197,7 +296,7 @@ export function createDevPanel(on: DevHandlers) {
 
   const stats = document.createElement("div");
   stats.style.opacity = "0.8";
-  panel.append(stats);
+  body.append(stats);
 
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -232,7 +331,8 @@ export function createDevPanel(on: DevHandlers) {
           const small = (text: string, title: string, f: () => void) => {
             const b = button(text, f);
             b.title = title;
-            b.style.cssText += ";padding:0 6px;margin:0";
+            b.setAttribute("aria-label", title);
+            b.classList.add("small");
             return b;
           };
           row.append(label);
@@ -285,7 +385,9 @@ export function createDevPanel(on: DevHandlers) {
             const head = document.createElement("div");
             const x = button("×", () => on.unpin(w.id));
             x.title = "unpin";
-            x.style.cssText += ";float:right;padding:0 6px;margin:0";
+            x.setAttribute("aria-label", "unpin");
+            x.classList.add("small");
+            x.style.cssText = "float:right;margin-left:4px";
             // Spectators' and villagers' words are text, never HTML.
             head.textContent = `#${w.id}${w.for ? ` → ${w.for}` : ""}${
               w.done ? ` ✓ ${w.done.by}` : ""
@@ -309,6 +411,14 @@ export function createDevPanel(on: DevHandlers) {
         if (!s.board.length) wishes.textContent = "no Wishes pinned";
       }
       agents.head.textContent = `agents · ${LINK_TEXT[s.link]}`;
+      // The bar says enough to watch by with the panel put away.
+      const clock = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${
+        String(minutes % 60).padStart(2, "0")
+      }`;
+      const n = s.agents.length;
+      summary.textContent = `day ${s.day} ${clock} · ${n} villager${n === 1 ? "" : "s"}`;
+      dot.className = `dot ${LINK_DOT[s.link]}`;
+      bar.setAttribute("aria-label", `${summary.textContent}, ${LINK_TEXT[s.link]}: panel`);
 
       const v = s.village;
       if (v) {
@@ -346,7 +456,11 @@ export function createDevPanel(on: DevHandlers) {
         agents.body.replaceChildren(
           ...(s.agents.length
             ? s.agents.map((a) => {
-              const b = button(label(a), () => on.follow(s.following === a.id ? null : a.id));
+              const b = button(label(a), () => {
+                on.follow(s.following === a.id ? null : a.id);
+                // On a phone, get the sheet out of the way of the villager being followed.
+                if (small.matches && s.following !== a.id) setOpen(false, false);
+              });
               const n = needs.get(a.id);
               if (n && life) b.title = `fed ${tenth(n[0])}%, rested ${tenth(n[1])}%`;
               mark(b, s.following === a.id);

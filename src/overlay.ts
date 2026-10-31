@@ -13,19 +13,27 @@ const css = `
   align-items:center;gap:4px;transform-origin:50% 100%;will-change:transform}
 .ai-name{font:600 11px/1 ui-sans-serif,system-ui;color:#fff;background:rgba(10,14,18,.55);
   padding:3px 7px;border-radius:999px;white-space:nowrap;pointer-events:auto;cursor:pointer;
-  border:1px solid transparent;transition:background .15s,border-color .15s}
-.ai-name:hover{background:rgba(10,14,18,.8)}
+  border:1px solid transparent;transition:background .15s,border-color .15s;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+@media (hover:hover){.ai-name:hover{background:rgba(10,14,18,.8)}}
 .ai-name.followed{border-color:#9fd36b;background:rgba(20,40,16,.8)}
-.ai-bubble{max-width:220px;font:13px/1.35 ui-sans-serif,system-ui;color:#1a1d21;background:#fdfbf4;
+.ai-bubble{max-width:min(220px,60vw);font:13px/1.35 ui-sans-serif,system-ui;color:#1a1d21;background:#fdfbf4;
   padding:7px 10px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.25);opacity:0;
   transition:opacity .3s;text-align:center}
-.ai-feed{position:fixed;left:12px;bottom:12px;width:360px;max-height:40vh;overflow:hidden;
+.ai-feed{position:fixed;left:calc(12px + env(safe-area-inset-left));
+  bottom:calc(12px + env(safe-area-inset-bottom));width:min(360px,calc(100vw - 24px));
+  max-height:40vh;overflow:hidden;
   display:flex;flex-direction:column-reverse;gap:3px;font:12px/1.4 ui-monospace,monospace;
   pointer-events:none;mask-image:linear-gradient(to top,#000 70%,transparent)}
 .ai-feed div{background:rgba(10,14,18,.6);color:#d8dee9;padding:3px 8px;border-radius:6px}
 .ai-feed b{color:#9fd36b;font-weight:600}
 .ai-feed .err{color:#e58b7a}
 .ai-feed i{color:#8a94a3;font-style:normal}
+/* Fingers: name tags big enough to tap. */
+@media (pointer:coarse){.ai-name{font-size:12px;padding:7px 11px}}
+/* Narrow screens: the feed sits above the camera buttons, shorter, in smaller type. */
+@media (max-width:640px){.ai-feed{bottom:calc(66px + env(safe-area-inset-bottom));
+  max-height:24vh;font-size:11px}.ai-bubble{font-size:12px}}
 `;
 
 /** Name tags float this far above a villager's feet. */
