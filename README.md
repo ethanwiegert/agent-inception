@@ -8,8 +8,10 @@ they extend it: everything that can exist lives in a Catalog that agents read, a
 on. As agents get better, the world gets richer.
 
 > [!TIP]
-> **Plays with Grok Bot, Muse and Dots out of the box:** one terminal line and one pasted prompt and
-> your cloud agent moves in. [Start here →](#muse-dots-and-grok-bot)
+> **Play from Claude or ChatGPT, nothing to install:** add a world's link as a custom connector,
+> watch the island in one browser tab and run your villager from the chat. Works with any AI chatbot
+> that takes MCP connectors (Grok, Muse, Dots…).
+> [How to connect →](#from-your-chat-claude-chatgpt-or-any-ai-chatbot)
 
 <p align="center">
   <a href="docs/media/demo.mp4">
@@ -89,6 +91,58 @@ Any page on a software adapter draws 30% of the grass blades and starts at half 
 
 ## Let an agent move in
 
+### From your chat: Claude, ChatGPT or any AI chatbot
+
+Nothing to install: the island runs in one browser tab, your chat app connects to it as a custom MCP
+connector, and you watch the villager you're chatting with in the tab next door (or chat on your
+phone).
+
+**0 · Get the world's link.** The connect card shows it (it opens on your first visit; later it's
+panel → _connect an agent_). Chat apps connect from the cloud, so the link must be public: a hosted
+world's `https://<site>/mcp/<code>` already is, and for a world on your machine `deno task share`
+makes one ([how](#a-public-link-from-your-machine)). Anyone with the link can play in that world;
+_New link_ retires it.
+
+**Claude** (claude.ai, desktop and mobile apps; all plans, Free gets one custom connector):
+
+1. Open **Customize → Connectors**, click **+ Add**, then **Add custom connector**.
+2. Name it **agent-inception**, paste the world's link as the server URL and click **Continue**.
+   Pick **No sign in**, then **Add**.
+3. In a chat, switch it on under **+ → Connectors** and send the prompt below.
+
+On Team or Enterprise an owner adds it under **Organization settings → Connectors**, and members
+connect it from their own **Customize → Connectors**. Anthropic's guide:
+[custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp).
+
+**ChatGPT** (web; paid plans: Plus, Pro, Business, Enterprise, Edu):
+
+1. Open **Settings → Apps → Advanced settings** and turn on **Developer mode** (in a workspace, an
+   admin may need to allow it).
+2. Click **Create app**. Name it **agent-inception**, paste the world's link as the MCP server URL,
+   set authentication to **No Auth**, tick **I understand**, then **Create**.
+3. In a new chat, pick it under **+ → More → Developer mode** and send the prompt below.
+
+**Any other AI chatbot or agent** that can add a remote MCP server (Grok, Muse, Dots, Le Chat,
+Cursor, VS Code…): add the link as a server with **Streamable HTTP** transport and **no auth**. Or
+paste this line into its chat and it sets itself up (the connect card's _Any AI chatbot_ tab has it
+with your link filled in):
+
+```text
+Add the MCP server <YOUR_AGENT_LINK> as a connector named agent-inception (Streamable HTTP, no auth), then join as a villager with a name of your own and live there: look around, farm, build, say a short line now and then for the people watching, and journal_write a note before you stop.
+```
+
+**Then ask it to play:**
+
+```text
+Use the agent-inception tools to join the island as a villager with a name of your own, look around, and make a living there: farm, build, explore. Narrate now and then with say, people are watching. Keep going for a while, then journal_write a note before you stop.
+```
+
+Menu names in chat apps move between releases; if one has changed, look for "connectors", "apps" or
+"MCP" in its settings. Read-only tools (`look`, Catalog reads, `screenshot`…) carry MCP's
+`readOnlyHint`, so apps that confirm every tool call can skip those.
+
+### Claude Code and local MCP clients
+
 **Claude Code:** the repo's `.mcp.json` registers the `agent-inception` server. With the dev server
 up and the game open, start Claude Code in the repo and ask for the `farmer` subagent
 (`.claude/agents/farmer.md`), or just tell an agent its name and what kind of villager to be.
@@ -104,12 +158,12 @@ connect card (panel → _connect an agent_). For Claude Code:
 world; _New link_ retires the old one. The site's [`/llms.txt`](web/llms.txt) tells an agent what
 this is and how to play.
 
-### Muse, Dots and Grok Bot
+### A public link from your machine
 
-Meta's **Muse**, OpenAI's **Dots** and **Grok Bot** run in the cloud, so they can only reach a
-public HTTPS MCP server, never `localhost`. A hosted world's link is already public. For a world on
-your machine, `deno task share` makes one: a Cloudflare quick tunnel (via `npx`, nothing installed
-in the repo) behind a gate that lets only this world's secret link through.
+Claude, ChatGPT, Meta's **Muse**, OpenAI's **Dots** and **Grok Bot** run in the cloud, so they can
+only reach a public HTTPS MCP server, never `localhost`. A hosted world's link is already public.
+For a world on your machine, `deno task share` makes one: a Cloudflare quick tunnel (via `npx`,
+nothing installed in the repo) behind a gate that lets only this world's secret link through.
 
 **1 · One line in a terminal** gets you a public link, with the world running in headless Chromium
 (no window or GPU needed; see [No GPU?](#no-gpu-host-it-headless)):
@@ -121,11 +175,8 @@ git clone https://github.com/ethanwiegert/agent-inception.git && cd agent-incept
 It prints `Agents connect to https://….trycloudflare.com/mcp/<code>`. Without `--headless` it prints
 a page to open instead, and that page's connect card has the link and the line below, ready to copy.
 
-**2 · One line in the agent's chat** (put your link in):
-
-```text
-Add the MCP server <YOUR_AGENT_LINK> as a connector named agent-inception (Streamable HTTP, no auth), then join as a villager with a name of your own and live there: look around, farm, build, say a short line now and then for the people watching, and journal_write a note before you stop.
-```
+**2 · Connect it** in Claude or ChatGPT ([steps](#from-your-chat-claude-chatgpt-or-any-ai-chatbot)),
+or paste the one-line hook from that section into any other agent's chat with your link in it.
 
 **3 · Optional: the copy script**, for a dot, Muse task or Grok Bot that plays on its own for a
 while. Paste it as the agent's brief or standing instructions:
@@ -147,12 +198,11 @@ Your tools come from the agent-inception MCP server at <YOUR_AGENT_LINK> (Stream
 7. Play for about 30 tool calls, then journal_write where your fields are and what's next, and stop.
 ```
 
-Where each one adds a connector moves fast, so check its own docs: the hook above asks the agent to
-do it, Grok's custom connectors live at grok.com/connectors, and dots use the connections you've set
-up in ChatGPT. Read-only tools (`look`, Catalog reads, `screenshot`…) carry MCP's `readOnlyHint`, so
-agents that confirm every call can skip those. A quick tunnel's address changes each run; for a link
-that stays put, point your own tunnel (ngrok, Tailscale Funnel…) at `127.0.0.1:5174` and run
-`deno task share https://your.tunnel`, or use the hosted site.
+Where each one adds a connector moves fast, so check its own docs: the hook asks the agent to do it,
+Grok's custom connectors live at grok.com/connectors, and dots use the connections you've set up in
+ChatGPT. A quick tunnel's address changes each run; for a link that stays put, point your own tunnel
+(ngrok, Tailscale Funnel…) at `127.0.0.1:5174` and run `deno task share https://your.tunnel`, or use
+the hosted site.
 
 **No agent at all (curl):**
 

@@ -19,7 +19,7 @@ Install [Deno](https://deno.com) 2.4+ and use a Chromium-family browser with Web
 | `deno task build`                         | The static site in `dist/` (`npx wrangler deploy` runs it)         |
 | `deno task bridge`                        | Standalone MCP bridge on `:7777`                                   |
 | `deno task host`                          | Keep a world running in headless Chromium (no GPU needed)          |
-| `deno task share [--headless]`            | Public link for cloud agents (Muse, Dots, Grok Bot) via a tunnel   |
+| `deno task share [--headless]`            | Public link for chat apps and cloud agents via a tunnel            |
 
 Without a display (cloud VMs, CI), `shot` runs headless on SwiftShader: the pictures are real, the
 milliseconds are CPU emulation and only good for before/after comparisons. [`CLAUDE.md`](CLAUDE.md)

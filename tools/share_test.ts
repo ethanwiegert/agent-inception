@@ -1,7 +1,7 @@
 import { deepStrictEqual as assertEquals, match as assertMatch } from "node:assert/strict";
 import { createBridge } from "./bridge.ts";
 import { createGate, shareBase } from "./share.ts";
-import { cloudHook, reachableFromCloud } from "../src/connect.ts";
+import { cloudHook, PROMPT, reachableFromCloud } from "../src/connect.ts";
 
 const CODE = "AAAAAAAAAAAAAAAAAAAAAA";
 const rpc = (method: string, params: Record<string, unknown> = {}, id = 1) =>
@@ -79,4 +79,10 @@ Deno.test("share: cloud agents get the hook only for links they can reach", () =
   const hook = cloudHook("https://x.example/mcp/" + CODE);
   assertEquals(hook.includes("\n"), false);
   assertEquals(hook.includes(`https://x.example/mcp/${CODE} `), true);
+});
+
+Deno.test("share: the README shows the connect card's hook and prompt word for word", async () => {
+  const readme = await Deno.readTextFile(new URL("../README.md", import.meta.url));
+  assertEquals(readme.includes(cloudHook("<YOUR_AGENT_LINK>")), true, "hook");
+  assertEquals(readme.includes(PROMPT), true, "prompt");
 });

@@ -1,7 +1,8 @@
 /**
  * The corner links: the source on GitHub, and a small Support button that opens a note with a
  * Ko-fi link. Top left, clear of the panel (top right), the feed (bottom left) and the camera
- * buttons (bottom right); under the connect card and the CAPTCHA gag, so those stay modal.
+ * buttons (bottom right). Under the panel, which opens as a full-width sheet over them on a
+ * phone, and under the connect card and the CAPTCHA gag, so those stay modal.
  */
 
 export const GITHUB_URL = "https://github.com/ethanwiegert/agent-inception";
@@ -21,7 +22,7 @@ const NOTE = "Tips go straight to me, Ethan, the solo dev behind this island. No
 
 const css = `
 .ai-support{position:fixed;left:calc(12px + env(safe-area-inset-left));
-  top:calc(12px + env(safe-area-inset-top));z-index:18;display:flex;gap:6px;align-items:center;
+  top:calc(12px + env(safe-area-inset-top));z-index:4;display:flex;gap:6px;align-items:center;
   font:600 13px/1 ui-sans-serif,system-ui,sans-serif;user-select:none}
 .ai-support>a,.ai-support>button{height:32px;min-width:32px;box-sizing:border-box;
   border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,14,18,.55);
@@ -45,7 +46,9 @@ const css = `
 .ai-support-pop small{display:block;margin-top:6px;text-align:center;color:#6b6556;font-size:11px}
 @media (pointer:coarse){.ai-support>a,.ai-support>button{height:40px;min-width:40px}
   .ai-support-pop{top:48px}.ai-support-pop a{padding:11px 12px}}
-@media (max-width:520px){.ai-support .label{display:none}.ai-support>button{padding:0}}`;
+@media (max-width:520px){.ai-support .label{display:none}.ai-support>button{padding:0}}
+/* On a phone the open panel is a full-width sheet over this corner: step out of its way. */
+@media (max-width:640px){body:has(.ai-panel:not(.closed)) .ai-support{visibility:hidden}}`;
 
 /** Mount the GitHub link and the Support button. Returns the root, for tests and teardown. */
 export function createSupportLinks() {
