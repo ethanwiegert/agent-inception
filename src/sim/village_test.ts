@@ -298,7 +298,10 @@ Deno.test("a camp can't build, craft or place what a hamlet or village unlocks",
     fern.inventory["lantern glass"] = 2;
   err(run(sim, "a", "build", { design: "hand cart", x, z }), "needs axle (unlocks at a hamlet)");
   err(run(sim, "a", "build", { design: "windmill", x, z }), "motor (unlocks at a village)");
-  err(run(sim, "a", "craft", { item: "brick" }), "brick unlocks when the village is a hamlet");
+  err(
+    run(sim, "a", "craft", { item: "brick" }),
+    "brick unlocks once the village has grown into a hamlet",
+  );
   err(run(sim, "a", "place_block", { block: "lantern glass", x, z }), "a village");
   ok(run(sim, "a", "build", { design: "stone bench", x, z }));
   // An agent's glowing Material is a light: it waits for lamps.
@@ -353,7 +356,8 @@ Deno.test("building another villager's Design credits the village and tells its 
   const before = sim.village.points;
   const r = ok(run(sim, "a", "build", { design: "wren seat", x, z }));
   assert(r.includes('You built Wren\'s "wren seat"'), r);
-  assert(sim.village.points >= before + VILLAGE_LIMITS.borrowed + 1);
+  // Two planks of blocks: half a log for the first build, and the bonus for sharing.
+  assertEquals(sim.village.points, before + VILLAGE_LIMITS.borrowed + 0.5);
   const wren = ok(run(sim, "b", "look"));
   assert(wren.includes('Fern built your "wren seat"'), wren);
 });
@@ -483,8 +487,92 @@ Deno.test("join and look tell an agent about Village Life", () => {
   const j = ok(run(sim, "a", "join", { name: "Fern" }));
   assert(j.includes("Village Life is on") && j.includes("errands"), j);
   const look = ok(run(sim, "a", "look"));
-  assert(look.includes("Needs: fed 100%, rested 100%. Village: a camp (0 of 40"), look);
+  assert(look.includes("Needs: fed 100%, rested 100%. Village: a camp, 0 of 40"), look);
   sim.village.setLife(false);
   const j2 = ok(run(sim, "b", "join", { name: "Wren" }));
   assert(j2.includes("This world is a Sandbox"), j2);
+});
+
+// ---------------------------------------------------------------- playtest 0009
+
+Deno.test("playtest 0009: craft says what's locked before what's missing", () => {
+  const { sim } = site();
+  err(run(sim, "a", "craft", { item: "brick" }), "brick unlocks once the village has grown");
+  err(run(sim, "a", "craft", { item: "bread" }), "a hamlet");
+});
+
+Deno.test("playtest 0009: Materials named with underscores craft and place by that name", () => {
+  const { sim, fern, x, z } = site();
+  stand(sim, x, z);
+  ok(add(sim, "material", "hazel_clay_tile", { form: "block", color: "#aa6644" }));
+  ok(add(sim, "relation", "", { type: "made_from", from: "hazel_clay_tile", to: "planks" }));
+  fern.inventory.planks = 2;
+  const r = ok(run(sim, "a", "craft", { item: "hazel_clay_tile" }));
+  assert(r.includes("Crafted 1 hazel_clay_tile"), r);
+  ok(run(sim, "a", "place_block", { block: "hazel_clay_tile", x: x + 1, z }));
+  fern.inventory.wool = 1;
+  err(run(sim, "a", "place_block", { block: "wool", x: x + 2, z }), "an item, not a block");
+});
+
+Deno.test("playtest 0009: a bare string or list as arguments is refused plainly", () => {
+  const { sim } = site();
+  err(run(sim, "a", "eat", "wheat" as never), "arguments are an object");
+  err(run(sim, "a", "eat", ["wheat"] as never), "arguments are an object");
+});
+
+Deno.test("playtest 0009: a finished bring errand says so once", () => {
+  const { sim, fern } = site();
+  const e = errand(sim, { kind: "bring", what: "log", count: 3 });
+  ok(run(sim, "a", "errands", { action: "take", id: e.id }));
+  fern.inventory.log = 3;
+  const r = ok(run(sim, "a", "errands", { action: "give", id: e.id }));
+  assertEquals(r.split(`Errand #${e.id} done`).length, 2, r);
+  assert(r.startsWith("You hand over 3 log."), r);
+});
+
+Deno.test("playtest 0009: a cheap Design's first build earns its worth, not a whole point", () => {
+  const { sim, fern, x, z } = site();
+  stand(sim, x, z);
+  const crate = {
+    parts: [{ part: "box", material: "planks", at: [0.5, 0.3, 0.5], size: [0.6, 0.6, 0.6] }],
+  };
+  ok(add(sim, "design", "tiny crate", crate));
+  fern.inventory.planks = 1;
+  ok(run(sim, "a", "build", { design: "tiny crate", x: x + 2, z: z + 2 }));
+  assertEquals(sim.village.points, 0.25);
+});
+
+Deno.test("playtest 0009: a Rule that finds the bounty spent tells whoever set it off", () => {
+  const { sim } = site();
+  ok(add(sim, "rule", "gimme", {
+    when: { event: "said", what: "gimme" },
+    do: [{ give: { item: "log", count: 4 } }],
+  }));
+  for (let i = 0; i < 6; i++) ok(run(sim, "a", "say", { text: "gimme" }));
+  const r = ok(run(sim, "a", "say", { text: "gimme" }));
+  assert(r.includes('"gimme" gave nothing') && r.includes("bounty"), r);
+  const look = ok(run(sim, "a", "look"));
+  assert(look.includes("0 of 24 things left to give today"), look);
+});
+
+Deno.test("playtest 0009: look points to the nearest sheep when none is in view", () => {
+  const { sim, fern } = site();
+  const sheep = sim.animals.find((a) => a.species === 0)!;
+  fern.x = sheep.x + 20, fern.z = sheep.z;
+  for (const a of sim.animals) if (a !== sheep && a.species === 0) a.x += 200;
+  const look = ok(run(sim, "a", "look", { radius: 6 }));
+  assert(look.includes("a sheep (wool) at"), look);
+});
+
+Deno.test("playtest 0009: the board keeps three errands open while others are taken", () => {
+  const { sim } = site();
+  ok(run(sim, "b", "join", { name: "Wren" }));
+  steps(sim, 100);
+  ok(run(sim, "a", "errands", { action: "take", id: sim.village.errands[0].id }));
+  ok(run(sim, "b", "errands", { action: "take", id: sim.village.errands[1].id }));
+  steps(sim, 100);
+  assertEquals(sim.village.errands.filter((e) => !e.taker).length, VILLAGE_LIMITS.errands);
+  assertEquals(sim.village.errands.length, 5);
+  const look = ok(run(sim, "a", "look"));
+  assert(!look.includes("give))"), look);
 });

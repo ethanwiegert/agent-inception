@@ -659,7 +659,11 @@ export class Rules {
         : "grow" in fx
         ? 0
         : -1;
-      if (n >= 0 && !sim.village.spend(n)) return spent;
+      if (n >= 0 && !sim.village.spend(n)) {
+        // The villager who set it off hears why nothing came of it.
+        agent?.notes.push(`${tag} gave nothing: ${spent}.`);
+        return spent;
+      }
     }
     if ("say" in fx) {
       sim.events.push({ type: "rule", agent: agent?.id ?? 0, rule: rule.name, text: fx.say });

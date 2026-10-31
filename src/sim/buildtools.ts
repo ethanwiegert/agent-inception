@@ -1,4 +1,4 @@
-import type { DesignContent, Entry } from "./catalog.ts";
+import type { DesignContent, Entry, MaterialContent } from "./catalog.ts";
 import {
   type Args,
   give,
@@ -724,13 +724,18 @@ function heldBlock(
   value: unknown,
   emptyOk = false,
 ): { id: number; name: string } {
-  const want = String(value ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(value ?? "").trim().toLowerCase();
+  const want = sim.blocks.byName(raw) ? raw : raw.replace(/_/g, " ");
   if (!want) throw new Error('Say which block to place, e.g. block: "stone".');
   const def = sim.blocks.byName(want);
   const held = placeableHeld(sim, agent);
+  const item = sim.catalog.byName(want);
   const hint = held.length
     ? ` You can place: ${held.join(", ")}.`
     : " Dig some with break_block (grass gives dirt; deeper down there's stone).";
+  if (item?.kind === "material" && (item.content as MaterialContent).form === "item") {
+    throw new Error(`"${item.name}" is an item, not a block: it goes into Designs' parts.${hint}`);
+  }
   if (!def || def.id === 0 || !sim.holdable(def.name)) {
     throw new Error(`"${want}" isn't a block Material.${hint}`);
   }

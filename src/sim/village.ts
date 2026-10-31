@@ -36,8 +36,9 @@ export const NEEDS = {
 export const LEVEL_POINTS = [0, 40, 120] as const;
 
 export const VILLAGE_LIMITS = {
-  /** Errands posted at once, and that one villager may hold. */
+  /** Open (untaken) errands the board keeps, errands on it at most, and what one villager holds. */
   errands: 3,
+  board: 6,
   held: 2,
   /** Ticks an errand stays up untaken, and how long a villager has once they take it. */
   posted: TICKS_PER_DAY * 2,
@@ -51,8 +52,8 @@ export const VILLAGE_LIMITS = {
   bounty: 24,
   /** Points for one harvested crop. */
   harvest: 0.25,
-  /** Points for a Design's first build in the world: its cost in worth, within these. */
-  firstBuild: [1, 10],
+  /** Points for a Design's first build in the world: its cost in worth (a log is 1), at most. */
+  firstBuild: 10,
   /** Points when a villager builds another villager's Design for the first time. */
   borrowed: 2,
 } as const;
@@ -154,14 +155,14 @@ export class Village {
     return LEVEL_POINTS[this.level + 1] ?? null;
   }
 
-  /** "a camp (12 of 40 points to a hamlet)". */
+  /** "a camp, 12 of 40 points to a hamlet". */
   levelText(): string {
     const next = this.nextAt;
     const pts = Math.floor(this.points * 100) / 100;
     return `a ${this.levelName}` +
       (next === null
-        ? ` (${pts} points, as big as it grows)`
-        : ` (${pts} of ${next} points to a ${LEVELS[this.level + 1]})`);
+        ? `, ${pts} points, as big as it grows`
+        : `, ${pts} of ${next} points to a ${LEVELS[this.level + 1]}`);
   }
 
   /** Switch Village Life on, or the world to Sandbox. Everyone hears of it with their next call. */
@@ -192,10 +193,16 @@ export class Village {
     const c = this.sim.catalog;
     const at = (n: string) => `a ${LEVELS[unlockLevel(c, c.byName(n)!)]}`;
     const head = names.length === 1 && names[0] === e.name
-      ? `${e.name} unlocks when the village is ${at(e.name)}`
+      ? `${e.name} unlocks once the village has grown into ${at(e.name)}`
       : `"${e.name}" needs ${names.map((n) => `${n} (unlocks at ${at(n)})`).join(", ")}`;
-    return `${head}; it's ${this.levelText()} now. The village grows with errands, harvests ` +
-      "and the first build of each Design. (In a spectator's Sandbox everything is unlocked.)";
+    return `${head}. The village is ${this.levelText()}; it grows with errands, harvests and ` +
+      "the first build of each Design. (In a spectator's Sandbox everything is unlocked.)";
+  }
+
+  /** What's left of today's bounty for villagers' Rules. */
+  bountyLeft(): number {
+    this.refreshBounty();
+    return this.bounty;
   }
 
   /** Spend `n` of the day's bounty for villagers' Rules; false when it's used up. */
@@ -221,7 +228,11 @@ export class Village {
       if (sim.tick >= e.until) this.lapse(e);
       else if (e.kind === "light" && e.taker) this.checkLight(e);
     }
-    if (this.errands.length < VILLAGE_LIMITS.errands && sim.tick >= this.nextPost) {
+    const open = this.errands.filter((e) => !e.taker).length;
+    if (
+      open < VILLAGE_LIMITS.errands && this.errands.length < VILLAGE_LIMITS.board &&
+      sim.tick >= this.nextPost
+    ) {
       if (this.post()) this.nextPost = sim.tick + TICK_HZ;
       else this.nextPost = sim.tick + VILLAGE_LIMITS.gap;
     }
@@ -302,7 +313,7 @@ export class Village {
           }
         }
       }
-      const pts = Math.min(L.firstBuild[1], Math.max(L.firstBuild[0], costWorth(c, cost)));
+      const pts = Math.min(L.firstBuild, costWorth(c, cost));
       this.credit(pts);
       agent.notes.push(
         `First "${d.name}" in the village: +${
@@ -410,13 +421,13 @@ export class Village {
     return false;
   }
 
-  /** "Bring 4 wheat", "Build a "bed"", "Harvest 6 ripe crops"… */
-  text(e: Errand): string {
+  /** "Bring 4 wheat", "Build a "bed"", "Harvest 6 ripe crops"…, with how to do it unless `short`. */
+  text(e: Errand, short = false): string {
     const c = this.sim.catalog;
     const s = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
     switch (e.kind) {
       case "bring":
-        return `Bring ${e.count} ${e.what} for the village store (errands give)`;
+        return `Bring ${e.count} ${e.what} for the village store${short ? "" : " (errands give)"}`;
       case "build": {
         const d = c.byName(e.what);
         const whose = d && d.author !== NATURE ? ` (${d.author}'s Design)` : "";
@@ -429,9 +440,10 @@ export class Village {
       case "plant":
         return `Plant ${s(e.count, "tree", "trees")} (saplings)`;
       case "sleep":
-        return "Sleep a night in a bed (an hour or more)";
+        return `Sleep a night in a bed${short ? "" : " (an hour or more)"}`;
       case "light":
-        return "Stand in lamplight at night (light above 0.4 between 20:00 and 05:00)";
+        return "Stand in lamplight at night" +
+          (short ? "" : " (light above 0.4 between 20:00 and 05:00)");
     }
   }
 
@@ -491,7 +503,8 @@ export class Village {
       throw new Error(`You carry ${have} ${e.what}; errand #${e.id} wants ${e.count}.`);
     }
     agent.inventory[e.what] -= e.count;
-    return this.progress(agent, e, e.count) ?? "";
+    this.progress(agent, e, e.count); // its news comes with this result, as a note
+    return `You hand over ${e.count} ${e.what}.`;
   }
 
   /** Count `n` toward an errand; done, it pays out. Returns the news. */
@@ -504,14 +517,14 @@ export class Village {
     const bread = this.sim.produce("bread");
     if (bread) agent.inventory[bread] = (agent.inventory[bread] ?? 0) + 1;
     this.credit(e.points);
-    const news = `Errand #${e.id} done (${this.text(e).replace(/ \(errands give\)$/, "")}): ` +
+    const news = `Errand #${e.id} done (${this.text(e, true)}): ` +
       `+${e.points} points${bread ? ` and a loaf of ${bread}` : ""}. The village is ` +
       `${this.levelText()}.`;
     agent.notes.push(news);
     this.sim.events.push({
       type: "village",
       agent: agent.id,
-      text: `finished an errand: ${this.text(e).replace(/ \(.*\)$/, "")}`,
+      text: `finished an errand: ${this.text(e, true)}`,
     });
     return news;
   }
@@ -543,7 +556,7 @@ export class Village {
       points: Math.floor(this.points * 10) / 10,
       next: this.nextAt,
       errands: this.errands.map((e) =>
-        `#${e.id} ${this.text(e).replace(/ \(.*\)$/, "")}${e.taker ? ` · ${e.taker}` : ""}`
+        `#${e.id} ${this.text(e, true)}${e.taker ? ` · ${e.taker}` : ""}`
       ),
       needs: this.sim.agents.map((a) => [a.id, a.fed, a.rested]),
     };

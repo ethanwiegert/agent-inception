@@ -195,7 +195,7 @@ export const VILLAGE_HANDLERS: Record<string, Handler> = {
     }
     if (action === "list") {
       const lines = v.errands.map((e) => `  ${v.line(e, agent)}`);
-      return `Errands on the board (the village is ${v.levelText()}):\n` +
+      return `Errands on the board. The village is ${v.levelText()}.\n` +
         (lines.length ? lines.join("\n") : "  none right now; new ones are posted every hour.") +
         '\nTake one with errands action "take" and its id.';
     }

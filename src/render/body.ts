@@ -215,7 +215,7 @@ export function buildBodies(
     const asleep = a.anim === Anim.Sleep;
     if (asleep) {
       // Feet toward the yaw, head back: centered on where the sim lays them (a bed's mattress).
-      translate(root, 0, 0.12, 0.85);
+      translate(root, 0, 0.12, 0.95);
       rotateX(root, -Math.PI / 2);
     }
 

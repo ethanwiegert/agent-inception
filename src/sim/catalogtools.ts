@@ -114,7 +114,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "in its Material, at least 1).\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
       `when: {"event": "harvested", "what": "wheat"} (events: ${RULE_EVENTS.join(", ")}; ` +
-      'optional "what" matches the block, crop, fish or villager, or words for said), ' +
+      'optional "what" matches the block, crop, fish or villager, words for said, the food ' +
+      'for ate, or "bed" or "ground" for slept), ' +
       '{"every": 60} game minutes (10-1440), or {"daily": 6} (hour). ' +
       'if (optional): {"chance": 0.2}, {"time": [18, 6]}, {"clouds_above": 0.6}, ' +
       '{"clouds_below": 0.3}, {"has": {"item": "wheat", "count": 2}}, ' +

@@ -177,7 +177,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "wait",
-    description: "Rest for a while, e.g. while crops grow. 1-60 real seconds.",
+    description: "Rest for a while, e.g. while crops grow. 1-60 real seconds (at 1× speed a " +
+      "game hour is 25 real seconds, so a 60-second wait is about 2.4 game hours).",
     inputSchema: {
       type: "object",
       properties: { seconds: { type: "number", minimum: 1, maximum: 60 } },
@@ -225,6 +226,12 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
     const handler = HANDLERS[name];
     if (!handler) return done(`Unknown tool "${name}".`, true);
     if (name !== "_whoami") agent.lastActive = sim.tick;
+    if (args !== undefined && args !== null && (typeof args !== "object" || Array.isArray(args))) {
+      return done(
+        `${name}'s arguments are an object of named values, like {"x": 3, "z": 4}.`,
+        true,
+      );
+    }
     // An argument the tool doesn't take is a mistake to point out, not to ignore quietly.
     const known = TOOL_DEFS.find((t) => t.name === name)?.inputSchema.properties;
     const unknown = known && Object.keys(args ?? {}).filter((k) => !(k in known));
@@ -294,7 +301,7 @@ function villageIntro(sim: Sim): string {
   return "Village Life is on. You get hungry and tired: eat food you carry (wheat, berries, " +
     "eggs, milk, fish; bread from an oven fills most) and sleep at night, best in a bed. Under " +
     `${pct(NEEDS.low)} you walk and work slower; nobody ever dies. The village is ` +
-    `${v.levelText()}: errands, harvests and the first build of each Design raise it to a ` +
+    `${v.levelText()}. Errands, harvests and the first build of each Design raise it to a ` +
     "hamlet and then a village, and each level unlocks Parts and Materials (hinges, lamps and " +
     "flames at a hamlet; motors, levers, plates and lantern glass at a village). errands lists " +
     "small goals anyone may take for points and bread. Spectators may switch the world to " +
@@ -310,8 +317,12 @@ function villageText(sim: Sim, agent: Agent): string {
   const open = v.errands.filter((e) => !e.taker).length;
   return `Needs: fed ${pct(agent.fed)}, rested ${pct(agent.rested)}${slow}. ` +
     `Village: ${v.levelText()}. Errands: ${open} open` +
-    (mine.length ? `, yours ${mine.map((e) => `#${e.id} (${v.text(e)})`).join(", ")}` : "") +
-    ` (errands; at most ${VILLAGE_LIMITS.held} each).`;
+    (mine.length ? `, yours ${mine.map((e) => `#${e.id} (${v.text(e, true)})`).join(", ")}` : "") +
+    ` (errands; at most ${VILLAGE_LIMITS.held} each).` +
+    (v.bountyLeft() < VILLAGE_LIMITS.bounty
+      ? ` Villagers' Rules have ${v.bountyLeft()} of ${VILLAGE_LIMITS.bounty} things left to ` +
+        "give today."
+      : "");
 }
 
 const HANDLERS: Record<string, Handler> = {
@@ -606,7 +617,8 @@ function plantable(
   wanted: unknown,
 ): { seed: string; design: Entry; grow: number } {
   const c = sim.catalog;
-  const want = String(wanted ?? "wheat seeds").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(wanted ?? "wheat seeds").trim().toLowerCase();
+  const want = c.byName(raw) ? raw : raw.replace(/_/g, " ");
   const options: { seed: string; design: Entry; rel: RelationContent }[] = [];
   for (const [item, n] of Object.entries(agent.inventory)) {
     const e = n > 0 ? c.byName(item) : undefined;
@@ -888,6 +900,24 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       if (i > -d && i < d) visit(ax - d, az + i, d), visit(ax + d, az + i, d);
     }
   }
+  // Animals with something to collect (wool for a bed, milk, eggs) out of view: the nearest.
+  SPECIES.forEach((def, species) => {
+    if (!def.productEvery) return;
+    let best: (typeof sim.animals)[number] | null = null, bestD = Infinity;
+    for (const a of sim.animals) {
+      if (a.species !== species) continue;
+      const d = Math.hypot(a.x - agent.x, a.z - agent.z);
+      if (d < bestD) best = a, bestD = d;
+    }
+    if (!best || bestD <= r * 1.5 || bestD > 40) return;
+    const product = sim.catalog.byName(def.name);
+    const gives = product ? sim.drops(product)[0]?.[0] : undefined;
+    beyond.push(
+      `a ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
+        Math.floor(best.z)
+      } (${away(Math.round(bestD))}, wandering)`,
+    );
+  });
   if (beyond.length) lines.push("", `Nearest within 40 tiles: ${beyond.join(", ")}.`);
   if (ripe || growing) {
     const soon = growing ? `; next ripens in ~${gameDuration(soonest)}` : "";

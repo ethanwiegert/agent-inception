@@ -85,8 +85,6 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     if (times < 1 || times > MAX_TIMES) throw new Error(`times is 1-${MAX_TIMES}.`);
     const recipe = pickRecipe(sim, agent, args.item, args.from);
     const product = sim.catalog.byName(recipe.output)!;
-    const locked = sim.village.lockedText(product);
-    if (locked) throw new Error(locked);
     // A workbench: bread is baked at an oven. Craft walks over to the nearest one.
     const benches = sim.catalog.links(product.id, "needs").map(({ entry }) => entry);
     const bench = benches
@@ -400,7 +398,8 @@ interface Recipe {
  */
 function pickRecipe(sim: Sim, agent: Agent, item: unknown, from: unknown): Recipe {
   const c = sim.catalog;
-  const want = String(item ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(item ?? "").trim().toLowerCase();
+  const want = c.byName(raw) ? raw : raw.replace(/_/g, " ");
   if (!want) throw new Error('Say what to craft, e.g. item: "planks".');
   const e = c.byName(want);
   const craftable = craftableNow(sim, agent);
@@ -412,6 +411,8 @@ function pickRecipe(sim: Sim, agent: Agent, item: unknown, from: unknown): Recip
   }
   const output = c.current(e);
   if (!output) throw new Error(`"${e.name}" is retired, so nobody crafts it now.${hint}`);
+  const locked = sim.village.lockedText(output);
+  if (locked) throw new Error(locked);
   const recipes = recipesFor(sim, e);
   if (!recipes.length) {
     throw new Error(
