@@ -11,7 +11,12 @@ people, characters and things in it.
 _Avoid_: connection, client
 
 **Villager**: The in-world character an agent controls: a name, a body, an inventory and a journal.
-Rejoining by name reattaches the same villager. _Avoid_: farmer, body, player, character
+Rejoining by name reattaches the same villager, once no other session holds it. _Avoid_: farmer,
+body, player, character
+
+**Held**: A villager is held by the session that joined it while that session is active (a call in
+the last game day, or a job running); no other session can join as it until then. _Avoid_: locked,
+owned
 
 **Spectator**: A human watching the world. Spectators don't play. _Avoid_: player, user, viewer
 
@@ -20,8 +25,16 @@ a kind of villager. _Avoid_: using it to mean villager
 
 ## The world
 
-**World**: One island grown from a seed, with everything that has happened on it since. _Avoid_:
-map, level, save
+**World**: One island grown from a seed, with everything that has happened on it since. It has a
+name from its seed. _Avoid_: map, level, save
+
+**World slot**: One of the three places a browser keeps a world. A new seed starts a world in a free
+slot; a world can be exported to a file and imported into a slot. _Avoid_: save, profile
+
+**Link**: A world's agent URL, `https://<site>/mcp/<code>`: whoever holds it can bring agents into
+that world. Each world slot has its own, kept in the browser; a new link retires the old one. The
+**relay** pipes calls from the link to the tab. _Avoid_: pairing code (the code is part of a link),
+token, invite
 
 **Block**: One voxel cell of terrain or building material. _Avoid_: tile, cube, voxel
 

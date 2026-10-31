@@ -31,13 +31,20 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
   real, the milliseconds are CPU emulation (`gpuMeasured: false`), good only for before/after.
 - `deno task camshot out.png "query" '{"distance":60,"pitch":0.2,"yaw":2.1,"dx":-60,"dz":30}'` —
   like `shot`, but poses the camera (offset from world center) and prints GPU errors
-- `deno task build` — minified `dist/main.js` + `dist/worker.js`
-- `deno task bridge` — standalone MCP bridge on :7777 (for a hosted game; not used in dev)
+- `deno task build` — minified `dist/main.js` + `dist/worker.js` with `web/` copied in: the whole
+  static site
+- `npx wrangler deploy` (after `build`) — deploy the site and relay to Cloudflare (`wrangler.jsonc`,
+  ADR 0006); `npx wrangler dev` runs it locally on workerd. wrangler is a dev tool run with npx,
+  never a dependency of the repo
+- `deno task bridge` — standalone MCP bridge on :7777 (the relay's rooms on Deno; not used in dev)
 
-URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
-`sandbox` (1 switches the world to Sandbox, 0 back to Village Life; saved with the world), `time`
-(0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`, `storybook`),
-`bridge` (WebSocket URL override), `debug` (comma list of passes to skip for profiling:
+URL params: `seed` (a seed that isn't the open world's starts a NEW world in a free world slot; with
+all three full it says so and opens the current one), `slot` (1-3: open that world slot), `relay` (1
+on localhost: pair through `/mcp/<code>` like the hosted site instead of the bridge's `/mcp`),
+`scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate), `sandbox` (1
+switches the world to Sandbox, 0 back to Village Life; saved with the world), `time` (0-1, 0.5 =
+noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`, `storybook`), `bridge`
+(WebSocket URL override), `debug` (comma list of passes to skip for profiling:
 `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas; frames
 render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
 
@@ -45,11 +52,17 @@ render only when `__game.capture()` asks; for software WebGPU, which can't back 
 
 ```
 src/main.ts         page entry: WebGPU init, frame loop, tool routing, offscreen screenshot/capture
-                    (name tags burnt in), session → villager cache
-src/worker.ts       sim worker: 20 Hz loop, streams ticks to the page, IndexedDB save/load
-src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation, tool calls
-src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect; a tab another tab replaced waits to be
-                    looked at again)
+                    (name tags burnt in), session → villager cache, the link (per-slot secret),
+                    world slot actions, adaptive render scale
+src/worker.ts       sim worker: 20 Hz loop, streams ticks to the page, IndexedDB world slots (3, with
+                    summaries), export/import of gzipped world files
+src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation, tool calls, slot
+                    requests
+src/agentlink.ts    page ↔ relay WebSocket: hello with the tools and the slot's secret, framed
+                    messages, auto-reconnect (a tab another tab replaced waits to be looked at
+                    again), renew
+src/connect.ts      the landing/connect card (first visit, and the panel's "connect an agent")
+src/prefs.ts        guarded localStorage (active slot, link secrets, welcomed)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, weather, sound, Notice Board, agents
 src/audio.ts        WebAudio: synthesized positional sounds and ambience, web/audio/manifest.json
@@ -57,6 +70,7 @@ src/audio.ts        WebAudio: synthesized positional sounds and ambience, web/au
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
                     shared by handlers), blocks.ts (block ids for the Catalog's Materials, patterns),
+                    save.ts (SAVE_VERSION, migrations, file validation, world names),
                     catalog.ts (append-only Catalog: entries, content schemas, Proposals,
                     rigOf: a Design's pieces and joints),
                     nature.ts (nature's entries as Catalog data: every block, item, plant, the
@@ -101,8 +115,16 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     sky.ts, post.ts (PBR Neutral tonemap, grading, sharpening), look.ts (presets,
                     sun/moon, weather), lighttex.ts (the light field as a 3D texture),
                     particles.ts (flames, smoke, lamp halos, signal sparks)
-tools/              dev.ts, bridge.ts (MCP server), serve.ts, browser.ts (CDP driver), shot.ts
+relay/              core.ts (the relay: a Room per world link pipes MCP over HTTP to the tab's
+                    socket; stateless sessions, pairing codes from secrets, framing), worker.ts
+                    (Cloudflare Worker + Durable Object running it; the site's assets)
+tools/              dev.ts, bridge.ts (the relay's rooms on Deno: /mcp, /bridge, /mcp/<code>,
+                    /tab/<code>), build.ts, serve.ts, browser.ts (CDP driver), shot.ts
 ```
+
+Saves: `Sim.save` writes `SAVE_VERSION` (`sim/save.ts`). Changing `SaveData` means bumping it and
+adding a migration from the old version, with a test; a save newer than the code is never
+overwritten.
 
 Uniform layout lives in `render/frame.ts`: the `F` offsets and the WGSL `Frame` struct must change
 together. Lit passes bind group 0: frame uniforms, shadow map and sampler, and the light field (3D
@@ -114,8 +136,8 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is next. The
-hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is in progress.
+The hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report
 in `docs/playtests/`, fixes, perf, screenshots).
@@ -159,13 +181,14 @@ in `docs/playtests/`, fixes, perf, screenshots).
 - Typed arrays crossing `postMessage` are typed `Float32Array<ArrayBuffer>` in `protocol.ts`.
 - `deno fmt` reflows code and markdown; match formatted text when editing by exact string.
 - Don't `pkill -f` with a pattern that also matches your own shell command.
-- The bridge reads `TOOL_DEFS` when the dev server starts: after adding or changing a tool's schema,
-  restart `deno task dev` (the game bundle rebuilds on its own).
+- The tab sends its tool list to the bridge or relay when it connects, so a changed tool schema
+  reaches agents after a page reload (MCP clients list tools when they connect, so reconnect them
+  too). Changes to `relay/` or `tools/` need a restart of `deno task dev`.
 
 ## Playing
 
 Agents play through MCP (`.mcp.json` registers `agent-inception`). With `deno task dev` running and
 the game open in a browser, spawn the `farmer` subagent (a cost-effective agent;
 `.claude/agents/farmer.md`), or delegate a task to a cost-effective agent with a name and a play
-brief. Agents `join` by name (rejoining reattaches the body), and the world persists in the
-browser's IndexedDB.
+brief. Agents `join` by name (rejoining reattaches the body once no other session holds it), and the
+world persists in the browser's IndexedDB (world slots).
