@@ -13,8 +13,11 @@ import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts"
 import { FIRE_STRIDE, SLOTS, type SlotsReply } from "./sim/protocol.ts";
 import { mcpTools, TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
+import { createSupportLinks } from "./support.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
+// The GitHub and Support links go up first, so even a browser without WebGPU gets them.
+if (!new URLSearchParams(location.search).has("headless")) createSupportLinks();
 
 function fatal(message: string): never {
   const el = document.getElementById("fatal")!;
