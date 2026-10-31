@@ -4,12 +4,14 @@ import {
   type DesignContent,
   type Entry,
   type MaterialContent,
+  NATURE,
   type Vec3,
 } from "./catalog.ts";
 import { daylight } from "./light.ts";
 import { GROWN, habitatRefusal, plantInfo } from "./props.ts";
 import { hash2 } from "./rng.ts";
 import type { Agent, Sim } from "./sim.ts";
+import { VILLAGE_LIMITS } from "./village.ts";
 import { Block, solid } from "./world.ts";
 
 /**
@@ -37,6 +39,8 @@ export const RULE_EVENTS = [
   "ignited",
   "burned",
   "signal",
+  "ate",
+  "slept",
 ] as const;
 export type RuleEvent = (typeof RULE_EVENTS)[number];
 
@@ -641,6 +645,22 @@ export class Rules {
   /** Do one effect; returns why it couldn't happen, or nothing. */
   private apply(fx: Effect, ctx: RuleCtx, rule: Entry): string | void {
     const sim = this.sim, agent = ctx.agent, tag = `✦ "${rule.name}"`;
+    // In Village Life, what villagers' Rules make out of nothing comes from a shared daily bounty.
+    const bounty = rule.author !== NATURE && sim.village.life;
+    const spent = "the village's bounty for villagers' Rules is used up today " +
+      `(${VILLAGE_LIMITS.bounty} things a game day: gifts, blocks, spread and grown plants)`;
+    if (bounty) {
+      const n = "give" in fx
+        ? fx.give.count
+        : "spread" in fx
+        ? fx.spread.count
+        : "set_block" in fx && fx.set_block.to !== "air"
+        ? 1
+        : "grow" in fx
+        ? 0
+        : -1;
+      if (n >= 0 && !sim.village.spend(n)) return spent;
+    }
     if ("say" in fx) {
       sim.events.push({ type: "rule", agent: agent?.id ?? 0, rule: rule.name, text: fx.say });
       agent?.notes.push(`${tag}: ${fx.say}`);
@@ -658,6 +678,7 @@ export class Rules {
         fx.grow.hours,
         ctx === NO_PLACE ? null : ctx,
         fx.grow.light_above,
+        bounty,
       );
     }
     if ("impulse" in fx) return this.impulse(fx.impulse, ctx === NO_PLACE ? null : ctx);
@@ -843,7 +864,13 @@ export class Rules {
    * near the event, or everywhere for a timer; only where light is above `lit`, if given.
    * Returns why nothing grew.
    */
-  private grow(what: string, hours: number, near: RuleCtx | null, lit?: number): string | void {
+  private grow(
+    what: string,
+    hours: number,
+    near: RuleCtx | null,
+    lit?: number,
+    bounty = false,
+  ): string | void {
     const sim = this.sim, c = sim.catalog, size = sim.world.sizeX, w = sim.world;
     if (lit !== undefined) sim.updateLight();
     const t = sim.timeOfDay(), clouds = sim.clouds();
@@ -877,6 +904,8 @@ export class Rules {
       sim.props.set(key % size, Math.floor(key / size), { ...p, planted: p.planted - ticks });
       n++;
     }
+    // Each plant-hour grown comes out of the day's bounty.
+    if (bounty) sim.village.spend(Math.ceil(hours * n));
     if (!n) {
       return `no growing ${design.name} ${near ? "nearby" : "anywhere"}${
         lit !== undefined ? " in the light" : ""

@@ -29,6 +29,7 @@ const err = (r: CallResult, includes: string) => {
 
 function world() {
   const sim = new Sim(7);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   run(sim, "a", "join", { name: "Fern" });
   return { sim, fern: sim.agents[0] };
 }
@@ -384,6 +385,7 @@ Deno.test("set_block acts near the event and refuses unsafe cells", () => {
 
 Deno.test("timer rules run on the clock and can change the weather", () => {
   const sim = new Sim(3);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   addRule(sim, "rain dance", {
     when: { every: 60 },
     do: [{ weather: { clouds: 0.95, hours: 2 } }],
@@ -657,6 +659,7 @@ Deno.test("the Catalog, proposals and rule stats survive save and load", () => {
 
 Deno.test("join and look mention the Catalog", () => {
   const sim = new Sim(7);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   assert(ok(run(sim, "a", "join", { name: "Fern" })).includes("Catalog"));
   assert(ok(run(sim, "a", "look")).includes("Catalog:"));
 });

@@ -14,6 +14,7 @@ import { Catalog } from "./sim/catalog.ts";
 import { Objects } from "./sim/objects.ts";
 import { Props } from "./sim/props.ts";
 import type { SimEvent } from "./sim/sim.ts";
+import type { VillageStatus } from "./sim/village.ts";
 import { World } from "./sim/world.ts";
 
 export interface AgentView {
@@ -69,6 +70,8 @@ export class SimClient {
   tick = 0;
   day = 1;
   timeOfDay = 0;
+  /** Village Life as the worker last told it. */
+  village: VillageStatus | null = null;
   speed = 1;
   clouds = 0.35;
   private registry = new BlockRegistry();
@@ -281,6 +284,7 @@ export class SimClient {
     this.speed = msg.speed;
     this.clouds = msg.clouds;
     if (msg.profiles) this.profiles = msg.profiles;
+    if (msg.village) this.village = msg.village;
     if (msg.catalog) {
       const d = msg.catalog;
       this.catalog.mirror(d.entries, d.status ?? [], d.proposals);

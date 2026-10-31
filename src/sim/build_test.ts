@@ -28,6 +28,7 @@ const err = (r: CallResult, includes: string) => {
 /** A villager next to a flat, clear patch of meadow, `w` × `d` columns, east of them. */
 function site(w = 4, d = 4) {
   const sim = new Sim(1337);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   ok(run(sim, "a", "join", { name: "Fern" }));
   const fern = sim.agents[0];
   const world = sim.world;

@@ -171,6 +171,21 @@ export function buildBodies(
         armL = -0.3;
         lean = 0.1;
         break;
+      case Anim.Eat: {
+        // Hand to mouth, a bite, and down a little.
+        const bite = Math.max(0, Math.sin(t * 5));
+        armR = -2.1 + bite * 0.35;
+        armL = -0.5;
+        headPitch = -0.12 + bite * 0.1;
+        lean = 0.05;
+        break;
+      }
+      case Anim.Sleep:
+        // Lying on the back, arms by the sides, breathing slowly.
+        armL = armR = 0.05;
+        bob = Math.sin(t * 1.1) * 0.01;
+        headYaw = 0.25;
+        break;
       default: {
         const breathe = Math.sin(t * 1.8);
         armL = 0.04 + breathe * 0.03;
@@ -197,6 +212,12 @@ export function buildBodies(
     translate(root, a.x, a.y + bob - crouch, a.z);
     rotateY(root, a.yaw);
     if (fall) rotateX(root, -fall);
+    const asleep = a.anim === Anim.Sleep;
+    if (asleep) {
+      // Feet toward the yaw, head back: centered on where the sim lays them (a bed's mattress).
+      translate(root, 0, 0.12, 0.85);
+      rotateX(root, -Math.PI / 2);
+    }
 
     // Legs pivot at the hips; crouching bends them forward a little.
     for (const [side, role] of [[-1, "left leg"], [1, "right leg"]] as const) {
@@ -234,7 +255,7 @@ export function buildBodies(
     rotateX(head, headPitch);
     add(pieces.head.id, head);
     if (pieces.eyes) {
-      const blink = (t % 4.3) < 0.12 ? 0.15 : 1;
+      const blink = asleep || (t % 4.3) < 0.12 ? 0.15 : 1;
       part.set(head);
       add(pieces.eyes.id, scale(joint(part, "eyes", "head"), 1, blink, 1));
     }
