@@ -4,7 +4,7 @@
  * named by the pairing code, which runs a relay Room (relay/core.ts). The tab's socket hibernates
  * while the world is quiet, so idle worlds cost nothing. Deploy with `npx wrangler deploy`.
  */
-import { CODE_RE, Room, type Socket, type Tool } from "./core.ts";
+import { CODE_RE, originAllowed, POLICY, Room, type Socket, type Tool } from "./core.ts";
 
 // The few Cloudflare runtime types this file uses (no npm types package: zero dependencies).
 interface DurableObjectState {
@@ -28,6 +28,9 @@ type Attached = WebSocket & {
   deserializeAttachment(): unknown;
 };
 declare const WebSocketPair: { new (): { 0: WebSocket; 1: WebSocket } };
+
+/** Sockets a room keeps open before they've said hello. */
+const MAX_WAITING = 4;
 
 const CLOSED_TEXT = "No game tab is open for this link. Ask the human to open the game in the " +
   "browser that made it (a background tab is fine). If they made a new link, this one is retired.";
@@ -79,6 +82,16 @@ export class RoomObject {
     if (kind === "mcp") return room.handleMcp(req);
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected a WebSocket", { status: 426 });
+    }
+    if (!originAllowed(req.headers.get("origin"), [url.origin])) {
+      return new Response("forbidden origin", { status: 403 });
+    }
+    // Sockets that haven't proved they're the tab can't pile up: past a few, the newest stays.
+    const waiting = this.state.getWebSockets().filter((ws) => !tag(ws)?.tab);
+    for (const ws of waiting.slice(0, Math.max(0, waiting.length - MAX_WAITING + 1))) {
+      try {
+        ws.close(POLICY, "too many sockets waiting");
+      } catch { /* already closed */ }
     }
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1]);

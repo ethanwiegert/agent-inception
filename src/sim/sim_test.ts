@@ -3,7 +3,7 @@ import { type CallResult, gameHours, Sim, TICKS_PER_DAY } from "./sim.ts";
 import { AnimalAnim, SPECIES } from "./animals.ts";
 import { FISH, waterHabitat } from "./fish.ts";
 import { GROWN } from "./props.ts";
-import { callTool } from "./tools.ts";
+import { callTool, MAX_VILLAGERS } from "./tools.ts";
 import { Block } from "./world.ts";
 
 let nextCall = 1;
@@ -248,4 +248,15 @@ Deno.test("fish schools keep to their water, and casting near one catches fish",
   assertEquals(spot.f.count, before - wren.inventory[name]);
   assert(run(sim, "s", "look").text.includes("Fish in view") || spot.f.count === 0);
   assert(run(sim, "s", "fish", { x: spot.x, z: spot.z }).isError, "not water");
+});
+
+Deno.test("a world holds a capped number of villagers, so joins can't swell a save past loading", () => {
+  const sim = new Sim(3);
+  for (let i = 0; i < MAX_VILLAGERS; i++) {
+    callTool(sim, `s${i}`, "join", { name: `V${i}` }, 900_000 + i);
+  }
+  assertEquals(sim.agents.length, MAX_VILLAGERS);
+  const r = run(sim, "late", "join", { name: "Latecomer" });
+  assert(r.isError && r.text.includes("villagers"), r.text);
+  assertEquals(sim.agents.length, MAX_VILLAGERS);
 });

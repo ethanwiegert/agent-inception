@@ -329,6 +329,8 @@ export function cleanText(v: unknown, what: string, max: number): string {
 export function cleanName(v: unknown): string {
   const s = typeof v === "string" ? v.trim().replace(/\s+/g, " ") : "";
   if (/^\d+$/.test(s)) throw new Error("A name needs a letter; plain numbers are ids.");
+  // Names key plain objects (inventories, look-ups): ones every object already has are taken.
+  if (s in Object.prototype) throw new Error(`"${s}" is a reserved word; pick another name.`);
   if (!s || s.length > LIMITS.name || !NAME_RE.test(s)) {
     throw new Error(
       `A name is 1-${LIMITS.name} characters: letters, digits, spaces, ' _ -, starting with a ` +

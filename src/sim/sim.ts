@@ -408,7 +408,7 @@ export class Sim {
 
   /** A new villager's things: seeds and a sapling of each tree, as the Catalog now names them. */
   private starterKit(): Record<string, number> {
-    const kit: Record<string, number> = {};
+    const kit = inventoryOf({});
     const kitList: [string, number][] = [
       ["wheat seeds", 16],
       ["oak sapling", 1],
@@ -822,6 +822,7 @@ export class Sim {
       const agent = structuredClone(a);
       sim.agents.push({
         ...agent,
+        inventory: inventoryOf(agent.inventory),
         body: agent.body ?? null,
         lastActive: agent.lastActive ?? 0,
         authored: agent.authored ?? [],
@@ -841,4 +842,12 @@ export class Sim {
     sim.events = [];
     return sim;
   }
+}
+
+/**
+ * An inventory keyed by item name, with no prototype: a Catalog name like "constructor" in an old
+ * save must read as none held, not as an inherited function.
+ */
+export function inventoryOf(items: Record<string, number>): Record<string, number> {
+  return Object.assign(Object.create(null), items);
 }

@@ -742,3 +742,24 @@ Deno.test("look marks other villagers with digits, not letters", () => {
   )!;
   assertEquals(row[5 + Math.floor(w.x) - (Math.floor(f.x) - 12)], "1");
 });
+
+Deno.test("names that are built-in object keys can't be Catalog entries or slip past inventories", () => {
+  const { sim, fern } = world();
+  const material = {
+    color: "#6b8e4e",
+    pattern: "stone",
+    density: 2.4,
+    hardness: 5,
+    burns: false,
+    glows: 0,
+  };
+  // An inventory is a plain object: "constructor" would read as something Fern has.
+  for (const name of ["constructor", "toString", "hasOwnProperty", "valueOf"]) {
+    err(run(sim, "a", "catalog_add", { kind: "material", name, content: material }), "reserved");
+  }
+  // Inventories have no inherited keys, even for a save from before names were checked.
+  assertEquals(fern.inventory["constructor"], undefined);
+  assertEquals(Sim.load(sim.save(0)).agents[0].inventory["toString"], undefined);
+  // And a tool name that's an inherited key isn't a tool.
+  err(run(sim, "a", "constructor"), "Unknown tool");
+});

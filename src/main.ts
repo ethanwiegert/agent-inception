@@ -249,6 +249,21 @@ async function captureView(
   /** Render time in ms (wind, waves, drifting clouds); now by default. Fix it to compare shots. */
   at = performance.now(),
 ): Promise<string> {
+  // One capture at a time: a crowd of agents asking at once queues instead of rendering (and
+  // holding offscreen targets) side by side, which matters most on a software adapter.
+  const turn = captureTurn.then(() => capturePose(pose, width, height, type, at));
+  captureTurn = turn.then(() => {}, () => {});
+  return await turn;
+}
+let captureTurn = Promise.resolve();
+
+async function capturePose(
+  pose: Pose | null,
+  width: number,
+  height: number,
+  type: "image/jpeg" | "image/png",
+  at: number,
+): Promise<string> {
   if (!camera || !renderer) throw new Error("Still loading.");
   const cam = camera;
   const viewProj = new Float32Array(16);
@@ -302,7 +317,12 @@ async function encodeShot(
 const wsScheme = location.protocol === "https:" ? "wss" : "ws";
 /** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
 const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-const paired = !params.has("bridge") && (!devHost || params.get("relay") === "1");
+/**
+ * `?bridge=` points the tab at another socket, which then drives this world: honoured only on the
+ * dev server, so a crafted link to a hosted site can't hand someone's world to a stranger.
+ */
+const bridgeUrl = devHost ? params.get("bridge") ?? undefined : undefined;
+const paired = !bridgeUrl && (!devHost || params.get("relay") === "1");
 let ephemeral = false;
 
 /** This world slot's secret, made the first time the slot is linked and kept in this browser. */
@@ -320,7 +340,7 @@ async function startLink() {
   link = await connectLink({
     socketBase: `${wsScheme}://${location.host}`,
     httpBase: location.origin,
-    socketUrl: params.get("bridge") ?? undefined,
+    socketUrl: bridgeUrl,
     secret: paired ? linkSecret(client.slot) : null,
     tools: TOOL_DEFS.map(({ name, description, inputSchema }) => ({
       name,

@@ -234,7 +234,7 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
       );
     }
     if (!agent) return done('Call "join" with your name first.', true);
-    const handler = HANDLERS[name];
+    const handler = Object.hasOwn(HANDLERS, name) ? HANDLERS[name] : undefined;
     if (!handler) return done(`Unknown tool "${name}".`, true);
     if (name !== "_whoami") agent.lastActive = sim.tick;
     if (args !== undefined && args !== null && (typeof args !== "object" || Array.isArray(args))) {
@@ -262,6 +262,9 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
   }
 }
 
+/** Villagers one world holds: plenty for a crowd, and far under what a save may carry. */
+export const MAX_VILLAGERS = 100;
+
 function join(sim: Sim, session: string, args: Args): string {
   const name = String(args.name ?? "").trim();
   if (!/^[\w -]{1,20}$/.test(name)) {
@@ -274,6 +277,11 @@ function join(sim: Sim, session: string, args: Args): string {
     if (held) throw new Error(held);
     // Free: whoever had it before lets go, so only this session drives it now.
     for (const [s, a] of sim.sessions) if (a === agent) sim.sessions.delete(s);
+  }
+  if (!agent && sim.agents.length >= MAX_VILLAGERS) {
+    throw new Error(
+      `This world has its ${MAX_VILLAGERS} villagers. Rejoin as one of them once it's free.`,
+    );
   }
   agent ??= sim.addAgent(name);
   sim.sessions.set(session, agent);
