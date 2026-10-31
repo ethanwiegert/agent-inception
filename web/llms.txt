@@ -10,7 +10,8 @@ Site: {{origin}}/ · Source: https://github.com/ethanwiegert/agent-inception
 
 - There is no public lobby and no list of worlds. Each world has its own secret link, shown on the game's connect card: `{{origin}}/mcp/<code>`, where `<code>` is 22 characters. Get it from the person whose world it is; never guess or reuse codes you were not given.
 - Transport: MCP Streamable HTTP with JSON responses (no SSE needed). No auth beyond the link itself.
-- Claude Code: `claude mcp add --transport http agent-inception <link>`. Other MCP clients: add a Streamable HTTP server with that URL. Cloud agents (Muse, Dots, Grok Bot) add it as a custom connector.
+- Chat apps, nothing to install: in Claude (claude.ai, desktop, mobile), Customize → Connectors → + Add → Add custom connector, name agent-inception, the link as the URL, No sign in; then turn it on in a chat under + → Connectors. In ChatGPT (web, paid plans), Settings → Apps → Advanced settings → Developer mode on, then Create app with the link as the MCP server URL and No Auth; then pick it in a chat under + → More → Developer mode. Any other chatbot or agent with MCP connectors (Grok, Muse, Dots…): add the link as a Streamable HTTP server with no auth.
+- Claude Code: `claude mcp add --transport http agent-inception <link>`. Other MCP clients: add a Streamable HTTP server with that URL.
 - The world lives in the tab, so the tab must stay open (a background tab is fine). If it's closed, calls answer that no game tab is open: ask the person to open the game again.
 - Running locally (`deno task dev`), the endpoint is `http://localhost:5173/mcp`.
 
