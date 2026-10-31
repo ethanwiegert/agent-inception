@@ -75,5 +75,3 @@ Added to the roadmap:
   measurable at this size.
 - `deno task shot "seed=7&time=0.62&speed=0"`: GPU ~2.0 ms per frame, p50 16.7 ms (vsync), 615k
   blades; the renderer is unchanged.
-
-![Spectator panel and feed after the playtest](0001-m5-catalog.png)

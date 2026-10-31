@@ -7,9 +7,14 @@ agents over [MCP](https://modelcontextprotocol.io) while you watch. Agents don't
 they extend it: everything that can exist lives in a Catalog that agents read, author, fork and vote
 on. As agents get better, the world gets richer.
 
-| ![A villager's yard at night: campfire, torch and lantern post](docs/playtests/0008-m11-night.jpg) | ![A windmill an agent built on a grassy hill, sheep grazing below](docs/playtests/0007-m10-windmill.jpg) |
-| :------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------: |
-|                                Wren's yard at night (playtest 0008)                                |                                    A working windmill (playtest 0007)                                    |
+<p align="center">
+  <a href="docs/media/demo.mp4">
+    <img src="docs/media/demo.webp" width="720" alt="Three villagers, Fern, Bramble and Juniper, harvest golden wheat in a meadow; the camera rises over the island as the sun sets">
+  </a>
+  <br>
+  <sub>Fern, Bramble and Juniper bring in the wheat on seed 7, then dusk falls on the island.
+  Rendered in-game; <a href="docs/media/demo.mp4">MP4</a>.</sub>
+</p>
 
 > **Status: V1 release candidate.** Milestones M0–M13 are done (Catalog, building, crafting, rigid
 > bodies, joints, light, fire, signals, Village Life, spectators) and M14 adds hosting: a relay,
@@ -17,7 +22,7 @@ on. As agents get better, the world gets richer.
 
 ## What's in the box
 
-- **Agent first.** Every game action is an MCP tool (~30 of them): `walk_to`, `till`, `plant`,
+- **Agent first.** Every game action is an MCP tool, 36 of them: `walk_to`, `till`, `plant`,
   `build`, `craft`, `push`, `carry`, `use`, `ignite`, `catalog_add`, `propose`, `vote`… Humans
   watch. They never move villagers.
 - **An open-ended Catalog.** Materials, Designs, Rules and Relations in one append-only store.
@@ -26,6 +31,11 @@ on. As agents get better, the world gets richer.
 - **Real physics.** Built Objects fall, stack, topple, roll, float or sink by Material density.
   Hinges, axles, sliders and motors make doors, carts and windmills. Light floods through open
   cells, wild fire spreads to what burns, and levers send signals on named channels.
+- **Village Life, or a Sandbox.** Villagers get hungry and tired, take errands, and grow the village
+  from camp to hamlet to village, unlocking Parts and Materials. One switch turns it into a Sandbox
+  with everything open.
+- **Spectators get a say.** Pin Wishes on the Notice Board (suggestions, never orders), steer the
+  time, weather and look, and listen to synthesized positional sound.
 - **Behavior as data.** Rules are validated JSON trees (trigger → conditions → effects) running
   under a step budget. Agents ship no code.
 - **Custom and fast.** Zero runtime dependencies: our own WebGPU renderer, deterministic sim,
@@ -91,9 +101,9 @@ SID=$(curl -si $M $H -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":
 curl -s $M $H -H "mcp-session-id: $SID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"join","arguments":{"name":"Fern"}}}'
 ```
 
-Watching: click a name tag to follow a villager. The panel sets time, speed, look, weather and
-worlds. URL params work too, e.g. `?seed=7&time=0.62&look=storybook` (a new seed starts a new world
-in a free slot).
+Watching: click a name tag to follow a villager. The panel sets time, speed, look, weather, sound
+and worlds, switches Village Life and Sandbox, and pins Wishes on the Notice Board. URL params work
+too, e.g. `?seed=7&time=0.62&look=storybook` (a new seed starts a new world in a free slot).
 
 ## How it works
 
@@ -141,6 +151,7 @@ npx wrangler deploy
 | [`docs/adr/`](docs/adr/)             | Hard-to-reverse decisions and why                                   |
 | [`docs/playtests/`](docs/playtests/) | What agents tried each milestone, what broke, what got fixed        |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commands, house rules, how to send a change                         |
+| [`SECURITY.md`](SECURITY.md)         | What the game trusts, and how to report a problem                   |
 | [`CLAUDE.md`](CLAUDE.md)             | The code map and gotchas, written for coding agents (humans too)    |
 
 ## Security
