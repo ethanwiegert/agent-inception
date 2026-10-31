@@ -28,6 +28,7 @@ import { Signals } from "./signals.ts";
 import { TICK_HZ, TICKS_PER_DAY } from "./time.ts";
 import { Village, type VillageSave } from "./village.ts";
 import { Board, type BoardSave } from "./board.ts";
+import { SAVE_VERSION, worldName } from "./save.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
 
@@ -135,8 +136,11 @@ export interface CallResult {
 
 /** Everything needed to restore a world. Generated terrain is rebuilt from the seed. */
 export interface SaveData {
-  version: 2;
+  /** SAVE_VERSION; older saves are brought forward by `migrateSave` (save.ts) before loading. */
+  version: typeof SAVE_VERSION;
   seed: number;
+  /** The world's name, from its seed at first (save version 3). */
+  name: string;
   tick: number;
   dayOffset: number;
   savedAt: number;
@@ -216,8 +220,11 @@ export class Sim {
   readonly board: Board = new Board(this);
   /** Cloud cover a spectator holds the weather at (it wins over Rules), or null: natural. */
   spectatorClouds: number | null = null;
+  /** What the world is called in its slot and on exported files. */
+  name: string;
 
   constructor(readonly seed: number) {
+    this.name = worldName(seed);
     this.world = generateWorld({ seed });
     this.props = new Props(this.world, seed, this.catalog);
     this.objects = new Objects(this.world, this.catalog);
@@ -741,8 +748,9 @@ export class Sim {
 
   save(savedAt: number): SaveData {
     return {
-      version: 2,
+      version: SAVE_VERSION,
       seed: this.seed,
+      name: this.name,
       tick: this.tick,
       dayOffset: this.dayOffset,
       savedAt,
@@ -769,6 +777,7 @@ export class Sim {
   static load(data: SaveData): Sim {
     const sim = new Sim(data.seed);
     sim.tick = data.tick;
+    sim.name = data.name ?? sim.name;
     sim.weatherOverride = data.weatherOverride ?? null;
     if (data.catalog) {
       sim.catalog = Catalog.load(data.catalog);

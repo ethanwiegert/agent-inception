@@ -15,8 +15,13 @@ import {
   FIRE_STRIDE,
   type FromWorker,
   SCHOOL_STRIDE,
+  type SlotInfo,
+  type SlotOp,
+  SLOTS,
+  type SlotsReply,
   type ToWorker,
 } from "./sim/protocol.ts";
+import { FILE_FORMAT, migrateSave, SaveError } from "./sim/save.ts";
 import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
 import { callTool } from "./sim/tools.ts";
 
@@ -25,6 +30,9 @@ const MAX_CATCH_UP = TICKS_PER_DAY * 3;
 const SAVE_EVERY_MS = 5000;
 
 let sim: Sim | null = null;
+/** The world slot `sim` saves into, and whether saving is off (a save this version can't read). */
+let slot = 0;
+let readOnly = false;
 let speed = 1;
 let lastStep = performance.now();
 let budget = 0;
@@ -56,26 +64,16 @@ scope.onmessage = (e: MessageEvent<ToWorker>) => {
 async function handle(msg: ToWorker) {
   switch (msg.type) {
     case "init": {
-      const saved = await load();
-      // Saves from before the current format start the same island afresh (until M14).
-      if (saved && saved.version !== 2) {
-        sim = new Sim(saved.seed);
-        start(0);
-      } else if (saved && (msg.seed === undefined || msg.seed === saved.seed)) {
-        sim = Sim.load(saved);
-        const away = Math.min(MAX_CATCH_UP, ((Date.now() - saved.savedAt) / 1000) * TICK_HZ);
-        sim.tick += Math.floor(away); // crops grow from the clock, so idle time is just elapsed ticks
-        start(Math.floor(away));
-      } else {
-        sim = new Sim(msg.seed ?? 1337);
-        start(0);
-      }
+      const { notice } = await open(msg.slot, msg.seed);
+      const s = sim!;
+      const away = s.tick ? Math.min(MAX_CATCH_UP, ((Date.now() - savedAt) / 1000) * TICK_HZ) : 0;
+      s.tick += Math.floor(away); // crops grow from the clock, so idle time is just elapsed ticks
+      start(Math.floor(away), notice);
+      if (!readOnly) await persist();
       break;
     }
-    case "reset":
-      sim = new Sim(msg.seed);
-      start(0);
-      await persist();
+    case "slots":
+      post(await slotOp(msg.req, msg));
       break;
     case "call":
       if (!sim) break;
@@ -114,7 +112,7 @@ async function handle(msg: ToWorker) {
   }
 }
 
-function start(caughtUp: number) {
+function start(caughtUp: number, notice?: string) {
   const s = sim!;
   s.pendingEdits = [];
   sentAgentsVersion = sentCropsVersion = sentCropsCatalog = -1;
@@ -132,6 +130,9 @@ function start(caughtUp: number) {
   post({
     type: "ready",
     seed: s.seed,
+    slot,
+    name: s.name,
+    notice,
     world,
     caughtUp,
     props: { generated, diff: s.props.diff() },
@@ -296,31 +297,253 @@ function send() {
 
 // ---------------------------------------------------------------- persistence
 
+const SEED = 1337;
+let savedAt = 0;
+
+/**
+ * Open world slot `want`, or with a seed that isn't its world, a new world in a free slot. A save
+ * this version can't read is left alone: the world runs without saving and the notice says why.
+ */
+async function open(want: number, seed?: number): Promise<{ notice?: string }> {
+  slot = Number.isInteger(want) && want >= 0 && want < SLOTS ? want : 0;
+  readOnly = false;
+  savedAt = Date.now();
+  const raw = await read(slot);
+  if (seed !== undefined && raw && raw.seed !== seed) {
+    const free = await freeSlot();
+    if (free === null) {
+      const r = load(raw);
+      return {
+        notice: `All ${SLOTS} world slots are full, so seed ${seed} didn't start a new world. ` +
+          "Delete one under worlds, then try again." + (r.notice ? " " + r.notice : ""),
+      };
+    }
+    slot = free;
+    sim = new Sim(seed);
+    return {};
+  }
+  if (!raw) {
+    sim = new Sim(seed ?? SEED);
+    return {};
+  }
+  return load(raw);
+}
+
+function load(raw: Record<string, unknown>): { notice?: string } {
+  try {
+    const data = migrateSave(raw);
+    sim = Sim.load(data);
+    savedAt = data.savedAt;
+    return {};
+  } catch (e) {
+    sim = new Sim(Number.isSafeInteger(raw.seed) ? raw.seed as number : SEED);
+    // A save from before versions were kept starts its island afresh, as it always has.
+    if (e instanceof SaveError && e.kind === "older") {
+      return {
+        notice: "This world was saved before saves were kept, so its island starts afresh.",
+      };
+    }
+    // Never overwrite anything else that couldn't be read: a newer version may still open it.
+    readOnly = true;
+    const why = e instanceof SaveError ? e.message : `It couldn't be loaded (${e}).`;
+    return { notice: `World slot ${slot + 1} wasn't opened: ${why} This island won't be saved.` };
+  }
+}
+
 function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("agent-inception", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("saves");
+    // Version 2 (M14): world slots, and a small summary of each for the panel.
+    const req = indexedDB.open("agent-inception", 2);
+    req.onupgradeneeded = (e) => {
+      const d = req.result, tx = req.transaction!;
+      if (e.oldVersion < 1) d.createObjectStore("saves");
+      d.createObjectStore("meta");
+      // The one world from before slots becomes slot 1.
+      const saves = tx.objectStore("saves");
+      const get = saves.get("world");
+      get.onsuccess = () => {
+        if (!get.result) return;
+        saves.put(get.result, key(0));
+        saves.delete("world");
+      };
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function load(): Promise<SaveData | undefined> {
+const key = (n: number) => `slot${n}`;
+
+function request<T>(r: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+async function read(n: number): Promise<Record<string, unknown> | undefined> {
   try {
     const d = await db();
-    return await new Promise((resolve, reject) => {
-      const req = d.transaction("saves").objectStore("saves").get("world");
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    return await request(d.transaction("saves").objectStore("saves").get(key(n)));
   } catch {
     return undefined;
   }
 }
 
-async function persist() {
-  if (!sim) return;
-  const data = sim.save(Date.now());
+async function freeSlot(): Promise<number | null> {
   const d = await db();
-  d.transaction("saves", "readwrite").objectStore("saves").put(data, "world");
+  const keys = await request(d.transaction("saves").objectStore("saves").getAllKeys());
+  for (let n = 0; n < SLOTS; n++) if (!keys.includes(key(n))) return n;
+  return null;
+}
+
+async function write(n: number, data: SaveData) {
+  const d = await db();
+  const tx = d.transaction(["saves", "meta"], "readwrite");
+  tx.objectStore("saves").put(data, key(n));
+  tx.objectStore("meta").put(summary(n, data), key(n));
+  await new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function summary(n: number, data: SaveData): SlotInfo {
+  return {
+    slot: n,
+    name: data.name,
+    seed: data.seed,
+    day: Math.floor((data.tick + data.dayOffset) / TICKS_PER_DAY) + 1,
+    savedAt: data.savedAt,
+    villagers: data.agents.map((a) => a.name),
+  };
+}
+
+async function persist() {
+  if (!sim || readOnly) return;
+  await write(slot, sim.save(Date.now()));
+}
+
+async function list(): Promise<SlotInfo[]> {
+  const d = await db();
+  const tx = d.transaction(["saves", "meta"]);
+  const keys = await request(tx.objectStore("saves").getAllKeys());
+  const out: SlotInfo[] = [];
+  for (let n = 0; n < SLOTS; n++) {
+    if (!keys.includes(key(n))) {
+      out.push({ slot: n, empty: true });
+      continue;
+    }
+    let meta = await request(d.transaction("meta").objectStore("meta").get(key(n))) as
+      | SlotInfo
+      | undefined;
+    if (!meta) {
+      // A slot saved before summaries existed (or one this version can't read).
+      const raw = await read(n);
+      meta = {
+        slot: n,
+        name: typeof raw?.name === "string" ? raw.name : "an older world",
+        seed: Number(raw?.seed ?? 0),
+        day: 0,
+        savedAt: Number(raw?.savedAt ?? 0),
+        villagers: [],
+      };
+    }
+    out.push(meta);
+  }
+  return out;
+}
+
+/** Largest world file accepted, unpacked. A big world is a few MB. */
+const MAX_FILE = 64 << 20;
+
+async function slotOp(req: number, op: SlotOp): Promise<SlotsReply> {
+  const reply = async (extra: Partial<SlotsReply> = {}): Promise<SlotsReply> => ({
+    type: "slots",
+    req,
+    slots: await list(),
+    ...extra,
+  });
+  try {
+    switch (op.op) {
+      case "list":
+        return await reply();
+      case "save":
+        await persist();
+        return await reply();
+      case "delete": {
+        if (op.slot === slot) return await reply({ error: "That's the world you're watching." });
+        const d = await db();
+        const tx = d.transaction(["saves", "meta"], "readwrite");
+        tx.objectStore("saves").delete(key(op.slot));
+        tx.objectStore("meta").delete(key(op.slot));
+        await new Promise((resolve) => (tx.oncomplete = resolve));
+        return await reply();
+      }
+      case "export": {
+        if (op.slot === slot) await persist();
+        const raw = op.slot === slot && sim ? sim.save(Date.now()) : await read(op.slot);
+        if (!raw) return await reply({ error: "That slot is empty." });
+        const text = JSON.stringify({ format: FILE_FORMAT, ...raw });
+        const bytes = await pipe(new TextEncoder().encode(text), new CompressionStream("gzip"));
+        const name = String(raw.name ?? "world").replace(/[^\w -]+/g, "").trim() || "world";
+        const day = Math.floor((Number(raw.tick) + Number(raw.dayOffset)) / TICKS_PER_DAY) + 1;
+        return await reply({ file: { name: `${name} day ${day}.world.gz`, bytes } });
+      }
+      case "import": {
+        const free = await freeSlot();
+        if (free === null) {
+          return await reply({ error: `All ${SLOTS} slots are full. Delete one first.` });
+        }
+        let bytes = new Uint8Array(op.data);
+        if (bytes.length > MAX_FILE) return await reply({ error: "That file is too big." });
+        // gzip starts 1f 8b; plain JSON is taken as it is.
+        if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+          bytes = await pipe(bytes, new DecompressionStream("gzip"), MAX_FILE);
+        }
+        let raw: unknown;
+        try {
+          raw = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          return await reply({ error: "That file isn't a world (not JSON)." });
+        }
+        if ((raw as Record<string, unknown>)?.format !== FILE_FORMAT) {
+          return await reply({ error: "That file isn't an agent-inception world." });
+        }
+        const { format: _f, ...save } = raw as Record<string, unknown>;
+        const data = migrateSave(save);
+        Sim.load(structuredClone(data)); // throws now, not when the slot is opened
+        // Time away isn't caught up for a file: it opens where it was saved.
+        await write(free, { ...data, savedAt: Date.now() });
+        return await reply({ slot: free });
+      }
+    }
+  } catch (e) {
+    return await reply({ error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+/** Run bytes through a (de)compression stream, stopping past `limit` bytes. */
+async function pipe(
+  bytes: Uint8Array,
+  stream: CompressionStream | DecompressionStream,
+  limit = Infinity,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const out = new Blob([bytes as BlobPart]).stream().pipeThrough(stream).getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await out.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) {
+      await out.cancel();
+      throw new Error("That file is too big unpacked.");
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) all.set(p, at), at += p.length;
+  return all;
 }

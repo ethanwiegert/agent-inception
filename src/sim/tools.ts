@@ -66,7 +66,8 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "join",
     description: "Enter the world as a villager with this name. Call this first. " +
-      "Using a name that already exists puts you back in that body, with its inventory and journal.",
+      "Using a name that already exists puts you back in that body, with its inventory and " +
+      "journal, unless another agent is playing it (a villager is held while its agent is active).",
     inputSchema: {
       type: "object",
       properties: {
@@ -260,6 +261,12 @@ function join(sim: Sim, session: string, args: Args): string {
   }
   let agent = sim.agents.find((a) => a.name.toLowerCase() === name.toLowerCase());
   const returning = !!agent;
+  if (agent && sim.sessions.get(session) !== agent) {
+    const held = heldBy(sim, agent);
+    if (held) throw new Error(held);
+    // Free: whoever had it before lets go, so only this session drives it now.
+    for (const [s, a] of sim.sessions) if (a === agent) sim.sessions.delete(s);
+  }
   agent ??= sim.addAgent(name);
   sim.sessions.set(session, agent);
   agent.lastActive = sim.tick;
@@ -293,6 +300,33 @@ function join(sim: Sim, session: string, args: Args): string {
       ? "\nYour journal has notes from before — journal_read."
       : "");
 }
+
+/**
+ * How long a villager stays held by the session that joined it after its last call: a game day,
+ * about ten minutes at 1×. A job running holds it too.
+ */
+export const HOLD_TICKS = TICKS_PER_DAY;
+
+/** Why another session can't join as `agent` now, or null when it's free to take. */
+function heldBy(sim: Sim, agent: Agent): string | null {
+  if (![...sim.sessions.values()].includes(agent)) return null;
+  const idle = sim.tick - agent.lastActive;
+  if (idle >= HOLD_TICKS && !agent.queue.length) return null;
+  const ago = Math.floor(idle / (TICKS_PER_DAY / 24 / 60));
+  const freeIn = Math.max(1, Math.ceil((HOLD_TICKS - idle) / (TICKS_PER_DAY / 24 / 60)));
+  return `${agent.name} lives here already and another agent is playing them (${
+    agent.queue.length
+      ? "busy right now"
+      : ago < 1
+      ? "they called just now"
+      : `their last call was ${minutes(ago)} ago`
+  }). Join with a name of your own. A villager is free to rejoin once its agent has been away a ` +
+    `game day (about ten minutes at normal speed)${
+      agent.queue.length ? "" : `: ${agent.name} is free in ${minutes(freeIn)}`
+    }.`;
+}
+
+const minutes = (n: number) => n === 1 ? "1 game minute" : `${n} game minutes`;
 
 /** What join says about Village Life, or that the world is a Sandbox. */
 function villageIntro(sim: Sim): string {

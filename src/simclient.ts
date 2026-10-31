@@ -5,6 +5,8 @@ import {
   BODY_STRIDE,
   FIRE_STRIDE,
   type FromWorker,
+  type SlotOp,
+  type SlotsReply,
   type TickMessage,
   type ToWorker,
 } from "./sim/protocol.ts";
@@ -68,6 +70,9 @@ export interface ToolResult {
 export class SimClient {
   world: World | null = null;
   seed = 0;
+  /** The world slot this world lives in, and its name. */
+  slot = 0;
+  name = "";
   tick = 0;
   day = 1;
   timeOfDay = 0;
@@ -101,7 +106,7 @@ export class SimClient {
   private glowing = new Set<number>();
   /** Something that casts light changed since the field was last brought up to date. */
   private lightStale = false;
-  onReady: (world: World, caughtUp: number) => void = () => {};
+  onReady: (world: World, caughtUp: number, notice?: string) => void = () => {};
 
   /** Block ids for the mirrored Catalog's Materials, the same ids the sim uses. */
   get blocks(): BlockRegistry {
@@ -129,10 +134,20 @@ export class SimClient {
   private pending = new Map<number, (r: ToolResult) => void>();
   private nextCall = 1;
 
-  constructor(seed?: number) {
+  private slotReplies = new Map<number, (r: SlotsReply) => void>();
+  private nextReq = 1;
+
+  constructor(seed: number | undefined, slot: number) {
     this.worker = new Worker("/worker.js", { type: "module" });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
-    this.send({ type: "init", seed });
+    this.send({ type: "init", seed, slot });
+  }
+
+  /** Ask the worker about world slots: list, save, delete, export or import. */
+  slots(op: SlotOp): Promise<SlotsReply> {
+    const req = this.nextReq++;
+    this.send({ type: "slots", req, ...op } as ToWorker);
+    return new Promise((resolve) => this.slotReplies.set(req, resolve));
   }
 
   send(msg: ToWorker) {
@@ -241,8 +256,15 @@ export class SimClient {
   }
 
   private receive(msg: FromWorker) {
+    if (msg.type === "slots") {
+      this.slotReplies.get(msg.req)?.(msg);
+      this.slotReplies.delete(msg.req);
+      return;
+    }
     if (msg.type === "ready") {
       this.seed = msg.seed;
+      this.slot = msg.slot;
+      this.name = msg.name;
       this.catalog = Catalog.load(msg.catalog);
       // The worker's world and props as they stand: nothing to regenerate on the main thread.
       const world = World.fromData(msg.world);
@@ -261,7 +283,7 @@ export class SimClient {
       this.prevBodies = this.currBodies = new Float32Array(0);
       this.crops = new Float32Array(0);
       this.cropsVersion++;
-      this.onReady(world, msg.caughtUp);
+      this.onReady(world, msg.caughtUp, msg.notice);
       return;
     }
     if (msg.type === "results") return this.resolve(msg.results);

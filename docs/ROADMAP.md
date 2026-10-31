@@ -602,6 +602,21 @@ Decided in the build (M13):
 - A session can `join` as any villager's name and take over their body (playtest 0010); pairing
   should bind a villager to the session that made it.
 
+Grill outcome (2026-10-31):
+
+- **Cloudflare hosts it** (ADR 0006): one Worker serves the static site and the relay; each world's
+  relay room is a Durable Object that holds the tab's WebSocket (hibernating while idle, so a quiet
+  world costs nothing). Zero npm dependencies in the repo; Ethan deploys with `wrangler`.
+- **Pairing is a secret URL per world.** Each world slot has its own unguessable link,
+  `https://<site>/mcp/<code>`, that any MCP client takes as a plain HTTP server URL. It survives
+  reloads, so an agent's config never goes stale; a "new link" button cuts the old one off.
+- **A villager is held while active.** The session that joined a villager keeps it while it's active
+  (a call within about ten minutes at 1×, or a job running); another session asking for that name is
+  refused. After that it's free, so a restarted agent reattaches by name.
+- **Landing is an overlay on the live island.** The game loads at once; a first-visit card over it
+  explains the idea and shows the agent URL with copy buttons for Claude Code and other MCP clients.
+  The panel reopens it.
+
 ## V2 (unordered)
 
 Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;

@@ -1,13 +1,16 @@
-import { type CallReply, connectBridge } from "./agentlink.ts";
+import { type CallReply, connectLink, type Link, type LinkState } from "./agentlink.ts";
 import { SoundScape } from "./audio.ts";
 import { Camera } from "./camera.ts";
 import { attachReverseCaptcha } from "./captcha.ts";
+import { createConnectCard } from "./connect.ts";
 import { createDevPanel } from "./devpanel.ts";
 import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
+import { pref, setPref } from "./prefs.ts";
+import { newSecret } from "../relay/core.ts";
 import { LOOKS } from "./render/look.ts";
 import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
-import { FIRE_STRIDE } from "./sim/protocol.ts";
+import { FIRE_STRIDE, SLOTS, type SlotsReply } from "./sim/protocol.ts";
 import { TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
 
@@ -44,11 +47,21 @@ const format = navigator.gpu.getPreferredCanvasFormat();
 context?.configure({ device, format, alphaMode: "opaque" });
 
 let look = params.get("look") ?? "natural";
-let bridgeConnected = false;
+let linkState: LinkState = "connecting";
+let link: Link | null = null;
 
 // ---------------------------------------------------------------- simulation
 
-const client = new SimClient(params.has("seed") ? Number(params.get("seed")) : undefined);
+// The world slot to open: `?slot=` (1-3), else the one last watched in this browser. A `?seed=`
+// that isn't that slot's world starts a new world in a free slot (the worker picks it).
+const slotParam = Number(params.get("slot")) - 1;
+const startSlot = Number.isInteger(slotParam) && slotParam >= 0 && slotParam < SLOTS
+  ? slotParam
+  : Math.max(0, Math.min(SLOTS - 1, Number(pref("slot") ?? 0) || 0));
+const client = new SimClient(
+  params.has("seed") ? Number(params.get("seed")) : undefined,
+  startSlot,
+);
 if (params.has("speed")) client.send({ type: "speed", speed: Number(params.get("speed")) });
 if (params.has("time")) client.send({ type: "setTime", timeOfDay: Number(params.get("time")) });
 if (params.has("sandbox")) {
@@ -70,7 +83,21 @@ let camera: Camera | null = null;
 
 /** Milliseconds from navigation until the world was ready to draw (the first-frame budget). */
 let readyMs = 0;
-client.onReady = (world, caughtUp) => {
+client.onReady = (world, caughtUp, notice) => {
+  setPref("slot", String(client.slot));
+  // The seed has done its job (a new world, in its own slot): reloading shouldn't ask again.
+  if (params.has("seed") || params.has("slot")) {
+    const url = new URL(location.href);
+    url.searchParams.delete("seed");
+    url.searchParams.delete("slot");
+    history.replaceState(null, "", url);
+  }
+  if (notice) {
+    overlay.log("world", notice, true);
+    panel.notice(notice);
+  }
+  void refreshWorlds();
+  if (!link) void startLink();
   renderer = new Renderer(device, world);
   readyMs ||= performance.now();
   renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
@@ -270,12 +297,116 @@ async function encodeShot(
   return btoa(bin);
 }
 
+// ---------------------------------------------------------------- the link to agents
+
 const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-connectBridge(
-  params.get("bridge") ?? `${wsScheme}://${location.host}/bridge`,
-  handleTool,
-  (connected) => (bridgeConnected = connected),
+/** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
+const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const paired = !params.has("bridge") && (!devHost || params.get("relay") === "1");
+let ephemeral = false;
+
+/** This world slot's secret, made the first time the slot is linked and kept in this browser. */
+function linkSecret(slot: number, fresh = false): string {
+  const key = `link.${slot}`;
+  let secret = fresh ? null : pref(key);
+  if (!secret) {
+    secret = newSecret();
+    ephemeral = !setPref(key, secret);
+  }
+  return secret;
+}
+
+async function startLink() {
+  link = await connectLink({
+    socketBase: `${wsScheme}://${location.host}`,
+    httpBase: location.origin,
+    socketUrl: params.get("bridge") ?? undefined,
+    secret: paired ? linkSecret(client.slot) : null,
+    tools: TOOL_DEFS.map(({ name, description, inputSchema }) => ({
+      name,
+      description,
+      inputSchema,
+    })),
+    handle: handleTool,
+    onState: (state) => {
+      linkState = state;
+      connectCard.update();
+    },
+  });
+  // First visit: say what this is and how to bring an agent in.
+  if (!pref("welcomed") && !params.has("headless")) {
+    connectCard.show();
+    setPref("welcomed", "1");
+  }
+}
+
+const connectCard = createConnectCard(
+  () => ({
+    agentUrl: link?.agentUrl ?? "…",
+    state: linkState,
+    paired,
+    ephemeral,
+    worldName: client.name,
+  }),
+  async () => {
+    await link?.renew(linkSecret(client.slot, true));
+  },
 );
+
+// ---------------------------------------------------------------- world slots
+
+async function refreshWorlds(reply?: SlotsReply) {
+  const r = reply ?? await client.slots({ op: "list" });
+  panel.worlds(r.slots, client.slot);
+  if (r.error) panel.notice(r.error);
+  return r;
+}
+
+/** Save, then reload into world slot `slot` (with a new seed when starting a world). */
+async function openWorld(slot: number, seed?: number) {
+  await client.slots({ op: "save" });
+  setPref("slot", String(slot));
+  const url = new URL(location.href);
+  url.searchParams.delete("seed");
+  url.searchParams.delete("slot");
+  if (seed !== undefined) url.searchParams.set("seed", String(seed));
+  location.href = url.href;
+}
+
+const worldHandlers = {
+  open: (slot: number) => void openWorld(slot),
+  async create() {
+    const { slots } = await client.slots({ op: "list" });
+    const free = slots.find((s) => s.empty);
+    if (!free) return panel.notice(`All ${SLOTS} world slots are full. Delete one first.`);
+    await openWorld(free.slot, (Math.random() * 1e6) | 0);
+  },
+  async remove(slot: number) {
+    const r = await client.slots({ op: "list" });
+    const s = r.slots[slot];
+    if (!s || s.empty) return;
+    if (!confirm(`Delete “${s.name}” (seed ${s.seed}, day ${s.day})? This can't be undone.`)) {
+      return;
+    }
+    setPref(`link.${slot}`, null);
+    await refreshWorlds(await client.slots({ op: "delete", slot }));
+  },
+  async exportWorld(slot: number) {
+    const r = await client.slots({ op: "export", slot });
+    if (!r.file) return refreshWorlds(r);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([r.file.bytes], { type: "application/gzip" }));
+    a.download = r.file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  },
+  async importWorld(file: File) {
+    const r = await client.slots({ op: "import", data: await file.arrayBuffer() });
+    if (r.slot === undefined) return refreshWorlds(r);
+    setPref(`link.${r.slot}`, null); // an imported world gets its own new link
+    await openWorld(r.slot);
+  },
+};
 
 // ---------------------------------------------------------------- spectator UI
 
@@ -283,7 +414,8 @@ const panel = createDevPanel({
   look: (id) => (look = id),
   time: (t) => client.send({ type: "setTime", timeOfDay: t }),
   speed: (speed) => client.send({ type: "speed", speed }),
-  seed: (seed) => client.send({ type: "reset", seed }),
+  worlds: worldHandlers,
+  connect: () => connectCard.show(),
   follow: toggleFollow,
   villageLife: (on) => client.send({ type: "villageLife", on }),
   weather: (clouds) => client.send({ type: "weather", clouds }),
@@ -292,8 +424,47 @@ const panel = createDevPanel({
   sound: (muted) => sound.setMuted(muted),
 });
 
+/**
+ * Render resolution as a share of the screen's (up to 2 device pixels per CSS pixel). `?scale=`
+ * fixes it; otherwise it adapts: a GPU that can't hold ~50 fps renders fewer pixels (down to half),
+ * and earns them back when it has room. Integrated GPUs on high-DPI laptops need this to hold 60.
+ */
+const fixedScale = params.has("scale")
+  ? Math.min(1, Math.max(0.25, Number(params.get("scale")) || 1))
+  : null;
+let renderScale = fixedScale ?? 1;
+const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, WINDOW_MS = 2000;
+let windowStart = 0, windowFrames = 0, windowSlow = 0, slowWindows = 0, fastWindows = 0;
+
+/** Count this frame; every two seconds, step the render scale if the frame rate asks for it. */
+function adaptScale(now: number, interval: number) {
+  if (fixedScale !== null || !context) return;
+  // A hidden tab or a stall (a big world load) isn't the GPU being slow.
+  if (document.hidden || interval > 250) {
+    windowStart = now, windowFrames = windowSlow = 0;
+    return;
+  }
+  windowFrames++;
+  if (interval > SLOW_MS) windowSlow++;
+  if (now - windowStart < WINDOW_MS) return;
+  const slow = windowSlow > windowFrames / 2;
+  const gpu = renderer?.stats.gpuMs ?? 0;
+  // Room to spare: frames on time and, where the GPU timer works, under half a frame of GPU work.
+  const roomy = windowSlow < windowFrames / 20 && gpu > 0 && gpu < 7;
+  slowWindows = slow ? slowWindows + 1 : 0;
+  fastWindows = roomy ? fastWindows + 1 : 0;
+  windowStart = now, windowFrames = windowSlow = 0;
+  const was = renderScale;
+  if (slowWindows >= 2 && renderScale > SCALE_MIN) {
+    renderScale = Math.max(SCALE_MIN, renderScale - SCALE_STEP), slowWindows = 0;
+  } else if (fastWindows >= 3 && renderScale < 1) {
+    renderScale = Math.min(1, renderScale + SCALE_STEP), fastWindows = 0;
+  }
+  if (renderScale !== was) resize();
+}
+
 function resize() {
-  const dpr = Math.min(devicePixelRatio, 2);
+  const dpr = Math.min(devicePixelRatio, 2) * renderScale;
   canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
   canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
 }
@@ -302,7 +473,10 @@ resize();
 
 const stats = createFrameStats();
 Object.assign(globalThis, {
-  __perf: { summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs }), gpuErrors },
+  __perf: {
+    summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs, renderScale }),
+    gpuErrors,
+  },
   // Lets tests and the harness drive agents without the bridge.
   __game: {
     client,
@@ -330,9 +504,12 @@ const frameTarget = (): RenderTarget => ({
 });
 
 let lastPanel = 0;
+let lastFrame = 0;
 function frame(now: number) {
   requestAnimationFrame(frame);
   stats.tick(now);
+  adaptScale(now, lastFrame ? now - lastFrame : 0);
+  lastFrame = now;
   // Headless pages (software WebGPU, seconds per frame) draw only when a capture asks, but their
   // panel still follows the world.
   if (renderer && camera && context) draw(now, frameTarget());
@@ -402,7 +579,8 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
       day: client.day,
       speed: client.speed,
       seed: client.seed,
-      bridge: bridgeConnected,
+      link: linkState,
+      worldName: client.name,
       agents: agents.map((a) => ({ id: a.id, name: a.name })),
       following: camera.follow,
       catalog: client.catalog,
@@ -416,6 +594,7 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
         `${(r.grassBlades / 1000).toFixed(0)}k blades`,
+        ...(renderScale < 1 ? [`${Math.round(renderScale * 100)}% res`] : []),
       ],
     });
   }

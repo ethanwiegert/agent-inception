@@ -1,5 +1,5 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
-import { type CallResult, gameHours, Sim } from "./sim.ts";
+import { type CallResult, gameHours, Sim, TICKS_PER_DAY } from "./sim.ts";
 import { AnimalAnim, SPECIES } from "./animals.ts";
 import { FISH, waterHabitat } from "./fish.ts";
 import { GROWN } from "./props.ts";
@@ -74,7 +74,10 @@ Deno.test("rejoining by name reattaches the same body", () => {
   const sim = new Sim(1);
   run(sim, "s1", "join", { name: "Moss" });
   run(sim, "s1", "journal_write", { text: "plant by the cliff" });
-  run(sim, "s2", "join", { name: "moss" });
+  // A new session (a restarted agent) gets the body once the old one has been away a game day.
+  assert(run(sim, "s2", "join", { name: "moss" }).isError);
+  sim.tick += TICKS_PER_DAY;
+  assert(!run(sim, "s2", "join", { name: "moss" }).isError);
   assertEquals(sim.agents.length, 1);
   assert(run(sim, "s2", "journal_read").text.includes("plant by the cliff"));
 });

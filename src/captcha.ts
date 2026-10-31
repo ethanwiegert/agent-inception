@@ -67,7 +67,8 @@ export function attachReverseCaptcha(canvas: HTMLElement) {
   };
   const show = () => {
     const now = performance.now();
-    if (open || now - shownAt < COOLDOWN_MS) return;
+    // Not over another card (the connect card), and at most once a minute.
+    if (open || document.querySelector("[data-modal]") || now - shownAt < COOLDOWN_MS) return;
     shownAt = now;
     const [challenge, verdict] = CHALLENGES[turn++ % CHALLENGES.length];
     const root = document.createElement("div");
