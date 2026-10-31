@@ -23,6 +23,7 @@ import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogto
 import { JOINT_HANDLERS, JOINT_TOOL_DEFS, mechanismsText } from "./jointtools.ts";
 import { FIRE_HANDLERS, FIRE_TOOL_DEFS, fireText } from "./firetools.ts";
 import { VILLAGE_HANDLERS, VILLAGE_TOOL_DEFS } from "./villagetools.ts";
+import { BOARD_HANDLERS, BOARD_TOOL_DEFS } from "./boardtools.ts";
 import { NEEDS, pct, VILLAGE_LIMITS } from "./village.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
@@ -131,6 +132,7 @@ export const TOOL_DEFS: ToolDef[] = [
   ...JOINT_TOOL_DEFS,
   ...FIRE_TOOL_DEFS,
   ...VILLAGE_TOOL_DEFS,
+  ...BOARD_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -278,7 +280,8 @@ function join(sim: Sim, session: string, args: Args): string {
     "part is a tame fire, and levers and pressure plates send signals on named channels to " +
     "doors, motors and lamps (use flips a lever, or tunes a channel). ignite starts a wild fire " +
     "that spreads to what burns and burns it away, and douse puts it out. People are watching " +
-    "you live here, so take your time and narrate now and then with say. Choose how you look " +
+    "you live here, so take your time and narrate now and then with say; they may pin Wishes " +
+    "for you on the Notice Board (board), suggestions that are never orders. Choose how you look " +
     "with set_body: any Design with a body part, like the farmer you are now.\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
     "Materials, Designs, Rules that make things happen, and Relations between them " +
@@ -333,6 +336,7 @@ const HANDLERS: Record<string, Handler> = {
   ...JOINT_HANDLERS,
   ...FIRE_HANDLERS,
   ...VILLAGE_HANDLERS,
+  ...BOARD_HANDLERS,
   look(sim, agent, args) {
     const want = Number(args.radius ?? 6) | 0, r = Math.min(12, Math.max(3, want));
     const text = describe(sim, agent, r);
@@ -346,7 +350,9 @@ const HANDLERS: Record<string, Handler> = {
       (sim.world.objSolid[z * sim.world.sizeX + x] ? objectThere(sim, x, z) : undefined);
     if (inWay) {
       throw new Error(
-        `You can't stand at (${x}, ${z}): ${inWay}, in the way (too tall, or light enough to ` +
+        `You can't stand at (${x}, ${z}): ${
+          inWay.replace(/ is in the way$/, " stands there")
+        }, in the way (too tall, or light enough to ` +
           "kick away). Walk to a tile beside it.",
       );
     }
@@ -830,6 +836,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     } (${how}).`,
     `You stand at x=${ax} z=${az}, ground level ${ah}. ${inventoryText(agent)}`,
     villageText(sim, agent),
+    ...[sim.board.lookText(agent)].filter(Boolean),
     "",
     `Map: x ${ax - r}..${
       ax + r

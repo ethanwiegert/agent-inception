@@ -1,10 +1,13 @@
 import { type CallReply, connectBridge } from "./agentlink.ts";
+import { SoundScape } from "./audio.ts";
 import { Camera } from "./camera.ts";
+import { attachReverseCaptcha } from "./captcha.ts";
 import { createDevPanel } from "./devpanel.ts";
 import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { LOOKS } from "./render/look.ts";
 import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
+import { FIRE_STRIDE } from "./sim/protocol.ts";
 import { TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
 
@@ -60,6 +63,8 @@ const toggleFollow = (id: number | null) => {
   else camera.focus(id);
 };
 const overlay = new Overlay(toggleFollow);
+const sound = new SoundScape();
+attachReverseCaptcha(canvas);
 let renderer: Renderer | null = null;
 let camera: Camera | null = null;
 
@@ -79,6 +84,7 @@ client.onReady = (world, caughtUp) => {
 };
 
 client.onEvent = (event) => {
+  sound.event(event, agentAt);
   if (event.type === "say") {
     overlay.say(event.agent, event.text, performance.now());
     overlay.log(agentName(event.agent), `says “${event.text}”`);
@@ -95,12 +101,22 @@ client.onEvent = (event) => {
     overlay.log(agentName(event.agent), event.text);
   } else if (event.type === "village") {
     overlay.log(event.agent ? agentName(event.agent) : "village", event.text);
+  } else if (event.type === "board") {
+    overlay.log(event.agent ? agentName(event.agent) : "✎ notice board", event.text);
+    // A reply is said aloud too, so spectators see it over the villager's head.
+    if (event.agent && event.text.startsWith("replied")) {
+      overlay.say(event.agent, event.text.replace(/^replied to #\d+: /, ""), performance.now());
+    }
   } else if (event.type === "signal") {
     renderer?.particles.spark(event.from, event.to, event.on, performance.now() / 1000);
   }
 };
 
 const agentName = (id: number) => client.profiles[id - 1]?.name ?? `#${id}`;
+const agentAt = (id: number): [number, number, number] | undefined => {
+  const a = client.agents(performance.now()).find((a) => a.id === id);
+  return a && [a.x, a.y + 1, a.z];
+};
 
 // ---------------------------------------------------------------- agents
 
@@ -113,6 +129,9 @@ const QUIET_TOOLS = new Set([
   "catalog_find",
   "catalog_get",
   "proposals",
+  "board",
+  // Said aloud: the sim's say event logs it once, in quotes.
+  "say",
 ]);
 /** Catalog authoring is announced by the sim itself, with names instead of raw JSON. */
 const ANNOUNCED_TOOLS = new Set(["catalog_add", "catalog_fork", "propose", "vote"]);
@@ -267,6 +286,10 @@ const panel = createDevPanel({
   seed: (seed) => client.send({ type: "reset", seed }),
   follow: toggleFollow,
   villageLife: (on) => client.send({ type: "villageLife", on }),
+  weather: (clouds) => client.send({ type: "weather", clouds }),
+  wish: (text, forName) => client.send({ type: "wish", text, for: forName }),
+  unpin: (id) => client.send({ type: "unpin", id }),
+  sound: (muted) => sound.setMuted(muted),
 });
 
 function resize() {
@@ -283,6 +306,8 @@ Object.assign(globalThis, {
   // Lets tests and the harness drive agents without the bridge.
   __game: {
     client,
+    /** The page's sound: `setMuted`, `play(id)`, `started`. */
+    sound,
     call: handleTool,
     camera: () => camera,
     /** Switch the look preset, as the spectator panel does. */
@@ -308,8 +333,10 @@ let lastPanel = 0;
 function frame(now: number) {
   requestAnimationFrame(frame);
   stats.tick(now);
-  // Headless pages (software WebGPU, seconds per frame) draw only when a capture asks.
+  // Headless pages (software WebGPU, seconds per frame) draw only when a capture asks, but their
+  // panel still follows the world.
   if (renderer && camera && context) draw(now, frameTarget());
+  else if (renderer && camera) updatePanel(now, client.agents(now));
 }
 requestAnimationFrame(frame);
 
@@ -320,6 +347,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
   const followed = agents.find((a) => a.id === camera!.follow);
   if (followed) camera.track(followed.x, followed.z);
   client.updateLight();
+  if (!capture) sound.update(now, camera, agents, client.timeOfDay, client.clouds, nearestFire());
 
   renderer.render(
     camera,
@@ -357,6 +385,13 @@ function draw(now: number, out: RenderTarget, capture = false) {
     camera.follow,
   );
 
+  updatePanel(now, agents);
+  return agents;
+}
+
+/** Refresh the spectator panel, a few times a second. */
+function updatePanel(now: number, agents: { id: number; name: string }[]) {
+  if (!renderer || !camera) return;
   if (now - lastPanel > 250) {
     lastPanel = now;
     const s = stats.summary();
@@ -372,6 +407,11 @@ function draw(now: number, out: RenderTarget, capture = false) {
       following: camera.follow,
       catalog: client.catalog,
       village: client.village,
+      clouds: client.clouds,
+      heldClouds: client.heldClouds,
+      board: client.board,
+      boardVersion: client.boardVersion,
+      muted: sound.muted,
       stats: [
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
@@ -379,5 +419,20 @@ function draw(now: number, out: RenderTarget, capture = false) {
       ],
     });
   }
-  return agents;
+}
+
+/** The burning thing nearest the camera's focus, for the crackle, or null if none is close. */
+const firePoint: [number, number, number] = [0, 0, 0];
+function nearestFire(): [number, number, number] | null {
+  const f = client.fires, t = camera!.target;
+  let best = 900;
+  let found = false;
+  for (let i = 0; i < f.length; i += FIRE_STRIDE) {
+    const x = (f[i] + f[i + 1]) / 2, z = (f[i + 4] + f[i + 5]) / 2;
+    const d = (x - t[0]) ** 2 + (z - t[2]) ** 2;
+    if (d < best) {
+      best = d, found = true, firePoint[0] = x, firePoint[1] = f[i + 2], firePoint[2] = z;
+    }
+  }
+  return found ? firePoint : null;
 }

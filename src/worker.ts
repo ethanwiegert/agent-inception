@@ -40,6 +40,7 @@ let sentStatusVersion = -1;
 let sentEntries = 0;
 let sentFireVersion = -1;
 let sentVillage = -1;
+let sentBoard = -1;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
 
@@ -92,6 +93,21 @@ async function handle(msg: ToWorker) {
     case "villageLife":
       sim?.village.setLife(msg.on);
       break;
+    case "weather":
+      sim?.setWeather(msg.clouds);
+      break;
+    case "wish":
+      if (!sim) break;
+      try {
+        sim.board.pin(msg.text, msg.for);
+      } catch (e) {
+        const text = `couldn't pin the Wish: ${e instanceof Error ? e.message : e}`;
+        sim.events.push({ type: "board", agent: 0, wish: 0, text });
+      }
+      break;
+    case "unpin":
+      sim?.board.unpin(msg.id);
+      break;
     case "save":
       await persist();
       break;
@@ -107,6 +123,7 @@ function start(caughtUp: number) {
   sentPosesVersion = -1;
   sentFireVersion = -1;
   sentVillage = -1;
+  sentBoard = -1;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -244,6 +261,10 @@ function send() {
     timeOfDay: s.timeOfDay(),
     speed,
     clouds: s.clouds(),
+    heldClouds: s.spectatorClouds,
+    board: s.board.version !== sentBoard
+      ? (sentBoard = s.board.version, structuredClone(s.board.wishes))
+      : undefined,
     props: s.props.version !== sentPropsVersion
       ? (sentPropsVersion = s.props.version, s.props.diff())
       : undefined,

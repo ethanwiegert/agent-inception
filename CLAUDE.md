@@ -51,7 +51,9 @@ src/simclient.ts    page-side mirror of the sim: world copy, agent interpolation
 src/agentlink.ts    page ↔ bridge WebSocket (auto-reconnect; a tab another tab replaced waits to be
                     looked at again)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
-src/devpanel.ts     spectator panel: look, time, speed, seed, agent list
+src/devpanel.ts     spectator panel: look, time, speed, seed, weather, sound, Notice Board, agents
+src/audio.ts        WebAudio: synthesized positional sounds and ambience, web/audio/manifest.json
+                    files replace them; src/captcha.ts the reverse CAPTCHA gag
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
                     shared by handlers), blocks.ts (block ids for the Catalog's Materials, patterns),
@@ -77,7 +79,8 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     firetools.ts (ignite, douse), signals.ts (levers, plates, channels,
                     receivers), village.ts (Village Life: needs, pace, points and levels,
                     errands, the bounty for villagers' Rules, Sandbox), villagetools.ts (eat,
-                    sleep, errands), worth.ts (worth, food and unlock levels read off the
+                    sleep, errands), board.ts (Notice Board: spectators' Wishes, replies, done),
+                    boardtools.ts (board), worth.ts (worth, food and unlock levels read off the
                     Catalog), time.ts (tick rate, game days),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
@@ -111,7 +114,7 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M12 are done; M13, Spectators, is next. The
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is next. The
 hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report

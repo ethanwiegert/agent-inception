@@ -8,6 +8,11 @@ const types: Record<string, string> = {
   wgsl: "text/plain",
   png: "image/png",
   bin: "application/octet-stream",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
 };
 
 type Route = (req: Request) => Response | Promise<Response> | undefined;

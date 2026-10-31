@@ -73,6 +73,10 @@ Saves may break freely until M14; save versioning and migrations come last befor
   multiply), workbenches (`needs`), a village level from camp to hamlet to village whose Unlocks
   gate Parts and Materials, world-posted `errands`, a daily bounty for villagers' Rules, and the
   spectator's Sandbox switch; playtest [0009](playtests/0009-m12.md).
+- **M13 — spectators.** The Notice Board (spectators pin Wishes; agents read, reply and mark them
+  done with `board`; never orders, never paid), panel weather and sound, synthesized positional
+  audio with file slots for Ethan's soundtrack and voices, and the reverse CAPTCHA; playtest
+  [0010](playtests/0010-m13.md).
 
 ## V1
 
@@ -544,12 +548,48 @@ Decided in the build (M12):
 
 ### M13 — spectators
 
-- Notice Board: spectators pin Wishes (≤ 140 chars, open or for one villager); agents read them in
-  `look` and a board tool, reply, mark them done. Wishes are never orders.
-- Spectator panel: time, speed, look, seed, world slots, weather, Village Life toggle, follow.
-  Spectators never move villagers and never retire or replace entries.
-- Audio: WebAudio with positional sound and event hooks; Ethan's soundtrack and voices.
-- Reverse CAPTCHA when a spectator reaches for WASD or clicks the world.
+Grill outcome (2026-10-31):
+
+- **Wishes are social only.** A spectator pins a Wish (≤ 140 chars, for anyone or one villager) on
+  the Notice Board; agents read them in `look` and a new `board` tool, reply, and mark them done.
+  Nothing checks a Wish and nothing pays for one (no points, no bread), so a Wish is never an order
+  and "done" can't be farmed.
+- **Audio ships synthesized, with file slots.** Zero-dependency WebAudio placeholders for every
+  sound (steps, digging, building, splashes, munching, speech, chimes, birds, crickets, wind, fire),
+  positional where it happens, plus `web/audio/manifest.json` so Ethan's soundtrack, sounds and
+  voices drop in and replace them.
+- **The reverse CAPTCHA is a modal gag with a cooldown.** WASD or arrow keys, or a plain click on
+  the world (not a drag to orbit, not a double-click to glide, not a name tag), open a "Prove you
+  are a robot" card that every human fails, kindly; at most once a minute.
+- **Weather now, world slots in M14.** The panel holds the sky (natural, clear, cloudy, overcast);
+  world slots ship with saves and versioning.
+
+Decided in the build (M13):
+
+- **The board** (`sim/board.ts`, `sim/boardtools.ts`): at most 12 open Wishes; an open Wish comes
+  down after 3 game days, a done one a game day after it's done (listed as one line, its replies
+  folded away). A Wish takes 8 replies, 2 per villager, and only while open; a Wish for one villager
+  is marked done only by them (anyone may reply). Text is cleaned to one line (control characters
+  and bidirectional overrides out, spaces collapsed) and kept as text; markup stays literal. Agents
+  can't pin, unpin or edit: `board` lists, replies and marks done. Ids keep counting, so an old
+  reply can't land on a new Wish. Saved with the world.
+- **Telling agents**: a new Wish rides as a note on the next result of every villager it's for;
+  `look` adds one line while an open Wish is for you or anyone (how many, how many for you, the
+  newest two); `join` says spectators may pin Wishes, never orders.
+- **Page**: the panel's notice board section pins (for anyone or a villager picked from the list),
+  shows each Wish with its replies and done note, and unpins; pins, replies and done marks go to the
+  feed, and a reply shows over the villager's head too.
+- **Weather**: a spectator's hold wins over a Rule's `weather` effect (the Rule says so) and is
+  saved; "natural" lets the sky drift again.
+- **Audio** (`src/audio.ts`): starts on the first click or key (autoplay rules), mute remembered per
+  browser (localStorage) and suspended in hidden tabs. Villagers' animations drive steps and work
+  sounds; sim events drive the rest (a say, a catch, a level up or finished errand, a Wish pinned or
+  answered, a knock, a signal). At most 20 voices; nothing further than 70 blocks from the camera
+  starts. Ambience fades with daylight, clouds and the camera's height; one crackle loop sits on the
+  fire nearest the camera's focus. Speech plays a villager's voice clip from the manifest by their
+  id, else a soft two-note hum.
+- **The CAPTCHA** (`src/captcha.ts`) ignores keys typed into inputs, modified keys and touch taps
+  (one finger orbits on touch).
 
 ### M14 — ship V1
 
@@ -559,6 +599,8 @@ Decided in the build (M12):
 - Save format version and migrations from here on.
 - 60 fps on an integrated-GPU laptop at 1080p, measured; Chromium-family browsers only.
 - Landing/connect page.
+- A session can `join` as any villager's name and take over their body (playtest 0010); pairing
+  should bind a villager to the session that made it.
 
 ## V2 (unordered)
 
@@ -617,8 +659,9 @@ Pick these up in the gate of whichever milestone touches them.
 - From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
   (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
   all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
-  The dev panel's village section was only checked through its message path (headless tabs don't
-  draw the panel); look at it on the dev box.
+- From playtest 0010: spectators can only unpin a whole Wish, not hide one villager's reply.
+  `place_block` with `layers: 2` was seen laying one layer (not reproduced; check it). Listen to the
+  synth sounds on the dev box (only built and played headless, with no ears on them).
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

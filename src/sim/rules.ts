@@ -673,6 +673,11 @@ export class Rules {
     if ("weather" in fx) {
       const until = sim.tick + Math.round((fx.weather.hours / 24) * sim.ticksPerDay);
       sim.weatherOverride = { clouds: fx.weather.clouds, until };
+      if (sim.spectatorClouds !== null) {
+        const held = "a spectator holds the weather, so the sky stays as it is until they let go";
+        agent?.notes.push(`${tag}: ${held}.`);
+        return held;
+      }
       return;
     }
     if ("spread" in fx) return this.spread(fx.spread.what, fx.spread.count);

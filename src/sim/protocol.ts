@@ -1,3 +1,4 @@
+import type { Wish } from "./board.ts";
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
@@ -54,6 +55,11 @@ export type ToWorker =
   | { type: "setTime"; timeOfDay: number }
   /** The spectator's switch: Village Life on, or the world a Sandbox. */
   | { type: "villageLife"; on: boolean }
+  /** The spectator holds the sky at this cloud cover (0-1), or null lets it drift. */
+  | { type: "weather"; clouds: number | null }
+  /** The spectator pins a Wish on the Notice Board, for anyone (null) or one villager by name. */
+  | { type: "wish"; text: string; for: string | null }
+  | { type: "unpin"; id: number }
   | { type: "reset"; seed: number }
   | { type: "save" };
 
@@ -77,6 +83,8 @@ export interface TickMessage {
   timeOfDay: number;
   speed: number;
   clouds: number;
+  /** The cloud cover a spectator holds the sky at, or null when the weather is natural. */
+  heldClouds: number | null;
   agents: Float32Array<ArrayBuffer>;
   animals: Float32Array<ArrayBuffer>;
   schools: Float32Array<ArrayBuffer>;
@@ -95,6 +103,8 @@ export interface TickMessage {
   catalog?: CatalogDelta;
   /** Village Life: mode, level, errands and everyone's needs, sent about once a second. */
   village?: VillageStatus;
+  /** The Notice Board's Wishes, sent when one is pinned, answered, done or taken down. */
+  board?: Wish[];
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;
   /** Everything burning (FIRE_STRIDE each), sent when something catches, goes out or moves. */
