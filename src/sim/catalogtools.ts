@@ -5,6 +5,7 @@ import {
   ENGINE_RELATIONS,
   type Entry,
   KINDS,
+  LEVELS,
   LIMITS,
   type MaterialContent,
   type Proposal,
@@ -16,6 +17,7 @@ import { costText, partCost } from "./objects.ts";
 import { RULE_EVENTS, RULE_LIMITS, type RuleContent } from "./rules.ts";
 import { type Agent, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
+import { food, fraction, lockedIn, unlockLevel, worth } from "./worth.ts";
 
 /** Catalog tools: find and read entries, add and fork them, propose and vote on changes. */
 
@@ -71,6 +73,9 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       'placeable block), "item" (carried: seeds, wool, fish) or "liquid" (nature only). ' +
       "density in g/cm³ (water 1), hardness 0-10, glows 0-1 (it lights what's around it, " +
       "as a block or a part, by night and by day). burns: fire spreads to it and burns it away. " +
+      '"food": 0.3 makes it something villagers eat (0-1 of a full belly); yours fills no more ' +
+      "than what its recipe uses (half again when it's cooked at a workbench from nature's " +
+      "food). " +
       `Patterns: ${Object.keys(Pattern).join(", ")}.\n` +
       '- design: {"blocks": {"palette": {"s": "stone"}, "layers": [["sss", "s.s"]]}, "parts": ' +
       '[{"part": "cone", "material": "planks", "at": [0.5, 0.5, 0.5], "size": [0.2, 1, 0.2], ' +
@@ -109,7 +114,8 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       "in its Material, at least 1).\n" +
       '- rule: {"when": ..., "if": ..., "do": [...]}, live as soon as it\'s added. ' +
       `when: {"event": "harvested", "what": "wheat"} (events: ${RULE_EVENTS.join(", ")}; ` +
-      'optional "what" matches the block, crop, fish or villager, or words for said), ' +
+      'optional "what" matches the block, crop, fish or villager, words for said, the food ' +
+      'for ate, or "bed" or "ground" for slept), ' +
       '{"every": 60} game minutes (10-1440), or {"daily": 6} (hour). ' +
       'if (optional): {"chance": 0.2}, {"time": [18, 6]}, {"clouds_above": 0.6}, ' +
       '{"clouds_below": 0.3}, {"has": {"item": "wheat", "count": 2}}, ' +
@@ -144,11 +150,18 @@ export const CATALOG_TOOL_DEFS: ToolDef[] = [
       '"hours": 18}. hours is only for grows_into: game hours from planting to grown. ' +
       '{"type": "made_from", "from": "oak boards", "to": "log", "count": 4} is a recipe for ' +
       "craft: count of from out of one to (nature's own Materials keep nature's recipes; " +
-      "invent a Material and give it one). drops says what interact or digging gives. Engine " +
+      "invent a Material and give it one). A recipe passes worth along: 4 from a plank (a " +
+      `quarter log) are worth 1/16 each, and nothing is worth less than ` +
+      `${fraction(LIMITS.worthFloor)}, so it makes at most what that allows. ` +
+      '{"type": "needs", "from": "stew", "to": "oven"} makes craft work only beside a built ' +
+      "Design (a workbench). drops says what interact or digging gives. Engine " +
       `types the world will enforce: ${ENGINE_RELATIONS.join(", ")}; or your own ` +
       'lower_snake_case label like "sacred_to" that just records knowledge. No name needed.\n' +
       'Read worked examples with catalog_get: "lucky harvest", "dawn chorus", "wildflowers ' +
-      'spread", "lanterns at dusk", "lamplit fields", "stone bench".',
+      'spread", "lanterns at dusk", "lamplit fields", "stone bench", "bed", "oven", "sweet ' +
+      "dreams\". In Village Life, what villagers' Rules give, set, spread and grow comes from " +
+      "a shared bounty of 24 a game day; Parts and Materials a hamlet or village unlocks can't " +
+      "be built, crafted or placed before then.",
     inputSchema: {
       type: "object",
       properties: {
@@ -410,10 +423,13 @@ function line(sim: Sim, e: Entry): string {
   let extra = "";
   if (e.kind === "material") {
     const m = e.content as MaterialContent;
+    const fills = food(sim.catalog, e);
     extra = ` (density ${m.density}, hardness ${m.hardness}${m.burns ? ", burns" : ""}${
       m.glows ? `, glows ${m.glows}` : ""
-    })`;
+    }${fills ? `, food ${Math.round(fills * 100)}%` : ""})`;
   }
+  const level = e.kind === "relation" || e.kind === "rule" ? 0 : unlockLevel(sim.catalog, e);
+  if (level) extra += ` [unlocks at a ${LEVELS[level]}]`;
   const by = e.author === "nature" ? "nature" : e.author;
   const desc = e.description ? ` — ${e.description}` : "";
   return `#${e.id} ${e.kind} "${e.name}" by ${by}${extra}${status(sim, e)}${desc}`;
@@ -540,6 +556,33 @@ function get(sim: Sim, e: Entry): string {
     ? relationText(sim, e)
     : JSON.stringify(e.content, (k, v) => (k === "if" && v === null ? undefined : v));
   lines.push(`Content: ${content}`);
+  if (e.kind === "material") {
+    const fills = food(c, e), declared = (e.content as MaterialContent).food ?? 0;
+    lines.push(
+      `Worth ${fraction(worth(c, e))} of a log (recipes pass worth along; nothing is worth less ` +
+        `than ${fraction(LIMITS.worthFloor)}).` +
+        (fills
+          ? ` Food: one fills ${Math.round(fills * 100)}% of a villager's hunger` +
+            (fills < declared - 1e-9 ? " (no more than what it's made of)." : ".")
+          : declared
+          ? " It says it's food, but what it's made of feeds nobody, so it fills nothing."
+          : ""),
+    );
+  }
+  if (e.kind === "material" || e.kind === "part" || e.kind === "design") {
+    const locked = lockedIn(c, e, -1).filter((n) => unlockLevel(c, c.byName(n)!) > 0);
+    if (locked.length) {
+      lines.push(
+        `Village Life: ${
+          locked.map((n) => `${n} unlocks at a ${LEVELS[unlockLevel(c, c.byName(n)!)]}`).join(
+            ", ",
+          )
+        }; the village is ${sim.village.levelText()}${
+          sim.village.life ? "" : " (Sandbox: all open)"
+        }.`,
+      );
+    }
+  }
   if (e.kind === "design" && !(e.content as DesignContent).habitat) {
     // What build takes: each block, and each part's volume in its Material (at least 1).
     const d = e.content as DesignContent, cost = new Map<string, number>();

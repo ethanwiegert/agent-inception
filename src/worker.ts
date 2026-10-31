@@ -39,6 +39,7 @@ let sentCatalogVersion = -1;
 let sentStatusVersion = -1;
 let sentEntries = 0;
 let sentFireVersion = -1;
+let sentVillage = -1;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []) => scope.postMessage(msg, transfer);
 
@@ -88,6 +89,9 @@ async function handle(msg: ToWorker) {
     case "setTime":
       sim?.setTimeOfDay(msg.timeOfDay);
       break;
+    case "villageLife":
+      sim?.village.setLife(msg.on);
+      break;
     case "save":
       await persist();
       break;
@@ -102,6 +106,7 @@ function start(caughtUp: number) {
   sentObjectsVersion = s.objects.version;
   sentPosesVersion = -1;
   sentFireVersion = -1;
+  sentVillage = -1;
   sentCatalogVersion = s.catalog.version;
   sentStatusVersion = s.catalog.statusVersion;
   sentEntries = s.catalog.entries.length;
@@ -224,6 +229,12 @@ function send() {
     }
   }
 
+  // Needs change slowly: once a second, or at once when the board or the mode changed.
+  const villageKey = s.village.version * 1e6 + Math.floor(s.tick / TICK_HZ);
+  const village = villageKey !== sentVillage
+    ? (sentVillage = villageKey, s.village.status())
+    : undefined;
+
   const edits = Int32Array.from(s.pendingEdits);
   s.pendingEdits = [];
   post({
@@ -244,6 +255,7 @@ function send() {
     schools,
     profiles,
     catalog,
+    village,
     edits,
     crops,
     bodies,

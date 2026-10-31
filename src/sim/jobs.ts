@@ -60,8 +60,9 @@ export function* walk(
       const dx = tx - agent.x, dz = tz - agent.z;
       const d = Math.hypot(dx, dz);
       if (d < 1e-3) break;
-      // Something heavy overhead slows you down.
-      const s = Math.min(WALK_SPEED * (sim.carried(agent) ? CARRY_PACE : 1), d);
+      // Something heavy overhead slows you down, and so do hunger and tiredness.
+      const pace = (sim.carried(agent) ? CARRY_PACE : 1) * (agent.pace ?? 1);
+      const s = Math.min(WALK_SPEED * pace, d);
       agent.x += (dx / d) * s;
       agent.z += (dz / d) * s;
       agent.stride += s;
@@ -210,9 +211,10 @@ export function* face(agent: Agent, x: number, z: number): Generator<void, void>
   }
 }
 
+/** Work for `ticks` at a steady pace; a hungry or tired villager takes longer. */
 export function* work(agent: Agent, anim: number, ticks: number): Generator<void, void> {
   agent.anim = anim;
-  for (let i = 0; i < ticks; i++) yield;
+  for (let i = 0; i < ticks; i += agent.pace ?? 1) yield;
   agent.anim = Anim.Idle;
 }
 

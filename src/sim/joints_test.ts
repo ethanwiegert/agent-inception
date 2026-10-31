@@ -31,6 +31,7 @@ const err = (r: CallResult, includes: string) => {
 /** A villager beside a flat, clear patch of meadow, `w` × `d` columns, south of them. */
 function site(w = 8, d = 8, seed = 1337) {
   const sim = new Sim(seed);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   ok(run(sim, "a", "join", { name: "Fern" }));
   const fern = sim.agents[0];
   const world = sim.world;
@@ -130,6 +131,7 @@ const hinge = (joins: unknown, extra = {}) => ({
 
 Deno.test("joint parts: pieces hang off the root like a tree, with limits and speeds checked", () => {
   const sim = new Sim(1);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   const ok1 = sim.catalog.add(
     {
       kind: "design",
@@ -503,6 +505,7 @@ Deno.test("a house's door is a wall until it's opened, and then the way in is cl
 
 Deno.test("a world saved before joints existed gains nature's joint Parts and examples on load", () => {
   const sim = new Sim(5);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   const save = sim.save(0);
   const added = ["hinge", "axle", "slider", "motor", "garden gate", "hand cart", "windmill"];
   // An older save: the same entries without the new ones, numbered without gaps.

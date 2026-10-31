@@ -1,6 +1,7 @@
 import { Pattern, type PatternName } from "./blocks.ts";
 import { seedNature } from "./nature.ts";
 import { plainText, type RuleContent, validateRule } from "./rules.ts";
+import { recipeRefusal } from "./worth.ts";
 
 /**
  * The Catalog: every kind of thing that can exist in this world and how those kinds relate. It is
@@ -30,7 +31,15 @@ export interface MaterialContent {
   burns: boolean;
   /** Light it gives off, 0-1. */
   glows: number;
+  /** How much one fills a villager's hunger, 0-1 (Village Life); none means it isn't food. */
+  food?: number;
+  /** The village level that unlocks it (nature's; camp when missing). */
+  unlock?: LevelName;
 }
+
+/** Village levels, smallest first (Village Life, M12). */
+export const LEVELS = ["camp", "hamlet", "village"] as const;
+export type LevelName = (typeof LEVELS)[number];
 
 export const PART_SHAPES = ["box", "sphere", "cylinder", "cone"] as const;
 export type PartShapeName = (typeof PART_SHAPES)[number];
@@ -58,6 +67,10 @@ export const DEVICE_SHAPES: Record<DeviceKind, PartShapeName> = {
   lever: "box",
   plate: "box",
 };
+/** Furniture: a mattress is where a villager sleeps best (a bed is a Design with one). */
+export const FURNITURE = ["mattress"] as const;
+export type FurnitureKind = (typeof FURNITURE)[number];
+export const FURNITURE_SHAPES: Record<FurnitureKind, PartShapeName> = { mattress: "box" };
 /** The piece of a Design its parts belong to unless they name another (and its blocks always). */
 export const MAIN_PIECE = "main";
 export interface PartContent {
@@ -66,6 +79,10 @@ export interface PartContent {
   joint?: JointKind;
   /** A light, a tame fire, or a signal source. */
   device?: DeviceKind;
+  /** Something villagers use in Village Life: a mattress to sleep on. */
+  furniture?: FurnitureKind;
+  /** The village level that unlocks it (camp when missing). */
+  unlock?: LevelName;
 }
 
 export type Vec3 = [number, number, number];
@@ -157,7 +174,8 @@ export interface DesignContent {
 /** The shape a Design's part is drawn and collides as, by its Part's name. */
 export function shapeOf(part: string): PartShapeName {
   return (JOINT_SHAPES as Record<string, PartShapeName>)[part] ??
-    (DEVICE_SHAPES as Record<string, PartShapeName>)[part] ?? part as PartShapeName;
+    (DEVICE_SHAPES as Record<string, PartShapeName>)[part] ??
+    (FURNITURE_SHAPES as Record<string, PartShapeName>)[part] ?? part as PartShapeName;
 }
 
 /** The device a Part is, by name, if it's one. */
@@ -286,6 +304,8 @@ export const LIMITS = {
   growHours: 720,
   /** What one craft of an agent's recipe may yield (nature's planks: 4 from a log). */
   recipeCount: 4,
+  /** Nothing is worth less than this (a log is worth 1): recipes can't split things finer. */
+  worthFloor: 1 / 16,
   /** Joint parts per Design (so at most 9 pieces). */
   joints: 8,
   /** A motor's fastest turn, degrees per second. */
@@ -596,7 +616,16 @@ export class Catalog {
   addMissingNature(tick: number) {
     const nature = natureCatalog();
     for (const e of nature.entries) {
-      if (!e.name || this.byName(e.name)) continue;
+      const have = e.name ? this.byName(e.name) : undefined;
+      if (have?.author === NATURE && have.kind === e.kind) {
+        // Village Life's fields on nature's own older entries: what feeds, and what unlocks when.
+        const from = e.content as unknown as Record<string, unknown>;
+        const to = have.content as unknown as Record<string, unknown>;
+        for (const k of ["food", "unlock"]) {
+          if (from[k] !== undefined && to[k] === undefined) to[k] = from[k];
+        }
+      }
+      if (!e.name || have) continue;
       let content = e.content;
       if (e.kind === "relation") {
         const r = e.content as RelationContent;
@@ -715,7 +744,11 @@ export function numberIn(v: unknown, min: number, max: number, where: string): n
 }
 
 function validateMaterial(o: Record<string, unknown>, author: string): MaterialContent {
-  onlyKeys(o, ["form", "color", "pattern", "density", "hardness", "burns", "glows"], "material");
+  onlyKeys(
+    o,
+    ["form", "color", "pattern", "density", "hardness", "burns", "glows", "food", "unlock"],
+    "material",
+  );
   const color = String(o.color ?? "").trim().toLowerCase();
   if (!/^#[0-9a-f]{6}$/.test(color)) throw new Error('color must look like "#a0522d".');
   const pattern = String(o.pattern ?? "plain") as PatternName;
@@ -738,11 +771,18 @@ function validateMaterial(o: Record<string, unknown>, author: string): MaterialC
     hardness: numberIn(o.hardness ?? 1, 0, 10, "hardness"),
     burns: Boolean(o.burns ?? false),
     glows: numberIn(o.glows ?? 0, 0, 1, "glows"),
+    ...(o.food !== undefined && o.food !== 0 ? { food: numberIn(o.food, 0, 1, "food") } : {}),
+    ...(o.unlock !== undefined && o.unlock !== "camp" ? { unlock: levelName(o.unlock) } : {}),
   };
 }
 
+function levelName(v: unknown): LevelName {
+  if (!LEVELS.includes(v as LevelName)) throw new Error(`unlock is one of ${LEVELS.join(", ")}.`);
+  return v as LevelName;
+}
+
 function validatePart(o: Record<string, unknown>): PartContent {
-  onlyKeys(o, ["shape", "joint", "device"], "part");
+  onlyKeys(o, ["shape", "joint", "device", "furniture", "unlock"], "part");
   if (!PART_SHAPES.includes(o.shape as PartShapeName)) throw new Error("unknown shape");
   const out: PartContent = { shape: o.shape as PartShapeName };
   if (o.joint !== undefined) {
@@ -753,6 +793,11 @@ function validatePart(o: Record<string, unknown>): PartContent {
     if (!DEVICES.includes(o.device as DeviceKind)) throw new Error("unknown device");
     out.device = o.device as DeviceKind;
   }
+  if (o.furniture !== undefined) {
+    if (!FURNITURE.includes(o.furniture as FurnitureKind)) throw new Error("unknown furniture");
+    out.furniture = o.furniture as FurnitureKind;
+  }
+  if (o.unlock !== undefined) out.unlock = levelName(o.unlock);
   return out;
 }
 
@@ -1140,6 +1185,25 @@ function validateRelation(
       if (seen.has(id)) continue;
       seen.add(id);
       for (const { entry } of c.links(id, "made_from")) stack.push(entry.id);
+    }
+    // Worth passes along a recipe: 4 planks from a log are a quarter log each, and nothing is
+    // split finer than the floor, so chains of recipes can't multiply one log into a thousand.
+    if (author !== NATURE) {
+      const why = recipeRefusal(c, { from: from.id, to: to.id, count: out.count });
+      if (why) throw new Error(`That recipe would split worth too fine: ${why}.`);
+    }
+  } else if (type === "needs") {
+    // A workbench: crafting `from` needs an Object of Design `to` close by (bread needs an oven).
+    if (
+      from.kind !== "material" || to.kind !== "design" || (to.content as DesignContent).habitat
+    ) {
+      throw new Error(
+        "needs goes from a Material you craft to the Design of the workbench it's made at " +
+          '(like "bread" needs "oven"); craft then works within 3 tiles of one.',
+      );
+    }
+    if (author !== NATURE && from.author === NATURE) {
+      throw new Error(`"${from.name}" is nature's; its recipes and workbenches are nature's too.`);
     }
   }
   if (type !== "grows_into" && o.hours !== undefined) {

@@ -22,6 +22,8 @@ import { BODY_HANDLERS, BODY_TOOL_DEFS, CARRY_MAX, kg, PUSH_MAX } from "./bodyto
 import { CATALOG_HANDLERS, CATALOG_TOOL_DEFS, catalogSummary } from "./catalogtools.ts";
 import { JOINT_HANDLERS, JOINT_TOOL_DEFS, mechanismsText } from "./jointtools.ts";
 import { FIRE_HANDLERS, FIRE_TOOL_DEFS, fireText } from "./firetools.ts";
+import { VILLAGE_HANDLERS, VILLAGE_TOOL_DEFS } from "./villagetools.ts";
+import { NEEDS, pct, VILLAGE_LIMITS } from "./village.ts";
 import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
 import { partBounds } from "./objects.ts";
@@ -128,6 +130,7 @@ export const TOOL_DEFS: ToolDef[] = [
   ...BODY_TOOL_DEFS,
   ...JOINT_TOOL_DEFS,
   ...FIRE_TOOL_DEFS,
+  ...VILLAGE_TOOL_DEFS,
   {
     name: "fish",
     description: "Cast a line into water at (x, z) from the bank (you walk to within " +
@@ -174,7 +177,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "wait",
-    description: "Rest for a while, e.g. while crops grow. 1-60 real seconds.",
+    description: "Rest for a while, e.g. while crops grow. 1-60 real seconds (at 1× speed a " +
+      "game hour is 25 real seconds, so a 60-second wait is about 2.4 game hours).",
     inputSchema: {
       type: "object",
       properties: { seconds: { type: "number", minimum: 1, maximum: 60 } },
@@ -222,6 +226,12 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
     const handler = HANDLERS[name];
     if (!handler) return done(`Unknown tool "${name}".`, true);
     if (name !== "_whoami") agent.lastActive = sim.tick;
+    if (args !== undefined && args !== null && (typeof args !== "object" || Array.isArray(args))) {
+      return done(
+        `${name}'s arguments are an object of named values, like {"x": 3, "z": 4}.`,
+        true,
+      );
+    }
     // An argument the tool doesn't take is a mistake to point out, not to ignore quietly.
     const known = TOOL_DEFS.find((t) => t.name === name)?.inputSchema.properties;
     const unknown = known && Object.keys(args ?? {}).filter((k) => !(k in known));
@@ -274,9 +284,44 @@ function join(sim: Sim, session: string, args: Args): string {
     "Materials, Designs, Rules that make things happen, and Relations between them " +
     "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
     "(seeds, saplings, wheat, wool, milk, eggs, fish), counted by its Catalog name. Changing " +
-    `shared entries goes through propose and vote. ${catalogSummary(sim)}\nStart with look.` +
+    `shared entries goes through propose and vote. ${catalogSummary(sim)}\n` +
+    villageIntro(sim) + "\nStart with look." +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
+      : "");
+}
+
+/** What join says about Village Life, or that the world is a Sandbox. */
+function villageIntro(sim: Sim): string {
+  const v = sim.village;
+  if (!v.life) {
+    return "This world is a Sandbox (a spectator chose it): no needs, no errands, everything " +
+      "unlocked. Spectators can switch Village Life on at any time; look says which it is.";
+  }
+  return "Village Life is on. You get hungry and tired: eat food you carry (wheat, berries, " +
+    "eggs, milk, fish; bread from an oven fills most) and sleep at night, best in a bed. Under " +
+    `${pct(NEEDS.low)} you walk and work slower; nobody ever dies. The village is ` +
+    `${v.levelText()}. Errands, harvests and the first build of each Design raise it to a ` +
+    "hamlet and then a village, and each level unlocks Parts and Materials (hinges, lamps and " +
+    "flames at a hamlet; motors, levers, plates and lantern glass at a village). errands lists " +
+    "small goals anyone may take for points and bread. Spectators may switch the world to " +
+    "Sandbox at any time; look says which it is.";
+}
+
+/** look's lines about needs, the village and errands. */
+function villageText(sim: Sim, agent: Agent): string {
+  const v = sim.village;
+  if (!v.life) return "Sandbox: no needs, no errands, everything unlocked.";
+  const slow = (agent.pace ?? 1) < 1 ? " — you're slowed: eat, or sleep at night" : "";
+  const mine = v.errands.filter((e) => e.taker === agent.name);
+  const open = v.errands.filter((e) => !e.taker).length;
+  return `Needs: fed ${pct(agent.fed)}, rested ${pct(agent.rested)}${slow}. ` +
+    `Village: ${v.levelText()}. Errands: ${open} open` +
+    (mine.length ? `, yours ${mine.map((e) => `#${e.id} (${v.text(e, true)})`).join(", ")}` : "") +
+    ` (errands; at most ${VILLAGE_LIMITS.held} each).` +
+    (v.bountyLeft() < VILLAGE_LIMITS.bounty
+      ? ` Villagers' Rules have ${v.bountyLeft()} of ${VILLAGE_LIMITS.bounty} things left to ` +
+        "give today."
       : "");
 }
 
@@ -287,6 +332,7 @@ const HANDLERS: Record<string, Handler> = {
   ...BODY_HANDLERS,
   ...JOINT_HANDLERS,
   ...FIRE_HANDLERS,
+  ...VILLAGE_HANDLERS,
   look(sim, agent, args) {
     const want = Number(args.radius ?? 6) | 0, r = Math.min(12, Math.max(3, want));
     const text = describe(sim, agent, r);
@@ -571,7 +617,8 @@ function plantable(
   wanted: unknown,
 ): { seed: string; design: Entry; grow: number } {
   const c = sim.catalog;
-  const want = String(wanted ?? "wheat seeds").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(wanted ?? "wheat seeds").trim().toLowerCase();
+  const want = c.byName(raw) ? raw : raw.replace(/_/g, " ");
   const options: { seed: string; design: Entry; rel: RelationContent }[] = [];
   for (const [item, n] of Object.entries(agent.inventory)) {
     const e = n > 0 ? c.byName(item) : undefined;
@@ -782,6 +829,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       light.toFixed(2)
     } (${how}).`,
     `You stand at x=${ax} z=${az}, ground level ${ah}. ${inventoryText(agent)}`,
+    villageText(sim, agent),
     "",
     `Map: x ${ax - r}..${
       ax + r
@@ -852,6 +900,24 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       if (i > -d && i < d) visit(ax - d, az + i, d), visit(ax + d, az + i, d);
     }
   }
+  // Animals with something to collect (wool for a bed, milk, eggs) out of view: the nearest.
+  SPECIES.forEach((def, species) => {
+    if (!def.productEvery) return;
+    let best: (typeof sim.animals)[number] | null = null, bestD = Infinity;
+    for (const a of sim.animals) {
+      if (a.species !== species) continue;
+      const d = Math.hypot(a.x - agent.x, a.z - agent.z);
+      if (d < bestD) best = a, bestD = d;
+    }
+    if (!best || bestD <= r * 1.5 || bestD > 40) return;
+    const product = sim.catalog.byName(def.name);
+    const gives = product ? sim.drops(product)[0]?.[0] : undefined;
+    beyond.push(
+      `a ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
+        Math.floor(best.z)
+      } (${away(Math.round(bestD))}, wandering)`,
+    );
+  });
   if (beyond.length) lines.push("", `Nearest within 40 tiles: ${beyond.join(", ")}.`);
   if (ripe || growing) {
     const soon = growing ? `; next ripens in ~${gameDuration(soonest)}` : "";

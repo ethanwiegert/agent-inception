@@ -111,7 +111,11 @@ owner, creator, agent
 engine then does. Built-in behavior is written as Rules too, as examples. _Avoid_: script, code,
 behavior, trigger
 
-**Unlock**: The moment a village's progress makes an Element available. _Avoid_: tech, research
+**Unlock**: The moment a village's progress makes an Element available; until then it can't be
+built, crafted or placed. _Avoid_: tech, research
+
+**Bounty**: What villagers' Rules may make out of nothing in a game day of Village Life (gifts,
+blocks, spread and grown plants), shared by the world. _Avoid_: quota, allowance
 
 **Herd**: A group of animals of one species that stays together. _Avoid_: flock, group
 
@@ -125,8 +129,21 @@ reasons to act. A world either has it on or is a sandbox. _Avoid_: survival mode
 **Sandbox**: A world with Village Life switched off: no needs, no errands, nothing asked of anyone.
 _Avoid_: creative mode, free play
 
-**Need**: A villager's hunger or energy. An unmet need slows the villager down and never kills it.
-_Avoid_: stat, meter
+**Need**: A villager's hunger or energy (fed and rested, 0-1). An unmet need slows the villager down
+and never kills it. `eat` and `sleep` meet them. _Avoid_: stat, meter, health
+
+**Food**: How much one of a Material fills a villager's hunger (its `food`, 0-1). _Avoid_:
+nutrition, calories
+
+**Bed**: A Design with a mattress Part; villagers sleep twice as well on one. _Avoid_: cot
+
+**Worth**: What one of a Material is worth, a log being 1: nature's say so, and a recipe passes its
+ingredient's worth along split by its count, never below 1/16. _Avoid_: value, price, cost
+
+**Workbench**: A Design a recipe `needs` built nearby to craft (bread needs an oven). _Avoid_:
+station, crafting table
+
+**Level**: How grown the village is: camp, hamlet or village, from its points. _Avoid_: tier, age
 
 **Village**: Everything the villagers of a world have built and grown together, measured as a level
 (camp, hamlet, village). _Avoid_: town, settlement, base

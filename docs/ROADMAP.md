@@ -69,6 +69,10 @@ Saves may break freely until M14; save versioning and migrations come last befor
   and `douse`; signals on named channels from levers and pressure plates to lamps, flames, motors
   and doors; lantern post, torch, campfire, signal lever and pressure plate as worked examples;
   playtest [0008](playtests/0008-m11.md).
+- **M12 — Village Life.** Needs (`eat`, `sleep`, beds), worth that recipes pass along (chains can't
+  multiply), workbenches (`needs`), a village level from camp to hamlet to village whose Unlocks
+  gate Parts and Materials, world-posted `errands`, a daily bounty for villagers' Rules, and the
+  spectator's Sandbox switch; playtest [0009](playtests/0009-m12.md).
 
 ## V1
 
@@ -473,15 +477,70 @@ Decided in the build (M11):
 
 ### M12 — Village Life
 
-- Needs: hunger (food restores it) and energy (rest at night). Unmet needs slow a villager; no
-  death.
-- Village level (camp → hamlet → village) from what the villagers built and grew together; each
-  level Unlocks base Materials and Parts.
-- From playtest 0004: recipe chains of agent Materials still amplify (×4 per step, no loops).
-  Scarcity (what a recipe may cost or yield, workbenches as `needs`) belongs here.
-- Errands offered by the world; any villager may take or ignore one.
-- On by default; the spectator flips Village Life / Sandbox at any time (needs pause, everything
-  unlocked). Agents learn the mode from `join` and `look`.
+Grill outcome (2026-10-31):
+
+- **Needs: eat and sleep.** Hunger empties over about a game day; a new `eat` tool eats a held
+  Material that is food (wheat, berries, eggs, milk, fish, and agents' own foods), filling by how
+  much it feeds. Energy runs down with work and refills with a new `sleep` tool, only at night,
+  twice as fast in a Design with a new mattress Part (nature's "bed"). Under 25% a villager walks
+  and works at 70% pace (both needs: about half). `join` and `look` show both. Nobody dies.
+- **Village level from deeds; levels lock Parts.** Points for shared deeds (errands, harvests, the
+  first build of each Design, building another villager's Design). Camp starts with the basic Parts
+  and wood, stone and dirt; a hamlet (40 points) unlocks hinges, axles, sliders, lamps, flames,
+  brick and tiles; a village (120) unlocks motors, levers, plates and lantern glass. What stands
+  stays and works; Sandbox unlocks everything.
+- **Worth is conserved.** Every Material has a worth: nature's are 1, or what their recipe splits
+  off (planks a quarter of a log); an agent's is its ingredient's worth over the recipe's count.
+  Nothing is worth less than 1/16, so recipe chains can't multiply things. `needs` makes a recipe
+  need a workbench Design close by (bread needs an oven).
+- **Errands are world-posted and sim-checked.** Three open at a time, picked from the seed, the
+  level and the Catalog (bring Materials, build a Design (villagers' too), harvest, catch, plant
+  trees, sleep in a bed, stand in lamplight at night). An `errands` tool lists, takes, gives and
+  drops them; the reward is village points and a loaf of bread.
+- **Sandbox** is the spectator's switch (dev panel, or `?sandbox=1`): needs pause, nothing is
+  locked, no errands. Agents learn the mode from `join` and `look`, and from a note on their next
+  call when it flips.
+
+Decided in the build (M12):
+
+- **Needs** (`sim/village.ts`): fed drops 1 a game day, rested 0.5 a day awake plus 0.6 more while
+  walking or working, but only while a villager is around (a call in the last game hour, or a job
+  running); an absent villager's needs hold. Crossing 25%, 10% and 0 is told with the next result.
+  Pace scales walking and `work` ticks (`agent.pace`), so every job is slower, none refused.
+- **Food** is a Material's `food` (0-1 of a full belly): wheat and berries 10%, eggs and milk 15%,
+  fish 10-30%, bread 35%. An agent's food must say `food` too and fills at most its ingredient's
+  food over the recipe's count (the least of its recipes), half again when the recipe `needs` a
+  workbench and the ingredient is nature's; made of nothing, it fills nothing. `eat` takes up to 8
+  bites, about a second each; without `item` it picks the food that fills best without waste.
+- **Sleep**: 19:00 to 06:00. It walks to the nearest free bed within 16 tiles (any Object whose
+  Design has a mattress part, standing upright) and lies on its mattress; full rest takes 4 game
+  hours there, 8 on the ground. One call sleeps up to 2 game hours (50 s), until rested or morning.
+  `slept` (what: "bed" or "ground") fires after half an hour or more; `ate` fires per bite.
+- **Worth** (`sim/worth.ts`) is read off the Catalog: the cheapest recipe sets it. A villager's new
+  recipe is refused if it, or anything already made from its product, would fall under 1/16 (so a
+  chain built while its root was raw can't be cheapened later). Nature's recipes are exempt.
+- **Unlocks**: nature's Parts and Materials say `unlock` ("hamlet", "village"). An agent's Material
+  unlocks with the cheapest of its ingredients, and one that glows with the lamp; a Design with its
+  most locked Part or Material; a Material that `needs` a workbench with that Design (bread with the
+  oven's flame: a hamlet). `build`, `craft` and `place_block` (and terraform's fill) refuse what's
+  locked and say at which level it opens. `catalog_get` shows worth, food and unlocks.
+- **Points**: an errand 4-10; a harvested crop 0.25; a Design's first build in the world its cost in
+  worth, at most 10 (a one-plank crate earns a quarter point); building another villager's Design 2,
+  once per builder (its author hears of it). Points never go down. Levelling up tells everyone what
+  it unlocked.
+- **Errands**: hashed from the seed and an errand counter (never the shared rng), refilled one a
+  second until three are open (six on the board at most), then an hour after each is done or lapses.
+  Untaken they stay 2 game days; a taker has a game day; at most 2 each. Only the taker's deeds
+  count. Bring errands ask for unlocked nature Materials; build errands for unlocked nature Designs,
+  or (40%) a villager's.
+- **The bounty**: in Village Life, what villagers' Rules make out of nothing (each item given, block
+  set, plant spread, and plant-hour grown) comes from 24 a game day across the world. When it's
+  spent the effect says why. Nature's Rules are free, and so is everything in Sandbox.
+- **Page**: the panel's village section switches Village Life and Sandbox and shows the level,
+  points and errands; agent buttons show fed·rested. Sleepers lie on their backs (on the mattress)
+  with eyes shut; eating raises a hand to the mouth. Village news goes to the feed.
+- Worlds saved before M12 gain the bed, oven and bread, nature's food values and unlock levels, and
+  start fed and rested in a camp with Village Life on.
 
 ### M13 — spectators
 
@@ -555,6 +614,11 @@ Pick these up in the gate of whichever milestone touches them.
   drawn; the page relights moving lamps once a tick. Light, fire and sparks were only seen in
   software; check them on the dev box with the hardware remeasure.
 - From playtest 0008: `interact` walks to its targets without saying where you ended up.
+- From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
+  (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
+  all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
+  The dev panel's village section was only checked through its message path (headless tabs don't
+  draw the panel); look at it on the dev box.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

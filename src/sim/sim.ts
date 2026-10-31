@@ -25,14 +25,12 @@ import { type PropDiff, Props } from "./props.ts";
 import { Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
 import { Signals } from "./signals.ts";
+import { TICK_HZ, TICKS_PER_DAY } from "./time.ts";
+import { Village, type VillageSave } from "./village.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
 
-export const TICK_HZ = 20;
-/** One game day per ten real minutes at 1× speed. */
-export const TICKS_PER_DAY = TICK_HZ * 600;
-/** Ticks in `hours` game hours. */
-export const gameHours = (hours: number) => Math.round((hours / 24) * TICKS_PER_DAY);
+export { gameHours, TICK_HZ, TICKS_PER_DAY } from "./time.ts";
 
 export const Anim = {
   Idle: 0,
@@ -44,6 +42,9 @@ export const Anim = {
   Fish: 6,
   /** Knocked over by something heavy, getting back up. */
   Fall: 7,
+  /** Asleep, lying down. */
+  Sleep: 8,
+  Eat: 9,
 } as const;
 
 /** A blow this fast (blocks/s) with this much momentum (tonne · blocks/s) knocks a villager over. */
@@ -89,6 +90,13 @@ export interface Agent {
   knock?: [number, number];
   /** The Object they're pushing (it doesn't knock them over). Not saved. */
   pushing?: number;
+  /** Needs (Village Life), 0-1: a full belly, and rest. */
+  fed: number;
+  rested: number;
+  /** Walking and working pace, 1 unless a need is low. Not saved. */
+  pace?: number;
+  /** Asleep: the bed Object they lie on, or 0 on the ground. Not saved. */
+  sleeping?: number;
   queue: { callId: number; job: Job }[];
 }
 
@@ -111,6 +119,8 @@ export type SimEvent =
   | { type: "catalog"; agent: number; text: string }
   /** Something physical happened to a villager: knocked over, dropped what they carried. */
   | { type: "physics"; agent: number; text: string }
+  /** Village Life news: the village grew, an errand was done, the spectator switched modes. */
+  | { type: "village"; agent: number; text: string }
   /** A signal ran from a sender (or a Rule's event) to receivers (flat x, y, z). */
   | { type: "signal"; from: [number, number, number]; to: number[]; on: boolean };
 
@@ -130,7 +140,7 @@ export interface SaveData {
   edits: number[];
   /** [tile key, design, planted, grow] */
   crops: [number, number, number, number][];
-  agents: Omit<Agent, "queue" | "anim" | "stride" | "notes">[];
+  agents: Omit<Agent, "queue" | "anim" | "stride" | "notes" | "pace" | "sleeping">[];
   /** Trees, rocks, flowers etc. that differ from generation. */
   props?: PropDiff;
   /** Objects villagers built from Designs' parts. */
@@ -144,6 +154,8 @@ export interface SaveData {
   ruleStats?: [number, RuleStat][];
   /** What's burning, and the fires it belongs to. */
   fire?: FireSave;
+  /** Village Life: on or Sandbox, points, level, errands. Missing before M12. */
+  village?: VillageSave;
   /** MCP session → agent id, so connected agents survive a page reload. */
   sessions: [string, number][];
 }
@@ -193,6 +205,7 @@ export class Sim {
   /** Wild fire: what burns now. */
   readonly wildfire: Fire = new Fire(this);
   readonly signals: Signals = new Signals(this);
+  readonly village: Village = new Village(this);
 
   constructor(readonly seed: number) {
     this.world = generateWorld({ seed });
@@ -283,6 +296,8 @@ export class Sim {
       authored: [],
       notes: [],
       queue: [],
+      fed: 1,
+      rested: 1,
     };
     this.agents.push(agent);
     this.agentsVersion++;
@@ -398,6 +413,7 @@ export class Sim {
   fire(event: RuleEvent, agent: Agent | null, x: number, y: number, z: number, what: string) {
     const ctx: RuleCtx = { agent, x, y, z, what };
     this.rules.fire(event, ctx);
+    this.village.onEvent(event, agent, what);
   }
 
   /** Close proposals that are due and announce the outcome. */
@@ -427,8 +443,11 @@ export class Sim {
     this.stepAnimals();
     stepSchools(this.schools, this.world, this.rng, this.tick, TICK_HZ);
     for (const agent of this.agents) {
-      // Bodies follow the ground: slopes while walking, edits while standing still.
-      agent.y += (standY(this.world, agent.x, agent.z, agent.y) - agent.y) * 0.35;
+      // Bodies follow the ground: slopes while walking, edits while standing still. A sleeper
+      // lies where their bed holds them.
+      if (agent.sleeping === undefined) {
+        agent.y += (standY(this.world, agent.x, agent.z, agent.y) - agent.y) * 0.35;
+      }
       if (this.down(agent)) continue;
       const current = agent.queue[0];
       if (!current) continue;
@@ -446,6 +465,7 @@ export class Sim {
     this.stepBodies();
     this.wildfire.step();
     this.signals.step();
+    this.village.step();
     this.rules.tick(this.tick, (this.tick + this.dayOffset) % TICKS_PER_DAY, TICKS_PER_DAY);
     if (this.tick % TICK_HZ === 0 && this.catalog.open().length) this.settleProposals();
   }
@@ -705,10 +725,11 @@ export class Sim {
       catalog: this.catalog.save(),
       ruleStats: structuredClone([...this.rules.stats]),
       fire: this.wildfire.save(),
+      village: this.village.save(),
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
-      agents: this.agents.map(({ queue: _q, anim: _a, stride: _s, notes: _n, ...rest }) =>
-        structuredClone(rest)
-      ),
+      agents: this.agents.map((
+        { queue: _q, anim: _a, stride: _s, notes: _n, pace: _p, sleeping: _z, ...rest },
+      ) => structuredClone(rest)),
     };
   }
 
@@ -736,6 +757,7 @@ export class Sim {
     if (data.props) sim.props.applyDiff(data.props);
     if (data.objects) sim.objects.reset(data.objects);
     sim.wildfire.load(data.fire);
+    sim.village.load(data.village);
     if (data.animals) sim.animals = structuredClone(data.animals);
     // Saves from before a placement change get fresh schools.
     if (data.schools?.every((f) => schoolFits(sim.world, f))) {
@@ -751,6 +773,8 @@ export class Sim {
         body: agent.body ?? null,
         lastActive: agent.lastActive ?? 0,
         authored: agent.authored ?? [],
+        fed: agent.fed ?? 1,
+        rested: agent.rested ?? 1,
         notes: [],
         anim: Anim.Idle,
         stride: 0,

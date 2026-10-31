@@ -2,6 +2,7 @@ import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
 import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent } from "./sim.ts";
+import type { VillageStatus } from "./village.ts";
 import type { WorldData } from "./world.ts";
 
 /**
@@ -51,6 +52,8 @@ export type ToWorker =
   | { type: "call"; callId: number; session: string; tool: string; args: Record<string, unknown> }
   | { type: "speed"; speed: number }
   | { type: "setTime"; timeOfDay: number }
+  /** The spectator's switch: Village Life on, or the world a Sandbox. */
+  | { type: "villageLife"; on: boolean }
   | { type: "reset"; seed: number }
   | { type: "save" };
 
@@ -90,6 +93,8 @@ export interface TickMessage {
    */
   bodies?: Float32Array<ArrayBuffer>;
   catalog?: CatalogDelta;
+  /** Village Life: mode, level, errands and everyone's needs, sent about once a second. */
+  village?: VillageStatus;
   /** Sent when crops change, or the Catalog does (a replaced Design recolors its crops). */
   crops?: Float32Array<ArrayBuffer>;
   /** Everything burning (FIRE_STRIDE each), sent when something catches, goes out or moves. */

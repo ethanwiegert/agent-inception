@@ -28,6 +28,7 @@ const err = (r: CallResult, includes: string) => {
 /** A villager next to a flat, clear patch of meadow, `w` × `d` columns, east of them. */
 function site(w = 4, d = 4) {
   const sim = new Sim(1337);
+  sim.village.life = false; // M7-M11 mechanics on their own: a Sandbox, nothing locked
   ok(run(sim, "a", "join", { name: "Fern" }));
   const fern = sim.agents[0];
   const world = sim.world;
@@ -67,7 +68,7 @@ Deno.test("place_block lays any held block Material over an area, stacked into a
 Deno.test("place_block refuses what isn't a held block, cells villagers stand in, and big jobs", () => {
   const { sim, fern, x, z } = site();
   err(run(sim, "a", "place_block", { x, z, block: "stone" }), "You have no stone");
-  err(run(sim, "a", "place_block", { x, z, block: "wheat seeds" }), "isn't a block Material");
+  err(run(sim, "a", "place_block", { x, z, block: "wheat seeds" }), "is an item, not a block");
   err(run(sim, "a", "place_block", { x, z, block: "water" }), "isn't a block Material");
   fern.inventory.stone = 99;
   err(

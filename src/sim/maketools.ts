@@ -4,6 +4,7 @@ import { areaArgs, give, type Handler, inventoryText, MAX_AREA, num, reach, work
 import { PART_TICKS, partCost, type WorldObject } from "./objects.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
+import { nearestOf } from "./villagetools.ts";
 
 /**
  * Making and gathering: `craft` turns one Material into another along made_from Relations, and
@@ -12,6 +13,9 @@ import type { ToolDef } from "./tools.ts";
  * Catalog data: made_from and drops Relations, each following replaced_by.
  */
 
+/** How far craft looks for a workbench a recipe needs, and how close it works at one. */
+const BENCH_SEARCH = 48;
+const BENCH_REACH = 3;
 /** Batches one craft call may run (about a second each). */
 const MAX_TIMES = 16;
 const CRAFT_TICKS = TICK_HZ;
@@ -27,8 +31,10 @@ export const MAKE_TOOL_DEFS: ToolDef[] = [
     name: "craft",
     description: "Make a Material from another you carry, by its recipe (a made_from Relation): " +
       "4 planks from 1 log, cobble from stone, brick or tiles from clay. Works anywhere, about a " +
-      "second per batch. Find recipes with catalog_find property type=made_from; invent your " +
-      "own Material and add a made_from Relation to craft it.",
+      "second per batch; a recipe that needs a workbench (bread: an oven) is crafted beside one " +
+      "(you walk over). Find recipes with catalog_find property type=made_from; invent your " +
+      "own Material and add a made_from Relation to craft it (it's worth what goes into it: 4 " +
+      "from a plank are each worth 1/16 of a log, the least anything is worth).",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,7 +84,23 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     const times = args.times === undefined ? 1 : num(args.times, "times");
     if (times < 1 || times > MAX_TIMES) throw new Error(`times is 1-${MAX_TIMES}.`);
     const recipe = pickRecipe(sim, agent, args.item, args.from);
+    const product = sim.catalog.byName(recipe.output)!;
+    // A workbench: bread is baked at an oven. Craft walks over to the nearest one.
+    const benches = sim.catalog.links(product.id, "needs").map(({ entry }) => entry);
+    const bench = benches
+      .map((d) => nearestOf(sim, d, agent.x, agent.z, BENCH_SEARCH))
+      .filter((b) => b !== null).sort((a, b) => a.d - b.d)[0];
+    if (benches.length && !bench) {
+      const names = benches.map((d) => `"${(sim.catalog.current(d) ?? d).name}"`).join(" or ");
+      throw new Error(
+        `${product.name} is made at a ${names}, and none stands within ${BENCH_SEARCH} tiles. ` +
+          `Build one (catalog_get ${
+            names.split(" or ")[0]
+          } says what it takes) and craft beside it.`,
+      );
+    }
     return (function* () {
+      if (bench && bench.d > BENCH_REACH) yield* reach(sim, agent, bench.x, bench.z);
       let made = 0, used = 0;
       for (let i = 0; i < times; i++) {
         if ((agent.inventory[recipe.input] ?? 0) < 1) break;
@@ -91,10 +113,11 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         sim.fire("crafted", agent, fx, sim.world.heightAt(fx, fz), fz, recipe.output);
       }
       const short = used < times ? ` You ran out of ${recipe.input} after ${used}.` : "";
+      const at = bench ? ` at the ${sim.catalog.get(bench.o.design)?.name ?? "workbench"}` : "";
       const others = recipe.others.length
         ? ` (It's also made from ${recipe.others.join(" or ")}: pass from to choose.)`
         : "";
-      return `Crafted ${made} ${recipe.output} from ${used} ${recipe.input}.${short}${others} ` +
+      return `Crafted ${made} ${recipe.output} from ${used} ${recipe.input}${at}.${short}${others} ` +
         inventoryText(agent);
     })();
   },
@@ -375,7 +398,8 @@ interface Recipe {
  */
 function pickRecipe(sim: Sim, agent: Agent, item: unknown, from: unknown): Recipe {
   const c = sim.catalog;
-  const want = String(item ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(item ?? "").trim().toLowerCase();
+  const want = c.byName(raw) ? raw : raw.replace(/_/g, " ");
   if (!want) throw new Error('Say what to craft, e.g. item: "planks".');
   const e = c.byName(want);
   const craftable = craftableNow(sim, agent);
@@ -387,6 +411,8 @@ function pickRecipe(sim: Sim, agent: Agent, item: unknown, from: unknown): Recip
   }
   const output = c.current(e);
   if (!output) throw new Error(`"${e.name}" is retired, so nobody crafts it now.${hint}`);
+  const locked = sim.village.lockedText(output);
+  if (locked) throw new Error(locked);
   const recipes = recipesFor(sim, e);
   if (!recipes.length) {
     throw new Error(

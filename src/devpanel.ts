@@ -1,5 +1,6 @@
 import { LOOKS } from "./render/look.ts";
 import type { Catalog } from "./sim/catalog.ts";
+import type { VillageStatus } from "./sim/village.ts";
 
 export interface DevHandlers {
   look: (id: string) => void;
@@ -7,6 +8,8 @@ export interface DevHandlers {
   speed: (s: number) => void;
   seed: (seed: number) => void;
   follow: (agentId: number | null) => void;
+  /** Village Life on, or the world a Sandbox. */
+  villageLife: (on: boolean) => void;
 }
 
 export interface DevStatus {
@@ -19,6 +22,7 @@ export interface DevStatus {
   agents: { id: number; name: string }[];
   following: number | null;
   catalog: Catalog;
+  village: VillageStatus | null;
   stats: string[];
 }
 
@@ -83,6 +87,14 @@ export function createDevPanel(on: DevHandlers) {
   const seedButton = button("", () => on.seed((Math.random() * 1e6) | 0));
   world.body.append(seedButton);
 
+  const village = section("village");
+  let life = true;
+  const lifeButton = button("Village Life", () => on.villageLife(true));
+  const sandboxButton = button("Sandbox", () => on.villageLife(false));
+  const errands = document.createElement("div");
+  village.body.append(lifeButton, sandboxButton, errands);
+  let villageKey = "";
+
   const agents = section("agents");
   let agentsKey = "";
 
@@ -106,13 +118,45 @@ export function createDevPanel(on: DevHandlers) {
       seedButton.textContent = `seed ${s.seed} — new world`;
       agents.head.textContent = `agents · bridge ${s.bridge ? "connected" : "offline"}`;
 
-      const key = JSON.stringify([s.agents, s.following]);
+      const v = s.village;
+      if (v) {
+        life = v.life;
+        mark(lifeButton, life);
+        mark(sandboxButton, !life);
+        village.head.textContent = life
+          ? `village · a ${v.level}, ${v.points}${v.next === null ? "" : `/${v.next}`} points`
+          : "village · sandbox: no needs, all unlocked";
+        const key = JSON.stringify([life, v.errands]);
+        if (key !== villageKey) {
+          villageKey = key;
+          errands.replaceChildren(
+            ...(life ? v.errands : []).map((t) => {
+              const el = document.createElement("div");
+              // Errands can name villagers' Designs: text, never HTML.
+              el.textContent = el.title = t;
+              el.style.cssText = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
+                "opacity:.85";
+              return el;
+            }),
+          );
+        }
+      }
+      // Each villager's needs, to the nearest tenth, so the buttons don't rebuild every tick.
+      const needs = new Map((s.village?.needs ?? []).map(([id, f, r]) => [id, [f, r]]));
+      const tenth = (n: number) => Math.round(n * 10) * 10;
+      const label = (a: { id: number; name: string }) => {
+        const n = needs.get(a.id);
+        return n && life ? `${a.name} ${tenth(n[0])}·${tenth(n[1])}` : a.name;
+      };
+      const key = JSON.stringify([s.agents.map(label), s.following]);
       if (key !== agentsKey) {
         agentsKey = key;
         agents.body.replaceChildren(
           ...(s.agents.length
             ? s.agents.map((a) => {
-              const b = button(a.name, () => on.follow(s.following === a.id ? null : a.id));
+              const b = button(label(a), () => on.follow(s.following === a.id ? null : a.id));
+              const n = needs.get(a.id);
+              if (n && life) b.title = `fed ${tenth(n[0])}%, rested ${tenth(n[1])}%`;
               mark(b, s.following === a.id);
               return b;
             })

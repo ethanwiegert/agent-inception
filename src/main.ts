@@ -48,6 +48,9 @@ let bridgeConnected = false;
 const client = new SimClient(params.has("seed") ? Number(params.get("seed")) : undefined);
 if (params.has("speed")) client.send({ type: "speed", speed: Number(params.get("speed")) });
 if (params.has("time")) client.send({ type: "setTime", timeOfDay: Number(params.get("time")) });
+if (params.has("sandbox")) {
+  client.send({ type: "villageLife", on: params.get("sandbox") === "0" });
+}
 addEventListener("visibilitychange", () => document.hidden && client.send({ type: "save" }));
 
 // Clicking a name (over a head or in the panel) follows that agent; clicking again lets go.
@@ -90,6 +93,8 @@ client.onEvent = (event) => {
     overlay.log(event.agent ? agentName(event.agent) : "catalog", event.text);
   } else if (event.type === "physics") {
     overlay.log(agentName(event.agent), event.text);
+  } else if (event.type === "village") {
+    overlay.log(event.agent ? agentName(event.agent) : "village", event.text);
   } else if (event.type === "signal") {
     renderer?.particles.spark(event.from, event.to, event.on, performance.now() / 1000);
   }
@@ -261,6 +266,7 @@ const panel = createDevPanel({
   speed: (speed) => client.send({ type: "speed", speed }),
   seed: (seed) => client.send({ type: "reset", seed }),
   follow: toggleFollow,
+  villageLife: (on) => client.send({ type: "villageLife", on }),
 });
 
 function resize() {
@@ -365,6 +371,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
       agents: agents.map((a) => ({ id: a.id, name: a.name })),
       following: camera.follow,
       catalog: client.catalog,
+      village: client.village,
       stats: [
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,

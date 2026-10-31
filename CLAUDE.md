@@ -35,10 +35,11 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 - `deno task bridge` — standalone MCP bridge on :7777 (for a hosted game; not used in dev)
 
 URL params: `seed` (a different seed than the save starts a NEW world and overwrites the save),
-`time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
-`storybook`), `bridge` (WebSocket URL override), `debug` (comma list of passes to skip for
-profiling: `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas;
-frames render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
+`sandbox` (1 switches the world to Sandbox, 0 back to Village Life; saved with the world), `time`
+(0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`, `storybook`),
+`bridge` (WebSocket URL override), `debug` (comma list of passes to skip for profiling:
+`shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas; frames
+render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
 
 ## Code map
 
@@ -74,7 +75,10 @@ src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, s
                     light.ts (light field in 16³ chunks: lamps, flames, fire, glowing blocks;
                     daylight), fire.ts (wild fire: what burns, spread, caps, burn-out),
                     firetools.ts (ignite, douse), signals.ts (levers, plates, channels,
-                    receivers),
+                    receivers), village.ts (Village Life: needs, pace, points and levels,
+                    errands, the bounty for villagers' Rules, Sandbox), villagetools.ts (eat,
+                    sleep, errands), worth.ts (worth, food and unlock levels read off the
+                    Catalog), time.ts (tick rate, game days),
                     world.ts (voxels, water, slopes, floors), worldgen.ts (island, rivers),
                     props.ts (plants as Objects of Designs: worldgen by habitat zone, growth,
                     save diff, PlantInfo read off a Design),
@@ -107,7 +111,7 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M11 are done; M12, Village Life, is next. The
+`docs/ROADMAP.md` lists the V1 milestones in order (M5-M12 are done; M13, Spectators, is next. The
 hardware GPU remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev
 box). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
 gate described there (tests, playtests with cost-effective agents including an adversary, a report

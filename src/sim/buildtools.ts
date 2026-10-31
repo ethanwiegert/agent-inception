@@ -1,4 +1,4 @@
-import type { DesignContent, Entry } from "./catalog.ts";
+import type { DesignContent, Entry, MaterialContent } from "./catalog.ts";
 import {
   type Args,
   give,
@@ -554,6 +554,10 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
         if (typeof r === "string") skipped.push(r);
         else object = r;
       }
+      // A Design of blocks only is built when its last block goes in (parts fire on their Object).
+      if (built && !rest.length && !content.parts.length) {
+        sim.fire("built", agent, x0, base, z0, design.name);
+      }
       const done = cells.length - rest.length;
       let text = cells.length
         ? `Built ${built} block${built === 1 ? "" : "s"} of ${name} ${place}: ` +
@@ -720,16 +724,23 @@ function heldBlock(
   value: unknown,
   emptyOk = false,
 ): { id: number; name: string } {
-  const want = String(value ?? "").trim().toLowerCase().replace(/_/g, " ");
+  const raw = String(value ?? "").trim().toLowerCase();
+  const want = sim.blocks.byName(raw) ? raw : raw.replace(/_/g, " ");
   if (!want) throw new Error('Say which block to place, e.g. block: "stone".');
   const def = sim.blocks.byName(want);
   const held = placeableHeld(sim, agent);
+  const item = sim.catalog.byName(want);
   const hint = held.length
     ? ` You can place: ${held.join(", ")}.`
     : " Dig some with break_block (grass gives dirt; deeper down there's stone).";
+  if (item?.kind === "material" && (item.content as MaterialContent).form === "item") {
+    throw new Error(`"${item.name}" is an item, not a block: it goes into Designs' parts.${hint}`);
+  }
   if (!def || def.id === 0 || !sim.holdable(def.name)) {
     throw new Error(`"${want}" isn't a block Material.${hint}`);
   }
+  const locked = sim.village.lockedText(sim.catalog.byName(def.name)!);
+  if (locked) throw new Error(locked);
   // Flatten may dig what it fills with, so it can start empty-handed.
   if (!emptyOk && !agent.inventory[def.name]) throw new Error(`You have no ${def.name}.${hint}`);
   return { id: def.id, name: def.name };
@@ -887,6 +898,8 @@ function buildable(sim: Sim, value: unknown): Entry {
   if (e.kind !== "design") throw new Error(`"${e.name}" is a ${e.kind}, not a Design.`);
   const live = c.current(e);
   if (!live) throw new Error(`"${e.name}" is retired, so nothing new is built from it.`);
+  const locked = sim.village.lockedText(live);
+  if (locked) throw new Error(locked);
   return live;
 }
 

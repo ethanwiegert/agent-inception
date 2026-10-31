@@ -767,6 +767,85 @@ add("rule", "lamplit fields", "At night, wheat that a lamp or fire lights keeps 
   do: [{ grow: { what: "wheat crop", hours: 0.5, light_above: 0.3 } }],
 });
 
+// ---------------------------------------------------------------- Village Life (M12)
+
+material(
+  "bread",
+  "item",
+  "#c8914f",
+  "plain",
+  0.3,
+  0.5,
+  true,
+  "A loaf baked from wheat in an oven.",
+);
+add("part", "mattress", "Furniture: villagers sleep twice as well on one (a bed).", {
+  shape: "box",
+  furniture: "mattress",
+});
+add("design", "bed", "A plank bed with a wool mattress: sleep on it at night.", {
+  anchored: true,
+  mark: "b",
+  parts: [
+    part("box", "planks", [0.5, 0.27, 1], [0.96, 0.26, 1.96]),
+    part("box", "planks", [0.5, 0.55, 0.06], [0.96, 0.62, 0.1]),
+    part("mattress", "wool", [0.5, 0.49, 1.05], [0.88, 0.18, 1.8]),
+  ],
+});
+add("design", "oven", "A domed cobble oven with a tame fire: bake bread beside it (craft).", {
+  anchored: true,
+  parts: [
+    part("box", "cobble", [0.5, 0.25, 0.5], [0.96, 0.5, 0.96]),
+    part("sphere", "cobble", [0.5, 0.62, 0.5], [0.9, 0.7, 0.9]),
+    part("cylinder", "cobble", [0.72, 1.05, 0.72], [0.18, 0.4, 0.18]),
+    part("flame", "log", [0.5, 0.62, 0.08], [0.26, 0.24, 0.12]),
+  ],
+});
+rel("bread", "made_from", "wheat");
+rel("bread", "needs", "oven");
+add("rule", "sweet dreams", "Now and then a night in a bed brings a dream.", {
+  when: { event: "slept", what: "bed" },
+  if: { chance: 0.3 },
+  do: [{ say: "You dreamt of wheat fields rolling to the sea." }],
+});
+add("rule", "warm bread", "Fresh bread cheers whoever eats it.", {
+  when: { event: "ate", what: "bread" },
+  do: [{ say: "Warm bread. The day looks brighter." }],
+});
+
+// Food: how much one fills a villager's hunger (a full belly is 1).
+const FOOD: Record<string, number> = {
+  wheat: 0.1,
+  berries: 0.1,
+  egg: 0.15,
+  milk: 0.15,
+  minnow: 0.1,
+  trout: 0.2,
+  perch: 0.2,
+  mackerel: 0.25,
+  cod: 0.3,
+  bread: 0.35,
+};
+// Unlocks: what a hamlet and a village make available. Everything else is there from the camp.
+const UNLOCK: Record<string, string> = {
+  hinge: "hamlet",
+  axle: "hamlet",
+  slider: "hamlet",
+  lamp: "hamlet",
+  flame: "hamlet",
+  brick: "hamlet",
+  tiles: "hamlet",
+  motor: "village",
+  lever: "village",
+  plate: "village",
+  "lantern glass": "village",
+};
+for (const e of entries) {
+  const content = e.content as Record<string, unknown>;
+  if (e.kind === "material" && FOOD[e.name]) content.food = FOOD[e.name];
+  if (UNLOCK[e.name]) content.unlock = UNLOCK[e.name];
+}
+
 /** Add nature's entries to a new Catalog. */
 export function seedNature(c: Catalog) {
   for (const e of entries) c.add(e, "nature", 0);
