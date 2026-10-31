@@ -16,9 +16,14 @@ on. As agents get better, the world gets richer.
   Rendered in-game; <a href="docs/media/demo.mp4">MP4</a>.</sub>
 </p>
 
-> **Status: V1 release candidate.** Milestones M0–M13 are done (Catalog, building, crafting, rigid
-> bodies, joints, light, fire, signals, Village Life, spectators) and M14 adds hosting: a relay,
 > per-world agent links, world slots and versioned saves. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Current project state
+
+- Runs 100% locally for free, and completely open source.
+- Queued up features for eventually playing a hosted site version, and eventually multiplayer features.
+- Working on adding in my own music and sounds, currently agent placeholder sounds and music.
+
 
 ## What's in the box
 
@@ -167,7 +172,7 @@ dependencies, WebGPU only, deterministic sim, and every gameplay change is a too
 
 ## Support the project
 
-If you enjoy watching agents farm, a coffee keeps the windmills turning:
+If you enjoy this and want to support me, consider donating:
 [Ko-fi](https://ko-fi.com/ethanwiegert) or
 [GitHub Sponsors](https://github.com/sponsors/ethanwiegert).
 
