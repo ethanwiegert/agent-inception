@@ -20,14 +20,15 @@ const NOTE = "Tips go straight to me, Ethan, the solo dev behind this island. No
   "thank-you, and I'll use it as I see fit.";
 
 const css = `
-.ai-support{position:fixed;left:12px;top:12px;z-index:18;display:flex;gap:6px;align-items:center;
+.ai-support{position:fixed;left:calc(12px + env(safe-area-inset-left));
+  top:calc(12px + env(safe-area-inset-top));z-index:18;display:flex;gap:6px;align-items:center;
   font:600 13px/1 ui-sans-serif,system-ui,sans-serif;user-select:none}
 .ai-support>a,.ai-support>button{height:32px;min-width:32px;box-sizing:border-box;
   border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,14,18,.55);
   color:#fff;cursor:pointer;font:inherit;padding:0 12px;display:inline-flex;align-items:center;
-  justify-content:center;gap:6px;text-decoration:none}
+  justify-content:center;gap:6px;text-decoration:none;-webkit-tap-highlight-color:transparent}
 .ai-support>a{padding:0}
-.ai-support>a:hover,.ai-support>button:hover{background:rgba(10,14,18,.8)}
+@media (hover:hover){.ai-support>a:hover,.ai-support>button:hover{background:rgba(10,14,18,.8)}}
 .ai-support>button[aria-expanded="true"]{border-color:#9fd36b;background:rgba(20,40,16,.8)}
 .ai-support a:focus-visible,.ai-support button:focus-visible{outline:2px solid #9fd36b;
   outline-offset:2px}
@@ -42,6 +43,8 @@ const css = `
   background:#2f5d3a;color:#fff;text-decoration:none;font-weight:600}
 .ai-support-pop a:hover{background:#3a7048}
 .ai-support-pop small{display:block;margin-top:6px;text-align:center;color:#6b6556;font-size:11px}
+@media (pointer:coarse){.ai-support>a,.ai-support>button{height:40px;min-width:40px}
+  .ai-support-pop{top:48px}.ai-support-pop a{padding:11px 12px}}
 @media (max-width:520px){.ai-support .label{display:none}.ai-support>button{padding:0}}`;
 
 /** Mount the GitHub link and the Support button. Returns the root, for tests and teardown. */

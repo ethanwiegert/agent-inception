@@ -6,11 +6,14 @@ const MIN_DIST = 6, MAX_DIST = 160;
 const DAMP = 10;
 
 const css = `
-.ai-cam{position:fixed;right:12px;bottom:12px;display:flex;gap:6px;align-items:center;
-  font:600 13px/1 ui-sans-serif,system-ui;user-select:none}
+.ai-cam{position:fixed;right:calc(12px + env(safe-area-inset-right));
+  bottom:calc(12px + env(safe-area-inset-bottom));display:flex;gap:6px;align-items:center;
+  font:600 13px/1 ui-sans-serif,system-ui;user-select:none;-webkit-user-select:none}
 .ai-cam button{width:32px;height:32px;border-radius:999px;border:1px solid rgba(255,255,255,.18);
-  background:rgba(10,14,18,.55);color:#fff;cursor:pointer;font:inherit;padding:0}
-.ai-cam button:hover{background:rgba(10,14,18,.8)}
+  background:rgba(10,14,18,.55);color:#fff;cursor:pointer;font:inherit;padding:0;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+@media (hover:hover){.ai-cam button:hover{background:rgba(10,14,18,.8)}}
+@media (pointer:coarse){.ai-cam{gap:8px}.ai-cam button{width:42px;height:42px;font-size:16px}}
 .ai-cam button.on{border-color:#9fd36b;background:rgba(20,40,16,.8)}
 .ai-cam .needle{display:inline-block;transition:none;color:#e58b7a}
 `;
@@ -19,7 +22,7 @@ const css = `
  * Orbit camera for spectators. Gestures move the *goal* values and the real view eases toward
  * them, so every input feels smooth. Mouse: drag orbits, right/middle-drag grabs the ground,
  * wheel zooms toward the cursor, double-click glides to a point. Touch: one finger orbits, pinch
- * zooms, two fingers pan. No keyboard control (WASD is reserved for the gag).
+ * zooms, two fingers pan, double-tap glides. No keyboard control (WASD is reserved for the gag).
  */
 export class Camera {
   readonly viewProj = mat4();
@@ -104,8 +107,15 @@ export class Camera {
       return Math.hypot(a.x - b.x, a.y - b.y);
     };
 
+    // Touch double-tap, where browsers don't turn it into a dblclick (touch-action: none).
+    let tap: { x: number; y: number; t: number } | null = null;
+    let lastTap: { x: number; y: number; t: number } | null = null;
+
     el.addEventListener("pointerdown", (e) => {
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, button: e.button });
+      tap = e.pointerType === "touch" && pointers.size === 1
+        ? { x: e.clientX, y: e.clientY, t: e.timeStamp }
+        : null;
       if (pointers.size === 2) pinch = spread();
       el.setPointerCapture(e.pointerId);
     });
@@ -113,11 +123,24 @@ export class Camera {
       pointers.delete(e.pointerId);
       if (pointers.size === 2) pinch = spread();
     };
-    el.addEventListener("pointerup", release);
+    el.addEventListener("pointerup", (e) => {
+      release(e);
+      const t = tap;
+      tap = null;
+      if (!t || Math.hypot(e.clientX - t.x, e.clientY - t.y) > 12 || e.timeStamp - t.t > 300) {
+        return;
+      }
+      const l = lastTap;
+      if (l && t.t - l.t < 350 && Math.hypot(t.x - l.x, t.y - l.y) < 40) {
+        lastTap = null;
+        this.glideTo(el, e.clientX, e.clientY);
+      } else lastTap = t;
+    });
     el.addEventListener("pointercancel", release);
     el.addEventListener("pointermove", (e) => {
       const p = pointers.get(e.pointerId);
       if (!p) return;
+      if (pointers.size > 1) tap = null;
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       if (pointers.size >= 2) {
         // Two fingers: pinch zooms about their midpoint, the midpoint's motion pans.
@@ -144,13 +167,16 @@ export class Camera {
       const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
       this.zoomAt(el, e.clientX, e.clientY, Math.exp(clamp(dy, -200, 200) * 0.0012));
     }, { passive: false });
-    el.addEventListener("dblclick", (e) => {
-      if (!this.ground(el, e.clientX, e.clientY, this.hit)) return;
-      this.follow = null;
-      this.moveGoal(this.hit[0], this.hit[2]);
-      this.goalDistance = clamp(Math.min(this.goalDistance, 30), MIN_DIST, MAX_DIST);
-    });
+    el.addEventListener("dblclick", (e) => this.glideTo(el, e.clientX, e.clientY));
     this.attachHud();
+  }
+
+  /** Glide over to the ground under a screen point, closing in a little. */
+  private glideTo(el: HTMLElement, cx: number, cy: number) {
+    if (!this.ground(el, cx, cy, this.hit)) return;
+    this.follow = null;
+    this.moveGoal(this.hit[0], this.hit[2]);
+    this.goalDistance = clamp(Math.min(this.goalDistance, 30), MIN_DIST, MAX_DIST);
   }
 
   private attachHud() {
@@ -161,8 +187,10 @@ export class Camera {
     bar.className = "ai-cam";
     const button = (label: string, title: string, onclick: () => void) => {
       const b = document.createElement("button");
+      b.type = "button";
       b.innerHTML = label;
       b.title = title;
+      b.setAttribute("aria-label", title);
       b.onclick = onclick;
       bar.append(b);
       return b;

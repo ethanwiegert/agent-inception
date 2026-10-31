@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- Only this site's own code runs; sockets go to this host (or a local bridge in dev). -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -73,6 +73,10 @@
       height: 100%;
       background: #0b0e12;
       color: #d8dee9;
+      /* Phones: no font inflation in landscape, no rubber-band or pull-to-refresh over the world. */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      overscroll-behavior: none;
     }
     canvas {
       display: block;
@@ -84,7 +88,6 @@
       position: fixed;
       inset: 0;
       display: grid;
-      place-items: center;
       overflow: auto;
       /* Clear of the GitHub and Support buttons (top left, src/support.ts). */
       padding: 64px 16px 24px;
@@ -95,6 +98,8 @@
       display: none;
     }
     #about main {
+      /* Auto margins center it without cutting off its top on a short screen. */
+      margin: auto;
       max-width: 560px;
     }
     #about h1 {

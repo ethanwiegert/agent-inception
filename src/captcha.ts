@@ -35,9 +35,9 @@ const CHALLENGES: [string, string][] = [
 ];
 
 const css = `
-.ai-captcha{position:fixed;inset:0;display:grid;place-items:center;background:rgba(5,8,12,.45);
-  z-index:20;font:14px/1.45 ui-sans-serif,system-ui,sans-serif;color:#1d232c}
-.ai-captcha>div{width:min(340px,calc(100vw - 32px));background:#f6f4ee;border-radius:12px;
+.ai-captcha{position:fixed;inset:0;display:grid;background:rgba(5,8,12,.45);overflow:auto;
+  z-index:20;font:14px/1.45 ui-sans-serif,system-ui,sans-serif;color:#1d232c;padding:16px 0}
+.ai-captcha>div{margin:auto;width:min(340px,calc(100vw - 32px));background:#f6f4ee;border-radius:12px;
   padding:18px 18px 14px;box-shadow:0 12px 40px rgba(0,0,0,.4)}
 .ai-captcha h2{margin:0 0 4px;font-size:16px}
 .ai-captcha p{margin:6px 0}
@@ -46,6 +46,8 @@ const css = `
 .ai-captcha input[type=checkbox]{width:20px;height:20px}
 .ai-captcha input[type=text]{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;
   border:1px solid #c9c4b6;font:inherit}
+@media (pointer:coarse){.ai-captcha input[type=text]{font-size:16px}
+  .ai-captcha button{min-height:40px}}
 .ai-captcha .verdict{color:#9a3b2a;min-height:1.45em}
 .ai-captcha .row{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
 .ai-captcha button{padding:5px 12px;border-radius:6px;border:1px solid #8a8576;background:#fff;
