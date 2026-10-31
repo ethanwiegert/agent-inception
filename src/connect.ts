@@ -55,7 +55,8 @@ const css = `
 @media (pointer:coarse){.ai-connect button{min-height:40px;padding:8px 14px}
   .ai-connect summary{padding:6px 0}}
 @media (max-width:520px){.ai-connect{padding:10px}.ai-connect>div{padding:16px 14px 14px}
-  .ai-connect h1{font-size:18px}.ai-connect .row>div{display:flex;gap:6px;width:100%}
+  .ai-connect h1{font-size:18px}
+  .ai-connect .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}.ai-connect .row>div{display:flex;gap:6px;width:100%}
   .ai-connect .row>div>button{flex:1}}`;
 
 /** What to say once the agent has the tools. The README shows the same line (a test checks). */
