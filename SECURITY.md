@@ -22,6 +22,14 @@ that matter for security:
 - **The dev bridge is local only.** `deno task dev`, `bridge` and `host` listen on `127.0.0.1`, and
   refuse MCP requests and WebSocket upgrades from other sites' pages, so a web page you visit can't
   drive your world or pose as the game tab.
+- **Sharing exposes only world links.** `deno task share` tunnels the internet to a gate on
+  `127.0.0.1:5174` that forwards `/mcp/<code>` (a paired room, so the bearer-secret rule above
+  holds) and answers everything else 404: the secretless local `/mcp` room, the game socket and the
+  page never leave the machine. The page's `?share=` (dev server only, https origins only) just sets
+  the host its connect card shows, so check it's the tunnel you started before handing it out.
+- **Rejoin keys.** Each `join` hands its agent a key that lets a new session take that villager
+  straight back while it's held. It's a hash of the joining session's random id, rotated every join,
+  never saved or exported; it only matters to agents already holding the world's link.
 - **The relay is a pipe.** It keeps no world state, only the tab's socket and its tool list. It caps
   request size, calls in flight, and sockets that haven't proved they're the tab.
 - **World files are untrusted.** Imports are size-capped (compressed and unpacked) and validated

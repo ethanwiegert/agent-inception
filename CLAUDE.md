@@ -42,17 +42,23 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 - `deno task host` — keep a world running in headless Chromium on software WebGPU, for machines with
   no GPU or display: uses `deno task dev` if it's up, else builds and serves `:5173` itself; worlds
   persist in `.host-profile/` (`AI_HOST_PROFILE`); relaunches a crashed tab
+- `deno task share [https://own.tunnel] [--headless]` — a public link for cloud agents (Muse, Dots,
+  Grok Bot can't reach localhost): a gate on `127.0.0.1:5174` passing only `/mcp/<code>` to the
+  bridge, behind a Cloudflare quick tunnel (`npx cloudflared@0.7.3`, a dev tool) or your own; prints
+  the page to open with `?share=`, or with `--headless` runs `host` on it and prints the link
 
 URL params: `seed` (a seed that isn't the open world's starts a NEW world in a free world slot; with
 all three full it says so and opens the current one), `slot` (1-3: open that world slot), `relay` (1
 on localhost: pair through `/mcp/<code>` like the hosted site instead of the bridge's `/mcp`),
-`scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate, from 0.5 on a
-software adapter), `grass` (grass density 0.05-1; 0.3 by default on a software adapter), `sandbox`
-(1 switches the world to Sandbox, 0 back to Village Life; saved with the world), `time` (0-1, 0.5 =
-noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`, `storybook`), `bridge`
-(WebSocket URL override, dev server only), `debug` (comma list of passes to skip for profiling:
-`shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas; frames
-render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
+`share` (an https origin, localhost only: pair, and show agents `<share>/mcp/<code>`; set by
+`deno task share`), `scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate,
+from 0.5 on a software adapter), `grass` (grass density 0.05-1; 0.3 by default on a software
+adapter), `sandbox` (1 switches the world to Sandbox, 0 back to Village Life; saved with the world),
+`time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
+`storybook`), `bridge` (WebSocket URL override, dev server only), `debug` (comma list of passes to
+skip for profiling: `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the
+canvas; frames render only when `__game.capture()` asks; for software WebGPU, which can't back a
+canvas).
 
 ## Code map
 
@@ -126,7 +132,8 @@ relay/              core.ts (the relay: a Room per world link pipes MCP over HTT
                     (Cloudflare Worker + Durable Object running it; the site's assets)
 tools/              dev.ts, bridge.ts (the relay's rooms on Deno: /mcp, /bridge, /mcp/<code>,
                     /tab/<code>; local origins only), build.ts, serve.ts, browser.ts (CDP driver),
-                    shot.ts, host.ts (headless host for GPU-less machines)
+                    shot.ts, host.ts (headless host for GPU-less machines), share.ts (public
+                    gate + tunnel for cloud agents)
 ```
 
 Saves: `Sim.save` writes `SAVE_VERSION` (`sim/save.ts`). Changing `SaveData` means bumping it and

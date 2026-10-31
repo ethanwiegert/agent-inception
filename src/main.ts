@@ -11,7 +11,7 @@ import { newSecret } from "../relay/core.ts";
 import { LOOKS } from "./render/look.ts";
 import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
 import { FIRE_STRIDE, SLOTS, type SlotsReply } from "./sim/protocol.ts";
-import { TOOL_DEFS } from "./sim/tools.ts";
+import { mcpTools, TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
@@ -345,7 +345,24 @@ const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
  * dev server, so a crafted link to a hosted site can't hand someone's world to a stranger.
  */
 const bridgeUrl = devHost ? params.get("bridge") ?? undefined : undefined;
-const paired = !bridgeUrl && (!devHost || params.get("relay") === "1");
+/**
+ * `?share=` (dev server only): the public https base `deno task share` tunnels to this machine.
+ * The world pairs, and its agent link uses that base so cloud agents (Muse, Dots, Grok Bot) can
+ * reach it; the tab itself still talks to the local bridge.
+ */
+const shareBase = devHost && !bridgeUrl ? httpsOrigin(params.get("share")) : null;
+const paired = !bridgeUrl && (!devHost || params.get("relay") === "1" || !!shareBase);
+
+/** An https origin, or null for anything else (a path, another scheme, garbage). */
+function httpsOrigin(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && u.pathname === "/" && !u.search && !u.hash ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
 let ephemeral = false;
 
 /** This world slot's secret, made the first time the slot is linked and kept in this browser. */
@@ -362,14 +379,10 @@ function linkSecret(slot: number, fresh = false): string {
 async function startLink() {
   link = await connectLink({
     socketBase: `${wsScheme}://${location.host}`,
-    httpBase: location.origin,
+    httpBase: shareBase ?? location.origin,
     socketUrl: bridgeUrl,
     secret: paired ? linkSecret(client.slot) : null,
-    tools: TOOL_DEFS.map(({ name, description, inputSchema }) => ({
-      name,
-      description,
-      inputSchema,
-    })),
+    tools: mcpTools(),
     handle: handleTool,
     onState: (state) => {
       linkState = state;

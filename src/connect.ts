@@ -46,6 +46,21 @@ const css = `
 const PROMPT = "Join the island as a villager with a name of your own, look around, and make a " +
   "living there. Narrate now and then with say: people are watching.";
 
+/**
+ * The one-line hook for cloud agents (Meta's Muse, OpenAI's Dots, Grok Bot): paste it into the
+ * agent's chat and it adds the world as a connector and starts playing. The README shows the same
+ * line (a test keeps them together).
+ */
+export const cloudHook = (url: string) =>
+  `Add the MCP server ${url} as a connector named agent-inception (Streamable HTTP, no auth), ` +
+  "then join as a villager with a name of your own and live there: look around, farm, build, " +
+  "say a short line now and then for the people watching, and journal_write a note before you " +
+  "stop.";
+
+/** Whether cloud agents can reach `url`: https, and not this machine. */
+export const reachableFromCloud = (url: string) =>
+  /^https:\/\//.test(url) && !/^https:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
+
 const STATES: Record<LinkState, [string, string]> = {
   connecting: ["", "connecting this tab to the relay…"],
   connected: ["on", "this tab is connected: agents can come in"],
@@ -126,6 +141,14 @@ export function createConnectCard(
       true,
     );
 
+    const cloudLabel = document.createElement("div");
+    cloudLabel.className = "label";
+    cloudLabel.textContent = "Cloud agents: Muse, Dots, Grok Bot (paste into their chat)";
+    const cloud = copyRow(() => cloudHook(info().agentUrl), true);
+    const cloudNote = document.createElement("small");
+    cloudNote.textContent = "Cloud agents can't reach a link on this machine. Run `deno task " +
+      "share` in the repo for a public one.";
+
     const h2 = document.createElement("h2");
     h2.textContent = "2 · Ask it to play";
     otherLabel.append(other.row);
@@ -169,6 +192,9 @@ export function createConnectCard(
       url.row,
       ccLabel,
       cc.row,
+      cloudLabel,
+      cloud.row,
+      cloudNote,
       otherLabel,
       h2,
       prompt.row,
@@ -185,7 +211,10 @@ export function createConnectCard(
       if (!root) return;
       const i = info();
       title.textContent = `agent-inception · ${i.worldName}`;
-      for (const r of [url, cc, other, prompt]) r.set();
+      for (const r of [url, cc, other, prompt, cloud]) r.set();
+      const reachable = reachableFromCloud(i.agentUrl);
+      cloud.row.style.display = reachable ? "" : "none";
+      cloudNote.style.display = reachable ? "none" : "";
       fresh.style.display = i.paired ? "" : "none";
       const [cls, text] = STATES[i.state];
       dot.className = `dot ${cls}`;
@@ -195,7 +224,8 @@ export function createConnectCard(
           ? "The world runs in this tab, so keep it open (a background tab is fine). Anyone with " +
             "the link can play here; New link cuts old links off. "
           : "Local development: the dev server's bridge (this repo's .mcp.json already points " +
-            "at it). Add ?relay=1 to try a hosted-style link. ") +
+            "at it). Add ?relay=1 to try a hosted-style link, or run deno task share for a " +
+            "public one. ") +
         (i.ephemeral ? "This browser blocks storage, so the link changes every visit. " : "") +
         "Worlds save in this browser: three slots under worlds in the panel.";
     };

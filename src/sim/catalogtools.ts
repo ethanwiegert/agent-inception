@@ -25,8 +25,9 @@ import { food, fraction, lockedIn, unlockLevel, worth } from "./worth.ts";
 export const AUTHOR_LIMITS = { hour: 5, day: 50 } as const;
 const PAGE = 25;
 
+// One plain type: some hosted models' tool APIs refuse a list of types. Ids come as "12" too.
 const ref = (description: string) => ({
-  type: ["string", "integer"],
+  type: "string",
   description: `${description} An id like 12 or a name.`,
 });
 

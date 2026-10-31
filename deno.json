@@ -8,6 +8,7 @@
     "build": "deno run -A tools/build.ts",
     "bridge": "deno run -A tools/bridge.ts",
     "host": "deno run -A tools/host.ts",
+    "share": "deno run -A tools/share.ts",
     "check": "deno check src tools relay && deno lint && deno fmt --check",
     "test": "deno test --parallel",
     "shot": "deno run -A tools/shot.ts",

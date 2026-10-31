@@ -80,6 +80,11 @@ export interface Agent {
   lastActive: number;
   /** Ticks of recent Catalog entries this villager added (rate limit). */
   authored: number[];
+  /**
+   * The rejoin key the latest join handed out: a new session that shows it takes the villager
+   * straight back, held or not (hosted agents' connections reset). Not saved.
+   */
+  key?: string;
   /** Approaching animals slowly (to shear, milk or collect), so they don't shy away. Not saved. */
   gentle?: boolean;
   /** Things Rules did to this villager, told with the next tool result. Not saved. */
@@ -777,7 +782,7 @@ export class Sim {
       spectatorClouds: this.spectatorClouds,
       sessions: [...this.sessions].map(([session, agent]) => [session, agent.id]),
       agents: this.agents.map((
-        { queue: _q, anim: _a, stride: _s, notes: _n, pace: _p, sleeping: _z, ...rest },
+        { queue: _q, anim: _a, stride: _s, notes: _n, pace: _p, sleeping: _z, key: _k, ...rest },
       ) => structuredClone(rest)),
     };
   }

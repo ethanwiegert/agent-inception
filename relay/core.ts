@@ -15,7 +15,10 @@ export const INSTRUCTIONS = "You are a villager living on a small voxel island t
   "methodical: plan a plot, till, plant, wait for wheat to ripen, harvest, build (place_block " +
   "for floors and walls, build for a whole Design). Keep notes in your journal. The Catalog " +
   "lists every kind of thing that can exist here; read it with catalog_find and catalog_get, " +
-  "and extend it with catalog_add and catalog_fork.";
+  "and extend it with catalog_add and catalog_fork. Keep playing on your own: look, pick " +
+  "something to do, do it, say a short line now and then for the people watching, and " +
+  "journal_write a note before you stop. If your connection resets and join says your name " +
+  "is held, join again with the rejoin key your last join gave you.";
 
 /** Largest request body accepted (a big Design or Rule is the biggest legitimate one). */
 export const MAX_BODY = 1 << 20;
@@ -53,6 +56,27 @@ export interface Tool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** MCP tool hints: hosted agents skip their confirm-every-call prompt for read-only tools. */
+  annotations?: ToolAnnotations;
+}
+
+export interface ToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+const HINTS = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const;
+
+/** A tool's annotations kept to MCP's known hints; undefined when there are none worth keeping. */
+function cleanAnnotations(raw: unknown): ToolAnnotations | undefined {
+  if (!isObject(raw)) return undefined;
+  const out: ToolAnnotations = {};
+  if (typeof raw.title === "string" && raw.title.length <= 64) out.title = raw.title;
+  for (const h of HINTS) if (typeof raw[h] === "boolean") out[h] = raw[h] as boolean;
+  return Object.keys(out).length ? out : undefined;
 }
 
 export type Content =
@@ -149,7 +173,10 @@ export function cleanTools(raw: unknown): Tool[] {
   return raw.slice(0, 200).filter((t): t is Tool =>
     isObject(t) && typeof t.name === "string" && /^[A-Za-z_][\w-]{0,63}$/.test(t.name) &&
     typeof t.description === "string" && isObject(t.inputSchema)
-  ).map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+  ).map(({ name, description, inputSchema, annotations }) => {
+    const hints = cleanAnnotations(annotations);
+    return { name, description, inputSchema, ...(hints ? { annotations: hints } : {}) };
+  });
 }
 
 // ---------------------------------------------------------------- the room
@@ -176,6 +203,15 @@ interface JsonRpc {
 }
 
 type Reply = { content: Content[]; isError: boolean };
+
+/** Methods a request may make without a session: none of them touch a villager. */
+const SESSIONLESS = new Set([
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+  "prompts/list",
+]);
 
 export class Room {
   private tab: Socket | null = null;
@@ -336,6 +372,13 @@ export class Room {
       }
       case "ping":
         return {};
+      // Only tools are offered, but some hosted clients list everything while connecting.
+      case "resources/list":
+        return { resources: [] };
+      case "resources/templates/list":
+        return { resourceTemplates: [] };
+      case "prompts/list":
+        return { prompts: [] };
       case "tools/list":
         return { tools: await this.toolList() };
       case "tools/call": {
@@ -400,7 +443,10 @@ export class Room {
     // tab keys villagers by them (held while active), and the link itself is the key to the world.
     let session = req.headers.get("mcp-session-id");
     if (messages.some((m) => m.method === "initialize")) session = crypto.randomUUID();
-    else if (!session || !SESSION_RE.test(session)) {
+    else if (!session && messages.every((m) => !m.method || SESSIONLESS.has(m.method))) {
+      // Listing needs no villager: hosted connectors check the tools before they initialize.
+      session = crypto.randomUUID();
+    } else if (!session || !SESSION_RE.test(session)) {
       return json({
         jsonrpc: "2.0",
         id: null,

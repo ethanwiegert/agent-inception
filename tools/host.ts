@@ -10,38 +10,15 @@
  */
 Deno.env.set("AI_HEADLESS", "1"); // before browser.ts reads it: a host never opens a window
 const { launch } = await import("./browser.ts");
-const { createBridge } = await import("./bridge.ts");
-const { serve } = await import("./serve.ts");
+const { ensureGame } = await import("./serve.ts");
 
-const PORT = 5173;
 const CHECK_MS = 30_000;
 /** A software screenshot can hold the page for seconds; a minute of silence means it's stuck. */
 const CHECK_TIMEOUT_MS = 60_000;
 const profile = Deno.env.get("AI_HOST_PROFILE") ?? ".host-profile";
 
-async function up(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
-    await res.body?.cancel();
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 let page = Deno.args[0];
-if (!page) {
-  page = `http://localhost:${PORT}/`;
-  if (!await up(page)) {
-    console.log("host: no dev server on :5173, building and serving dist/ with the MCP bridge");
-    const build = await new Deno.Command("deno", { args: ["task", "-q", "build"] }).output();
-    if (!build.success) {
-      console.error(new TextDecoder().decode(build.stderr));
-      Deno.exit(1);
-    }
-    serve(PORT, createBridge().route);
-  }
-}
+if (!page) page = await ensureGame("host");
 
 let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

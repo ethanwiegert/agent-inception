@@ -160,3 +160,41 @@ Deno.test("join: freeing every villager lets a restarted agent back in, and tell
   callTool(sim, "other", "look", {}, 7);
   assert(results(sim).every((r) => !r.isError));
 });
+
+Deno.test("join: the rejoin key takes a held villager straight back after a connection reset", () => {
+  const sim = new Sim(7);
+  callTool(sim, "first-session", "join", { name: "Muse" }, 1);
+  const [welcome] = results(sim);
+  const key = welcome.text.match(/Rejoin key: ([0-9A-Z]{5}-[0-9A-Z]{5})\./)?.[1];
+  assert(key, welcome.text);
+  const muse = sim.sessions.get("first-session")!;
+  // A hosted agent's new session without the key is refused, as before.
+  callTool(sim, "second-session", "join", { name: "Muse" }, 2);
+  assert(/rejoin key/.test(results(sim)[0].text));
+  // A wrong key is refused and says so.
+  callTool(sim, "second-session", "join", { name: "Muse", key: "AAAAA-AAAAA" }, 3);
+  const [wrong] = results(sim);
+  assert(wrong.isError && /isn't Muse's latest/.test(wrong.text), wrong.text);
+  // The right key, typed any which way, steps straight back in, and the old session lets go.
+  callTool(sim, "second-session", "join", { name: "muse", key: key.toLowerCase() }, 4);
+  const [back] = results(sim);
+  assert(!back.isError && /Welcome back, Muse/.test(back.text), back.text);
+  assertEquals(sim.sessions.get("second-session"), muse);
+  assertEquals(sim.sessions.get("first-session"), undefined);
+  assertEquals(sim.agents.length, 1);
+  // Each join rotates the key: the old one is spent.
+  callTool(sim, "third-session", "join", { name: "Muse", key }, 5);
+  assert(results(sim)[0].isError);
+  // Keys never go into a save (or an exported world file).
+  assert(!JSON.stringify(sim.save(0)).includes(muse.key!));
+});
+
+Deno.test("join: rejoin keys are deterministic and differ by session", () => {
+  const keyOf = (session: string) => {
+    const sim = new Sim(7);
+    callTool(sim, session, "join", { name: "Dots" }, 1);
+    return results(sim)[0].text.match(/Rejoin key: (\S+)\./)![1];
+  };
+  assertEquals(keyOf("abc"), keyOf("abc"));
+  assert(keyOf("abc") !== keyOf("abd"));
+});
