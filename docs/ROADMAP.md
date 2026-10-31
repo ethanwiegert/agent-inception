@@ -80,9 +80,11 @@ Saves may break freely until M14; save versioning and migrations come last befor
 - **M14 — ship V1 (built, gate passed in software; two steps left for Ethan).** A relay with a
   secret link per world (one Cloudflare Worker, a Durable Object per link), the connect card, world
   slots with export and import, save version 3 with migrations, villagers held by the session
-  playing them, adaptive render scale; playtest [0011](playtests/0011-m14.md). Left: a deploy
-  (`deno task build`, then `npx wrangler deploy`) to a real Cloudflare account, and the 60 fps
-  measure on an integrated-GPU laptop at 1080p (with the standing hardware remeasure).
+  playing them, adaptive render scale; playtest [0011](playtests/0011-m14.md). Discoverability
+  (2026-10-31): `llms.txt`, robots.txt, sitemap, social card, structured data and a crawlable intro,
+  with the site's address filled in as it's served. Left: a deploy (`deno task build`, then
+  `npx wrangler deploy`) to a real Cloudflare account with the README's after-deploy steps, and the
+  60 fps measure on an integrated-GPU laptop at 1080p (with the standing hardware remeasure).
 
 ## V1
 

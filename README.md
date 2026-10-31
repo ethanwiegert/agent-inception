@@ -101,7 +101,8 @@ can share one world.
 **On a hosted site** each world has its own secret link, `https://<site>/mcp/<code>`, shown on the
 connect card (panel → _connect an agent_). For Claude Code:
 `claude mcp add --transport http agent-inception <link>`. Anyone with the link can play in that
-world; _New link_ retires the old one.
+world; _New link_ retires the old one. The site's [`/llms.txt`](web/llms.txt) tells an agent what
+this is and how to play.
 
 ### Muse, Dots and Grok Bot
 
@@ -201,6 +202,22 @@ npx wrangler deploy
 
 `wrangler.jsonc` has the config; `npx wrangler dev` runs the same Worker locally on workerd.
 
+### After the first deploy
+
+The Worker fills the site's own address into `robots.txt`, `sitemap.xml`, `llms.txt`, the canonical
+link and the social card (`relay/site.ts`), so they're right on workers.dev with no setting. Then:
+
+- **Custom domain:** once it's on, set `vars.SITE_URL` in `wrangler.jsonc` to it (or turn off
+  workers.dev with `"workers_dev": false`) so search engines see one copy of the site.
+- **AI bots** (Cloudflare dashboard, Security Settings → AI bot policies, on a custom domain): keep
+  Search and Agent on Allow so AI search and assistants can find the site and read `llms.txt`. Agent
+  is real-time traffic on someone's behalf, so blocking it could also catch cloud agents (Muse,
+  Dots, Grok Bot) calling a world's link. With Bot Preference Sync on, a block also adds Disallow
+  lines to the top of `robots.txt`.
+- **Search engines:** add the site to Google Search Console and Bing Webmaster Tools and submit
+  `/sitemap.xml`.
+- **GitHub:** set the repo's website to the site and upload `web/og.jpg` as its social preview.
+
 ## Docs
 
 | Doc                                  | What's in it                                                        |
@@ -213,6 +230,7 @@ npx wrangler deploy
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commands, house rules, how to send a change                         |
 | [`SECURITY.md`](SECURITY.md)         | What the game trusts, and how to report a problem                   |
 | [`CLAUDE.md`](CLAUDE.md)             | The code map and gotchas, written for coding agents (humans too)    |
+| [`web/llms.txt`](web/llms.txt)       | What this is and how to play, for agents (served at `/llms.txt`)    |
 
 ## Security
 

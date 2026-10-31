@@ -5,6 +5,7 @@
  * while the world is quiet, so idle worlds cost nothing. Deploy with `npx wrangler deploy`.
  */
 import { CODE_RE, originAllowed, POLICY, Room, type Socket, type Tool } from "./core.ts";
+import { SITE_HEADERS, SITE_PAGES, siteOrigin, withOrigin } from "./site.ts";
 
 // The few Cloudflare runtime types this file uses (no npm types package: zero dependencies).
 interface DurableObjectState {
@@ -22,6 +23,8 @@ interface DurableObjectNamespace {
 interface Env {
   ROOMS: DurableObjectNamespace;
   ASSETS: { fetch(req: Request): Promise<Response> };
+  /** Optional: the one canonical address (a custom domain) when the site answers on several. */
+  SITE_URL?: string;
 }
 type Attached = WebSocket & {
   serializeAttachment(v: unknown): void;
@@ -38,12 +41,30 @@ const CLOSED_TEXT = "No game tab is open for this link. Ask the human to open th
 export default {
   fetch(req: Request, env: Env): Promise<Response> | Response {
     const url = new URL(req.url);
+    if (SITE_PAGES.includes(url.pathname)) return sitePage(req, env);
     const m = url.pathname.match(/^\/(mcp|tab)\/([^/]+)$/);
     if (!m) return env.ASSETS.fetch(req);
     if (!CODE_RE.test(m[2])) return new Response("no such world", { status: 404 });
     return env.ROOMS.get(env.ROOMS.idFromName(m[2])).fetch(req);
   },
 };
+
+/**
+ * A static page that names the site's own address (relay/site.ts): the asset with `{{origin}}`
+ * filled in. Anything but a plain 200 (a redirect, a 405 for a POST) passes through as it is.
+ */
+async function sitePage(req: Request, env: Env): Promise<Response> {
+  const head = req.method === "HEAD";
+  const res = await env.ASSETS.fetch(head ? new Request(req, { method: "GET" }) : req);
+  if (res.status !== 200) return res;
+  const text = withOrigin(await res.text(), siteOrigin(req.url, env.SITE_URL));
+  const headers = new Headers(res.headers);
+  // The body changed: the asset's length and ETag describe the file, not this response.
+  headers.delete("content-length");
+  headers.delete("etag");
+  for (const [name, value] of Object.entries(SITE_HEADERS)) headers.set(name, value);
+  return new Response(head ? null : text, { status: 200, headers });
+}
 
 /** What each socket carries through hibernation: the room's code, and whether it's the tab. */
 interface Tag {

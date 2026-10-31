@@ -26,7 +26,7 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 - `deno task dev` — rebuild on change; serve the game at http://localhost:5173 and the MCP bridge at
   http://localhost:5173/mcp (same process). Start it first; everything else depends on it.
 - `deno task check` — type check, lint, fmt check (run `deno fmt` to fix formatting)
-- `deno task test` — sim + world tests (headless, fast)
+- `deno task test` — sim + world tests (headless, fast; they may read the repo, nothing else)
 - `deno task shot [out.png] [query]` — build, open Chromium on the real GPU, print frame/GPU
   timings, save a screenshot. Query is URL params, e.g. `"seed=7&time=0.62&speed=0"`. With no
   display (cloud VMs, CI) it runs headless on SwiftShader and captures offscreen: the picture is
@@ -130,7 +130,11 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     particles.ts (flames, smoke, lamp halos, signal sparks)
 relay/              core.ts (the relay: a Room per world link pipes MCP over HTTP to the tab's
                     socket; stateless sessions, pairing codes from secrets, framing), worker.ts
-                    (Cloudflare Worker + Durable Object running it; the site's assets)
+                    (Cloudflare Worker + Durable Object running it; the site's assets), site.ts
+                    (the site's own address filled into the pages that need it, for `{{origin}}`)
+web/                the static site beside the bundle: index.html (meta, social card, JSON-LD, the
+                    "what this is" shown when the game can't start), llms.txt (for agents),
+                    robots.txt, sitemap.xml, _headers, icons, og.jpg (the social card)
 tools/              dev.ts, bridge.ts (the relay's rooms on Deno: /mcp, /bridge, /mcp/<code>,
                     /tab/<code>; local origins only), build.ts, serve.ts, browser.ts (CDP driver),
                     shot.ts, host.ts (headless host for GPU-less machines), share.ts (public
