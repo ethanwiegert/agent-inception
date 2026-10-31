@@ -35,9 +35,10 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
   like `shot`, but poses the camera (offset from world center) and prints GPU errors
 - `deno task build` — minified `dist/main.js` + `dist/worker.js` with `web/` copied in: the whole
   static site
-- `npx wrangler deploy` (after `build`) — deploy the site and relay to Cloudflare (`wrangler.jsonc`,
-  ADR 0006); `npx wrangler dev` runs it locally on workerd. wrangler is a dev tool run with npx,
-  never a dependency of the repo
+- `npx wrangler deploy` — run `build` (wrangler.jsonc's `build` command, Deno from npm, so a fresh
+  clone in Cloudflare's Git builds works) and deploy the site and relay to Cloudflare (ADR 0006);
+  `npx wrangler dev` runs it locally on workerd. wrangler is a dev tool run with npx, never a
+  dependency of the repo
 - `deno task bridge` — standalone MCP bridge on :7777 (the relay's rooms on Deno; not used in dev)
 - `deno task host` — keep a world running in headless Chromium on software WebGPU, for machines with
   no GPU or display: uses `deno task dev` if it's up, else builds and serves `:5173` itself; worlds

@@ -1,8 +1,11 @@
-// The hosted site and relay (ADR 0006). Build first (`deno task build`), then `npx wrangler deploy`.
+// The hosted site and relay (ADR 0006): `npx wrangler deploy` builds `dist/` first (the "build"
+// command below), so it works from a fresh clone, as in Cloudflare's Git builds. Deno comes from
+// npm there (the official `deno` package), since the build image doesn't ship it.
 {
   "name": "agent-inception",
   "main": "relay/worker.ts",
   "compatibility_date": "2025-09-01",
+  "build": { "command": "npx -y deno@2.9.6 task build" },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

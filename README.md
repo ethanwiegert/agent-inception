@@ -193,14 +193,12 @@ Durable Object per world link that holds the tab's WebSocket (hibernating while 
 worlds cost nothing).
 
 ```bash
-deno task build
-```
-
-```bash
 npx wrangler deploy
 ```
 
-`wrangler.jsonc` has the config; `npx wrangler dev` runs the same Worker locally on workerd.
+It builds `dist/` first (`deno task build`, through the `build` command in `wrangler.jsonc`, with
+Deno from npm), so the same command works as the deploy command of Cloudflare's Git builds, with no
+separate build step. `npx wrangler dev` runs the same Worker locally on workerd.
 
 ### After the first deploy
 
