@@ -50,9 +50,27 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-export async function launch(url: string, { width = 1280, height = 720 } = {}): Promise<Browser> {
+export interface LaunchOptions {
+  width?: number;
+  height?: number;
+  /** A profile directory to keep (its IndexedDB holds the worlds); a fresh temporary one if unset. */
+  profile?: string;
+}
+
+export async function launch(
+  url: string,
+  { width = 1280, height = 720, profile: keep }: LaunchOptions = {},
+): Promise<Browser> {
   const port = 9300 + Math.floor(Math.random() * 600);
-  const profile = await Deno.makeTempDir({ prefix: "agent-inception-chromium-" });
+  const profile = keep ?? await Deno.makeTempDir({ prefix: "agent-inception-chromium-" });
+  if (keep) {
+    await Deno.mkdir(keep, { recursive: true });
+    // A kept profile would restore last run's tabs: two tabs on one world fight over the bridge
+    // and both write its save. Start with no session to restore.
+    for (const dir of ["Sessions", "Sessions_Encrypted", "Current Session", "Current Tabs"]) {
+      await Deno.remove(`${keep}/Default/${dir}`, { recursive: true }).catch(() => {});
+    }
+  }
   if (headless) url += (url.includes("?") ? "&" : "?") + "headless";
   const proc = new Deno.Command(await chromiumPath(), {
     args: [
@@ -68,11 +86,20 @@ export async function launch(url: string, { width = 1280, height = 720 } = {}): 
     stderr: "null",
   }).spawn();
 
-  let target: { type: string; webSocketDebuggerUrl: string } | undefined;
+  type Target = { id: string; type: string; url: string; webSocketDebuggerUrl: string };
+  const devtools = `http://127.0.0.1:${port}/json`;
+  let target: Target | undefined;
   for (let i = 0; i < 100 && !target; i++) {
     try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-      target = list.find((t: { type: string }) => t.type === "page");
+      const list: Target[] = await (await fetch(devtools)).json();
+      target = list.find((t) => t.type === "page" && t.url === url) ??
+        list.find((t) => t.type === "page");
+      // Only one tab may run the game: close any other page (a restored or default tab).
+      for (const t of list) {
+        if (t.type === "page" && t !== target) {
+          await fetch(`${devtools}/close/${t.id}`).then((r) => r.body?.cancel(), () => {});
+        }
+      }
     } catch { /* not up yet */ }
     if (!target) await new Promise((r) => setTimeout(r, 100));
   }
@@ -86,6 +113,11 @@ export async function launch(url: string, { width = 1280, height = 720 } = {}): 
 
   let nextId = 1;
   const pending = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>();
+  // A closed DevTools socket (Chromium died) fails every call still waiting, instead of hanging.
+  ws.onclose = () => {
+    for (const p of pending.values()) p.reject(new Error("Chromium closed"));
+    pending.clear();
+  };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     const p = pending.get(msg.id);
@@ -141,7 +173,7 @@ export async function launch(url: string, { width = 1280, height = 720 } = {}): 
       ws.close();
       proc.kill();
       await proc.status;
-      await Deno.remove(profile, { recursive: true }).catch(() => {});
+      if (!keep) await Deno.remove(profile, { recursive: true }).catch(() => {});
     },
   };
 }

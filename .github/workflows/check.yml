@@ -4,12 +4,20 @@ on:
   push:
   pull_request:
 
+# The workflow only reads the code; a token that can't write keeps a bad PR from doing harm.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
+      # Actions are pinned to commits (tags can move); the comment says which release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
       - run: deno task check

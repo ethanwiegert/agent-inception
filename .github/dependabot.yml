@@ -1,0 +1,7 @@
+# Keeps the pinned GitHub Actions current. The repo has no package dependencies to watch.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

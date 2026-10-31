@@ -1,3 +1,7 @@
 dist/
 *.png
 !docs/playtests/*.png
+.wrangler/
+.host-profile/
+.env
+.dev.vars

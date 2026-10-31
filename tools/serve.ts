@@ -22,9 +22,16 @@ export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr
   return Deno.serve({ port, hostname: "127.0.0.1", onListen() {} }, async (req) => {
     const routed = route?.(req);
     if (routed) return routed;
-    let path = decodeURIComponent(new URL(req.url).pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(new URL(req.url).pathname);
+    } catch {
+      return new Response("bad path", { status: 400 });
+    }
     if (path.endsWith("/")) path += "index.html";
-    if (path.includes("..")) return new Response("bad path", { status: 400 });
+    if (path.includes("..") || path.includes("\0")) {
+      return new Response("bad path", { status: 400 });
+    }
     for (const root of roots) {
       try {
         const body = await Deno.readFile(root + path);
@@ -33,6 +40,7 @@ export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr
           headers: {
             "content-type": types[ext] ?? "application/octet-stream",
             "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
           },
         });
       } catch { /* try next root */ }

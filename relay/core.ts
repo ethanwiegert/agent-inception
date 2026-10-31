@@ -35,6 +35,19 @@ export const LOCAL = "local";
 /** A pairing code: 128 bits of a hash, base64url. */
 export const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
 const SESSION_RE = /^[A-Za-z0-9_-]{8,64}$/;
+/** Origins of pages on this machine: the dev server, `wrangler dev`. */
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+/** Close code for a socket that spoke before proving it's the tab. */
+export const POLICY = 1008;
+
+/**
+ * Whether a browser `origin` may reach a room: none (an agent, not a browser), a page on this
+ * machine, or one of `allowed` (the site's own). Browsers don't apply CORS to WebSockets or to
+ * simple cross-site POSTs, so without this any web page could talk to a local bridge.
+ */
+export function originAllowed(origin: string | null, allowed: readonly string[] = []): boolean {
+  return !origin || LOCAL_ORIGIN_RE.test(origin) || allowed.includes(origin);
+}
 
 export interface Tool {
   name: string;
@@ -199,10 +212,25 @@ export class Room {
    */
   async message(socket: Socket, text: string): Promise<boolean> {
     if (text.length > FRAME * 2) return false;
+    // Only the proven tab may send a message in parts: anyone else could fill memory with them.
+    // Before that a socket gets one whole frame, its hello, and is closed if it says anything else.
+    if (socket !== this.tab) {
+      let msg: unknown;
+      try {
+        msg = JSON.parse(text);
+      } catch { /* not JSON */ }
+      if (!isObject(msg) || msg.type !== "hello") {
+        try {
+          socket.close(POLICY, "say hello first");
+        } catch { /* already closed */ }
+        return false;
+      }
+      return await this.hello(socket, msg);
+    }
     const msg = this.frames.take(text);
     if (!msg) return false;
     if (msg.type === "hello") return await this.hello(socket, msg);
-    if (socket !== this.tab || msg.type !== "result" || typeof msg.id !== "number") return false;
+    if (msg.type !== "result" || typeof msg.id !== "number") return false;
     const call = this.pending.get(msg.id);
     if (!call) return false;
     this.pending.delete(msg.id);
@@ -238,6 +266,7 @@ export class Room {
         old.close(REPLACED, "replaced by a newer tab");
       } catch { /* already closed */ }
     }
+    if (this.tab !== socket) this.frames = new Reassembler();
     this.tab = socket;
     const tools = cleanTools(msg.tools);
     if (tools.length) {
@@ -341,11 +370,7 @@ export class Room {
   /** One MCP HTTP request (POST, or DELETE to end a session). */
   async handleMcp(req: Request): Promise<Response> {
     // Reject cross-site browser requests (DNS rebinding). Agents send no Origin or a local one.
-    const origin = req.headers.get("origin");
-    if (
-      origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) &&
-      !this.options.origins?.includes(origin)
-    ) {
+    if (!originAllowed(req.headers.get("origin"), this.options.origins)) {
       return new Response("forbidden origin", { status: 403 });
     }
     if (req.method === "DELETE") return new Response(null, { status: 204 });

@@ -52,6 +52,22 @@ them as files.
 
 On Linux, Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.
 
+### No GPU? Host it headless
+
+A server or cloud VM with no GPU (say 8 CPU cores and a few GB free) can still keep a world running
+for agents. `deno task host` opens the game in headless Chromium on software WebGPU (SwiftShader):
+the sim runs at full speed, agents play over MCP as usual, and their `screenshot` tool renders on
+the CPU in about a second. It uses the dev server if one is up, or builds and serves the game itself
+on `:5173`, and keeps worlds in `.host-profile/` across restarts.
+
+```bash
+deno task host
+```
+
+An idle hosted world uses a few percent of one core and about 1.5 GB of memory (mostly Chromium).
+Any page on a software adapter draws 30% of the grass blades and starts at half resolution;
+`?grass=1` and `?scale=1` put them back.
+
 ## Let an agent move in
 
 **Claude Code:** the repo's `.mcp.json` registers the `agent-inception` server. With the dev server
@@ -126,6 +142,12 @@ npx wrangler deploy
 | [`docs/playtests/`](docs/playtests/) | What agents tried each milestone, what broke, what got fixed        |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commands, house rules, how to send a change                         |
 | [`CLAUDE.md`](CLAUDE.md)             | The code map and gotchas, written for coding agents (humans too)    |
+
+## Security
+
+Agents are treated as untrusted, world links are bearer secrets, and the dev bridge only answers
+pages on your own machine. See [`SECURITY.md`](SECURITY.md) for the model and how to report a
+problem privately.
 
 ## Contributing
 

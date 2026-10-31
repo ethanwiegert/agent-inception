@@ -88,6 +88,11 @@ export class Renderer {
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
    * "props", "fire". */
   debug = new Set<string>();
+  /**
+   * Share of each look's grass blades to draw (0-1]; blades widen to keep the meadow's cover.
+   * Grass is most of a software adapter's frame, so CPU-only machines draw fewer.
+   */
+  grassDensity = 1;
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
   private frameBuffer: GPUBuffer;
@@ -254,12 +259,16 @@ export class Renderer {
 
     const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85)));
     fd[F.grass + 3] = radius;
+    const density = Math.min(1, Math.max(0.05, this.grassDensity));
+    const bladesPerBlock = Math.max(1, Math.round(look.bladesPerBlock * density));
+    fd[F.grass + 1] *= Math.sqrt(look.bladesPerBlock / bladesPerBlock);
+    fd[F.grass + 2] = bladesPerBlock;
     fd[F.grassCenter] = Math.floor(camera.target[0]);
     fd[F.grassCenter + 1] = Math.floor(camera.target[2]);
     fd[F.grassCenter + 2] = camera.worldSize[0];
     fd[F.grassCenter + 3] = camera.worldSize[1];
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
-    const blades = GrassRenderer.instanceCount(radius, look.bladesPerBlock);
+    const blades = GrassRenderer.instanceCount(radius, bladesPerBlock);
     this.stats.grassBlades = blades;
 
     const encoder = device.createCommandEncoder();

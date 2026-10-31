@@ -18,6 +18,8 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 - Every game action is a tool in `src/sim/tools.ts`. New gameplay = new or extended tool + test.
 - Built-in content is Catalog data in the formats agents author; no special-cased content in code
   (ADR 0002, from M6 on).
+- Agents are untrusted (`SECURITY.md`): validate every argument in the sim, render agent text as
+  text, and keep the bridge and relay to agents, local pages and the site's own (`originAllowed`).
 
 ## Commands
 
@@ -37,14 +39,18 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
   ADR 0006); `npx wrangler dev` runs it locally on workerd. wrangler is a dev tool run with npx,
   never a dependency of the repo
 - `deno task bridge` — standalone MCP bridge on :7777 (the relay's rooms on Deno; not used in dev)
+- `deno task host` — keep a world running in headless Chromium on software WebGPU, for machines with
+  no GPU or display: uses `deno task dev` if it's up, else builds and serves `:5173` itself; worlds
+  persist in `.host-profile/` (`AI_HOST_PROFILE`); relaunches a crashed tab
 
 URL params: `seed` (a seed that isn't the open world's starts a NEW world in a free world slot; with
 all three full it says so and opens the current one), `slot` (1-3: open that world slot), `relay` (1
 on localhost: pair through `/mcp/<code>` like the hosted site instead of the bridge's `/mcp`),
-`scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate), `sandbox` (1
-switches the world to Sandbox, 0 back to Village Life; saved with the world), `time` (0-1, 0.5 =
+`scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate, from 0.5 on a
+software adapter), `grass` (grass density 0.05-1; 0.3 by default on a software adapter), `sandbox`
+(1 switches the world to Sandbox, 0 back to Village Life; saved with the world), `time` (0-1, 0.5 =
 noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`, `storybook`), `bridge`
-(WebSocket URL override), `debug` (comma list of passes to skip for profiling:
+(WebSocket URL override, dev server only), `debug` (comma list of passes to skip for profiling:
 `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the canvas; frames
 render only when `__game.capture()` asks; for software WebGPU, which can't back a canvas).
 
@@ -119,7 +125,8 @@ relay/              core.ts (the relay: a Room per world link pipes MCP over HTT
                     socket; stateless sessions, pairing codes from secrets, framing), worker.ts
                     (Cloudflare Worker + Durable Object running it; the site's assets)
 tools/              dev.ts, bridge.ts (the relay's rooms on Deno: /mcp, /bridge, /mcp/<code>,
-                    /tab/<code>), build.ts, serve.ts, browser.ts (CDP driver), shot.ts
+                    /tab/<code>; local origins only), build.ts, serve.ts, browser.ts (CDP driver),
+                    shot.ts, host.ts (headless host for GPU-less machines)
 ```
 
 Saves: `Sim.save` writes `SAVE_VERSION` (`sim/save.ts`). Changing `SaveData` means bumping it and
@@ -138,10 +145,10 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 `docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is built and
 waits on Ethan's Cloudflare deploy and the integrated-GPU 60 fps measure. The hardware GPU
-remeasure, and the 500-piled-bodies sim budget, are standing TODOs for Ethan's dev box). Each
-milestone opens with a short clarifying grill with Ethan and closes with the playtest gate described
-there (tests, playtests with cost-effective agents including an adversary, a report in
-`docs/playtests/`, fixes, perf, screenshots).
+remeasure, and the 500-piled-bodies sim budget, are standing TODOs for a machine with a hardware
+GPU). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
+gate described there (tests, playtests with cost-effective agents including an adversary, a report
+in `docs/playtests/`, fixes, perf, screenshots).
 
 ## Testing and debugging
 

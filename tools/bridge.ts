@@ -5,7 +5,7 @@
  *
  *   agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──▶ sim worker
  */
-import { CODE_RE, LOCAL, Room, type Socket } from "../relay/core.ts";
+import { CODE_RE, LOCAL, originAllowed, Room, type Socket } from "../relay/core.ts";
 import { TOOL_DEFS } from "../src/sim/tools.ts";
 
 /** The tools a local room lists before a tab connects (a tab sends its own when it does). */
@@ -48,6 +48,10 @@ export function createBridge() {
   function socket(req: Request, r: Room): Response {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected a WebSocket", { status: 426 });
+    }
+    // Browsers let any page open a WebSocket to localhost: only the game's own pages may be the tab.
+    if (!originAllowed(req.headers.get("origin"))) {
+      return new Response("forbidden origin", { status: 403 });
     }
     const { socket, response } = Deno.upgradeWebSocket(req);
     const s: Socket = socket;

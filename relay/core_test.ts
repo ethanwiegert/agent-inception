@@ -10,7 +10,9 @@ import {
   LOCAL,
   MAX_BODY,
   newSecret,
+  originAllowed,
   pairingCode,
+  POLICY,
   Reassembler,
   REPLACED,
   Room,
@@ -160,6 +162,35 @@ Deno.test("relay: a paired room takes only the tab holding its secret", async ()
     JSON.stringify({ type: "result", id: c.id, content: [{ type: "text", text: "forged" }] }),
   );
   assertEquals((await pending).result.content[0].text, "ok");
+});
+
+Deno.test("relay: a socket that isn't the tab gets one whole hello, never parts", async () => {
+  const room = new Room({ code: await pairingCode(newSecret()) });
+  // Parts from a stranger would sit in memory waiting for the rest: they're refused outright.
+  const stranger = new FakeTab();
+  const frames: string[] = [];
+  sendFramed({ send: (t) => frames.push(t), close() {} }, {
+    type: "hello",
+    pad: "x".repeat(FRAME),
+  });
+  assert(frames.length > 1);
+  assert(!await room.message(stranger, frames[0]));
+  assertEquals(stranger.closedWith, POLICY);
+  const chatty = new FakeTab();
+  assert(!await room.message(chatty, JSON.stringify({ type: "result", id: 1, content: [] })));
+  assertEquals(chatty.closedWith, POLICY);
+  assert(!room.open);
+});
+
+Deno.test("relay: only agents, local pages and the site's own pages may reach a room", () => {
+  assert(originAllowed(null));
+  assert(originAllowed("http://localhost:5173"));
+  assert(originAllowed("http://127.0.0.1:8787"));
+  assert(originAllowed("http://[::1]:5173"));
+  assert(originAllowed("https://site.example", ["https://site.example"]));
+  assert(!originAllowed("https://evil.example"));
+  assert(!originAllowed("http://localhost.evil.example"));
+  assert(!originAllowed("null"));
 });
 
 Deno.test("relay: a newer tab replaces the old one, and calls waiting on the old one fail", async () => {
