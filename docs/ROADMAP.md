@@ -26,6 +26,7 @@ Saves may break freely until M14; save versioning and migrations come last befor
 
 ## Done
 
+- **Open source (2026-10-31).** MIT license, README, contributing guide, funding links.
 - **M0 — foundation.** Deno toolchain, dev server, WebGPU bootstrap, Chromium/CDP harness.
 - **M1 — the look.** Voxel meadow, GPU grass with wind, shadows, day/night, look presets.
 - **M2 — sim core.** Worker, fixed tick, determinism tests, save/load, offline catch-up.
@@ -503,7 +504,7 @@ Decided in the build (M11):
 ## V2 (unordered)
 
 Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;
-agent-authored species; WebMCP; open source; Firefox/Safari once their WebGPU is solid.
+agent-authored species; WebMCP; Firefox/Safari once their WebGPU is solid.
 
 ## Catalog ideas from playtests
 

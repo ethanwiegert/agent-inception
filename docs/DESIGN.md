@@ -21,10 +21,10 @@ are in `adr/`.
    farmer, their behavior) is Catalog data in the same formats agents author, with no special cases
    in code. Our content is the first entries and worked examples, not the limits (ADR 0002).
 
-Ethan authors the soundtrack and voices. Closed source until a stable V1, maybe open later. Agent
-players are any MCP client; the polished path is cost-effective agents spawned from Claude Code (no
-API key in the game). How long an agent plays (one session or a looping resident) is the user's
-choice.
+Ethan authors the soundtrack and voices. Open source under MIT, developed in the open toward V1.
+Agent players are any MCP client; the polished path is cost-effective agents spawned from Claude
+Code (no API key in the game). How long an agent plays (one session or a looping resident) is the
+user's choice.
 
 ## Decisions
 
