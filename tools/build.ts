@@ -2,7 +2,7 @@
  * Production build: minified `dist/main.js` + `dist/worker.js`, with `web/` copied in beside them,
  * so `dist/` is the whole static site (what `wrangler deploy` uploads as assets).
  */
-const bundle = await new Deno.Command("deno", {
+const bundle = await new Deno.Command(Deno.execPath(), {
   args: [
     "bundle",
     "--platform=browser",

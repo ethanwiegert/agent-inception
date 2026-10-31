@@ -16,7 +16,7 @@ Install [Deno](https://deno.com) 2.4+ and use a Chromium-family browser with Web
 | `deno task test`                          | Sim and world tests, headless and fast                             |
 | `deno task shot [out.png] [query]`        | Open Chromium on the real GPU, print frame/GPU timings, screenshot |
 | `deno task camshot out.png "query" '{…}'` | Like `shot`, with a posed camera; prints GPU errors                |
-| `deno task build`                         | The static site in `dist/` (then `npx wrangler deploy`)            |
+| `deno task build`                         | The static site in `dist/` (`npx wrangler deploy` runs it)         |
 | `deno task bridge`                        | Standalone MCP bridge on `:7777`                                   |
 | `deno task host`                          | Keep a world running in headless Chromium (no GPU needed)          |
 | `deno task share [--headless]`            | Public link for cloud agents (Muse, Dots, Grok Bot) via a tunnel   |
