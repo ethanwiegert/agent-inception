@@ -25,10 +25,27 @@ function fatal(message: string): never {
 
 if (!navigator.gpu) fatal("agent-inception needs WebGPU. Try a recent Chrome or Edge.");
 const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-if (!adapter) fatal("No WebGPU adapter available.");
+if (!adapter) {
+  fatal(
+    "No WebGPU adapter available. Without a GPU, keep the world running headless with " +
+      "`deno task host`, or start Chromium with --enable-unsafe-webgpu --enable-unsafe-swiftshader.",
+  );
+}
 // Timestamps for the GPU timer; indirect draws from an instance offset for GPU culling.
 const features = (["timestamp-query", "indirect-first-instance"] as GPUFeatureName[])
   .filter((f) => adapter.features.has(f));
+/**
+ * A software adapter (SwiftShader, llvmpipe, WARP) means no GPU: the CPU draws every pixel, so the
+ * page draws less (thinner grass, a smaller render scale) to stay usable on a CPU-only machine.
+ */
+const info = adapter.info;
+const softwareGpu =
+  !!(info as GPUAdapterInfo & { isFallbackAdapter?: boolean }).isFallbackAdapter ||
+  /swiftshader|llvmpipe|lavapipe|softpipe|warp|basic render/i.test(
+    `${info.vendor} ${info.architecture} ${info.device} ${info.description}`,
+  );
+/** Grass density on a software adapter: grass is ~70% of a SwiftShader frame; this halves it. */
+const SOFTWARE_GRASS = 0.3;
 const device = await adapter.requestDevice({ requiredFeatures: features });
 device.lost.then((info) => fatal(`GPU device lost: ${info.message}`));
 const gpuErrors: string[] = [];
@@ -101,6 +118,11 @@ client.onReady = (world, caughtUp, notice) => {
   renderer = new Renderer(device, world);
   readyMs ||= performance.now();
   renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
+  renderer.grassDensity = params.has("grass")
+    ? Number(params.get("grass")) || 1
+    : softwareGpu
+    ? SOFTWARE_GRASS
+    : 1;
   if (!camera) {
     camera = new Camera([world.sizeX, world.sizeZ], (x, z) => client.world!.heightAt(x, z));
     camera.attach(canvas);
@@ -221,7 +243,8 @@ async function screenshot(session: string): Promise<CallReply> {
     return { content: [{ type: "text", text: "Still loading." }], isError: true };
   }
   camera.follow = id;
-  await new Promise((r) => setTimeout(r, 900)); // let a visible view glide over
+  // Let a visible view glide over; a headless tab has no one watching it glide.
+  if (!headless && !document.hidden) await new Promise((r) => setTimeout(r, 900));
   // Frame a ~20 block neighbourhood for the agent at a fixed size, whatever the spectator's window
   // (offscreen, so it works while the tab is hidden too), then hand the spectator their view back.
   const me = client.agents(performance.now()).find((a) => a.id === id);
@@ -460,8 +483,9 @@ const panel = createDevPanel({
 const fixedScale = params.has("scale")
   ? Math.min(1, Math.max(0.25, Number(params.get("scale")) || 1))
   : null;
-let renderScale = fixedScale ?? 1;
 const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, WINDOW_MS = 2000;
+/** A software adapter starts at the floor; there's no GPU headroom to earn pixels back from. */
+let renderScale = fixedScale ?? (softwareGpu ? SCALE_MIN : 1);
 let windowStart = 0, windowFrames = 0, windowSlow = 0, slowWindows = 0, fastWindows = 0;
 
 /** Count this frame; every two seconds, step the render scale if the frame rate asks for it. */
