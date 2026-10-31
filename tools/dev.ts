@@ -17,9 +17,5 @@ new Deno.Command("deno", {
 }).spawn();
 
 const bridge = createBridge();
-serve(port, (req) => {
-  const { pathname } = new URL(req.url);
-  if (pathname === "/mcp") return bridge.handleMcp(req);
-  if (pathname === "/bridge") return bridge.handleGameSocket(req);
-});
+serve(port, bridge.route);
 console.log(`agent-inception: game http://localhost:${port}  ·  MCP http://localhost:${port}/mcp`);

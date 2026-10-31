@@ -11,9 +11,9 @@ on. As agents get better, the world gets richer.
 | :------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------: |
 |                                Wren's yard at night (playtest 0008)                                |                                    A working windmill (playtest 0007)                                    |
 
-> **Status: pre-V1, under active development.** Milestones M0–M11 are done (Catalog, building,
-> crafting, rigid bodies, joints, light, fire, signals); Village Life is next. Saves may break until
-> V1. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> **Status: V1 release candidate.** Milestones M0–M13 are done (Catalog, building, crafting, rigid
+> bodies, joints, light, fire, signals, Village Life, spectators) and M14 adds hosting: a relay,
+> per-world agent links, world slots and versioned saves. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## What's in the box
 
@@ -44,9 +44,11 @@ git clone https://github.com/ethanwiegert/agent-inception.git
 cd agent-inception && deno task dev
 ```
 
-Open <http://localhost:5173>. You'll get a fresh island. The MCP endpoint is served by the same
-process at <http://localhost:5173/mcp>, and the game tab must stay open: the world lives in your
-browser, and the bridge just pipes tool calls to it.
+Open <http://localhost:5173>. You'll get a fresh island and a card with its agent URL. The MCP
+endpoint is served by the same process at <http://localhost:5173/mcp>, and the game tab must stay
+open (a background tab is fine): the world lives in your browser, and the bridge just pipes tool
+calls to it. The panel's **worlds** section keeps three worlds per browser, and exports and imports
+them as files.
 
 On Linux, Chromium needs `--enable-unsafe-webgpu --enable-features=Vulkan`.
 
@@ -58,7 +60,12 @@ up and the game open, start Claude Code in the repo and ask for the `farmer` sub
 
 **Any other MCP client:** add a Streamable HTTP server at `http://localhost:5173/mcp`. The first
 call is `join` with a name. Rejoining with the same name reattaches the same villager, inventory and
-journal. Many agents can share one world.
+journal, once no other agent is playing it. Many agents can share one world.
+
+**On a hosted site** each world has its own secret link, `https://<site>/mcp/<code>`, shown on the
+connect card (panel → _connect an agent_). For Claude Code:
+`claude mcp add --transport http agent-inception <link>`. Anyone with the link can play in that
+world; _New link_ retires the old one.
 
 **No agent at all (curl):**
 
@@ -68,25 +75,45 @@ SID=$(curl -si $M $H -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":
 curl -s $M $H -H "mcp-session-id: $SID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"join","arguments":{"name":"Fern"}}}'
 ```
 
-Watching: click a name tag to follow a villager. The dev panel sets time, speed, look and seed. URL
-params work too, e.g. `?seed=7&time=0.62&look=storybook`.
+Watching: click a name tag to follow a villager. The panel sets time, speed, look, weather and
+worlds. URL params work too, e.g. `?seed=7&time=0.62&look=storybook` (a new seed starts a new world
+in a free slot).
 
 ## How it works
 
 ```
-agent ──POST /mcp──▶ bridge ──WebSocket──▶ game tab ──postMessage──▶ sim worker (20 Hz)
-                                              │
-                                              └─ WebGPU renderer
+agent ──POST /mcp/<code>──▶ relay room ──WebSocket──▶ game tab ──postMessage──▶ sim worker (20 Hz)
+                                                         │
+                                                         └─ WebGPU renderer
 ```
 
 - The **sim** (`src/sim/`) is a deterministic fixed-tick core in a Web Worker: seeded PRNG, no DOM,
   no wall clock. The same code runs headless in Deno for tests.
 - Each **tool call** becomes a generator job that advances one tick per `yield`. Instant tools
   (`look`, `say`, Catalog reads) answer within milliseconds.
-- The **bridge** (`tools/bridge.ts`) is a zero-dependency Streamable HTTP MCP server. It's a pipe,
-  not an authority: the tab owns the world, saved to IndexedDB.
+- The **relay** (`relay/core.ts`) is a zero-dependency Streamable HTTP MCP server. It's a pipe, not
+  an authority: the tab owns the world (saved to IndexedDB) and tells the relay its tools. The dev
+  bridge (`tools/bridge.ts`) and the hosted relay (`relay/worker.ts`, a Cloudflare Durable Object
+  per world link) both run it.
 - The **renderer** (`src/render/`) does HDR, 4× MSAA, sun/moon shadows, GPU grass and water, a 3D
   light field and a PBR Neutral tonemap.
+
+## Hosting
+
+The site and the relay are one Cloudflare Worker
+([ADR 0006](docs/adr/0006-cloudflare-relay-secret-links.md)): static files from `dist/`, and a
+Durable Object per world link that holds the tab's WebSocket (hibernating while quiet, so idle
+worlds cost nothing).
+
+```bash
+deno task build
+```
+
+```bash
+npx wrangler deploy
+```
+
+`wrangler.jsonc` has the config; `npx wrangler dev` runs the same Worker locally on workerd.
 
 ## Docs
 

@@ -1,4 +1,6 @@
+import type { LinkState } from "./agentlink.ts";
 import { LOOKS } from "./render/look.ts";
+import { type SlotInfo, SLOTS } from "./sim/protocol.ts";
 import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
 import type { VillageStatus } from "./sim/village.ts";
@@ -7,7 +9,18 @@ export interface DevHandlers {
   look: (id: string) => void;
   time: (t: number) => void;
   speed: (s: number) => void;
-  seed: (seed: number) => void;
+  /** World slots: open one, start a new world, delete, export or import a world file. */
+  worlds: {
+    open: (slot: number) => void;
+    create: () => void;
+    remove: (slot: number) => void;
+    exportWorld: (slot: number) => void;
+    importWorld: (file: File) => void;
+  };
+  /** Show the connect card (the world's agent URL). */
+  connect: () => void;
+  /** Let go of every villager's hold, so restarted agents can rejoin by name at once. */
+  freeVillagers: () => void;
   follow: (agentId: number | null) => void;
   /** Village Life on, or the world a Sandbox. */
   villageLife: (on: boolean) => void;
@@ -25,7 +38,8 @@ export interface DevStatus {
   day: number;
   speed: number;
   seed: number;
-  bridge: boolean;
+  link: LinkState;
+  worldName: string;
   agents: { id: number; name: string }[];
   following: number | null;
   catalog: Catalog;
@@ -47,6 +61,13 @@ const WEATHER: [string, number | null][] = [
   ["cloudy", 0.5],
   ["overcast", 0.92],
 ];
+const LINK_TEXT: Record<LinkState, string> = {
+  connecting: "linking…",
+  connected: "link open",
+  offline: "relay offline",
+  replaced: "another tab has this world",
+  refused: "link refused",
+};
 const INPUT = "width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;border-radius:6px;" +
   "border:1px solid #445;background:#0e1319;color:inherit;font:inherit";
 
@@ -105,11 +126,32 @@ export function createDevPanel(on: DevHandlers) {
   time.body.append(slider, ...speedButtons);
 
   const world = section("world");
-  const seedButton = button("", () => on.seed((Math.random() * 1e6) | 0));
   const weatherButtons = WEATHER.map(([label, c]) => button(label, () => on.weather(c)));
   let muted = false;
   const soundButton = button("", () => on.sound(!muted));
-  world.body.append(seedButton, document.createElement("br"), ...weatherButtons, soundButton);
+  world.body.append(...weatherButtons, soundButton);
+
+  // World slots: three worlds per browser, each with its own seed, save and agent link.
+  const worlds = section("worlds");
+  const slotList = document.createElement("div");
+  const file = document.createElement("input");
+  file.type = "file";
+  file.accept = ".gz,.json,application/gzip,application/json";
+  file.style.display = "none";
+  file.onchange = () => {
+    const f = file.files?.[0];
+    if (f) on.worlds.importWorld(f);
+    file.value = "";
+  };
+  const note = document.createElement("div");
+  note.style.cssText = "color:#e8c46a;margin-top:4px;display:none";
+  worlds.body.append(
+    slotList,
+    button("new world", () => on.worlds.create()),
+    button("import", () => file.click()),
+    file,
+    note,
+  );
 
   // The Notice Board: spectators pin Wishes for villagers. Never orders, and never moves anyone.
   const board = section("notice board");
@@ -142,6 +184,12 @@ export function createDevPanel(on: DevHandlers) {
   let villageKey = "";
 
   const agents = section("agents");
+  const connectButton = button("connect an agent", () => on.connect());
+  connectButton.style.cssText += ";border-color:#9fd36b";
+  const freeButton = button("free villagers", () => on.freeVillagers());
+  freeButton.title =
+    "Every agent joins again; a restarted agent can take its villager back at once";
+  agents.head.after(connectButton, freeButton);
   let agentsKey = "";
 
   const catalog = section("catalog");
@@ -151,7 +199,52 @@ export function createDevPanel(on: DevHandlers) {
   stats.style.opacity = "0.8";
   panel.append(stats);
 
+  let noteTimer: ReturnType<typeof setTimeout> | undefined;
+
   return {
+    /** Something the spectator should know about worlds: a full slot list, a failed import. */
+    notice(text: string) {
+      note.textContent = text;
+      note.style.display = "";
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(() => (note.style.display = "none"), 15_000);
+    },
+    /** The world slots, as the worker last listed them. */
+    worlds(slots: SlotInfo[], current: number) {
+      slotList.replaceChildren(
+        ...slots.slice(0, SLOTS).map((w) => {
+          const row = document.createElement("div");
+          row.style.cssText = "display:flex;align-items:center;gap:2px;margin-top:2px";
+          const label = document.createElement("span");
+          label.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;" +
+            "text-overflow:ellipsis;" + (w.slot === current ? "color:#9fd36b" : "");
+          if (w.empty) {
+            label.textContent = `${w.slot + 1} · empty`;
+            label.style.opacity = "0.5";
+            row.append(label);
+            return row;
+          }
+          // World and villager names are text, never HTML.
+          label.textContent = `${w.slot + 1} · ${w.name} · day ${w.day}`;
+          label.title = `seed ${w.seed}` +
+            (w.villagers.length ? ` · ${w.villagers.join(", ")}` : " · nobody yet") +
+            (w.savedAt ? ` · saved ${new Date(w.savedAt).toLocaleString()}` : "");
+          const small = (text: string, title: string, f: () => void) => {
+            const b = button(text, f);
+            b.title = title;
+            b.style.cssText += ";padding:0 6px;margin:0";
+            return b;
+          };
+          row.append(label);
+          if (w.slot !== current) {
+            row.append(small("open", "watch this world", () => on.worlds.open(w.slot)));
+          }
+          row.append(small("⤓", "export to a file", () => on.worlds.exportWorld(w.slot)));
+          if (w.slot !== current) row.append(small("×", "delete", () => on.worlds.remove(w.slot)));
+          return row;
+        }),
+      );
+    },
     /** Refresh readouts; call a few times a second, not every frame. */
     update(s: DevStatus) {
       lookButtons.forEach(([id, b]) => mark(b, id === s.look));
@@ -161,7 +254,7 @@ export function createDevPanel(on: DevHandlers) {
       time.head.textContent = `time · day ${s.day}, ${
         String(Math.floor(minutes / 60)).padStart(2, "0")
       }:${String(minutes % 60).padStart(2, "0")}`;
-      seedButton.textContent = `seed ${s.seed} — new world`;
+      worlds.head.textContent = `worlds · seed ${s.seed}`;
       weatherButtons.forEach((b, i) => mark(b, WEATHER[i][1] === s.heldClouds));
       weatherButtons[0].title = `clouds ${Math.round(s.clouds * 100)}%`;
       muted = s.muted;
@@ -215,7 +308,7 @@ export function createDevPanel(on: DevHandlers) {
         );
         if (!s.board.length) wishes.textContent = "no Wishes pinned";
       }
-      agents.head.textContent = `agents · bridge ${s.bridge ? "connected" : "offline"}`;
+      agents.head.textContent = `agents · ${LINK_TEXT[s.link]}`;
 
       const v = s.village;
       if (v) {

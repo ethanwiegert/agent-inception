@@ -48,8 +48,52 @@ export interface CatalogDelta {
   proposals: Proposal[];
 }
 
+/** How many worlds one browser keeps. */
+export const SLOTS = 3;
+
+/** A world slot as the panel lists it. */
+export type SlotInfo =
+  | { slot: number; empty: true }
+  | {
+    slot: number;
+    empty?: false;
+    name: string;
+    seed: number;
+    day: number;
+    savedAt: number;
+    villagers: string[];
+  };
+
+/** World slot requests; the worker answers each with a `SlotsReply` carrying the same `req`. */
+export type SlotOp =
+  | { op: "list" }
+  /** Save now (before a reload, say). */
+  | { op: "save" }
+  | { op: "delete"; slot: number }
+  /** The slot's world as a gzipped file. */
+  | { op: "export"; slot: number }
+  /** A world file (gzipped or plain JSON) into the first free slot. */
+  | { op: "import"; data: ArrayBuffer };
+
+export interface SlotsReply {
+  type: "slots";
+  req: number;
+  slots: SlotInfo[];
+  /** Set when the op failed. */
+  error?: string;
+  /** An exported world. */
+  file?: { name: string; bytes: Uint8Array<ArrayBuffer> };
+  /** Where an imported world went. */
+  slot?: number;
+}
+
 export type ToWorker =
-  | { type: "init"; seed?: number }
+  /**
+   * Open world slot `slot`. With a seed that isn't that slot's world, a new world starts in a free
+   * slot instead (the slot it went to comes back in `ready`).
+   */
+  | { type: "init"; seed?: number; slot: number }
+  | ({ type: "slots"; req: number } & SlotOp)
   | { type: "call"; callId: number; session: string; tool: string; args: Record<string, unknown> }
   | { type: "speed"; speed: number }
   | { type: "setTime"; timeOfDay: number }
@@ -60,12 +104,18 @@ export type ToWorker =
   /** The spectator pins a Wish on the Notice Board, for anyone (null) or one villager by name. */
   | { type: "wish"; text: string; for: string | null }
   | { type: "unpin"; id: number }
-  | { type: "reset"; seed: number }
+  /** The world's link was renewed: every agent must join again (nobody holds a villager). */
+  | { type: "forgetSessions" }
   | { type: "save" };
 
 export interface ReadyMessage {
   type: "ready";
   seed: number;
+  /** The world slot it lives in, and its name. */
+  slot: number;
+  name: string;
+  /** Something the spectator should hear about loading (slots full, a newer save left alone). */
+  notice?: string;
   /** The world as it stands, edits included, so the page doesn't regenerate it. */
   world: WorldData;
   /** Ticks fast-forwarded to cover time spent away. */
@@ -119,4 +169,4 @@ export interface ResultsMessage {
   results: CallResult[];
 }
 
-export type FromWorker = ReadyMessage | TickMessage | ResultsMessage;
+export type FromWorker = ReadyMessage | TickMessage | ResultsMessage | SlotsReply;

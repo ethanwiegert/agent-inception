@@ -16,8 +16,8 @@ Install [Deno](https://deno.com) 2.4+ and use a Chromium-family browser with Web
 | `deno task test`                          | Sim and world tests, headless and fast                             |
 | `deno task shot [out.png] [query]`        | Open Chromium on the real GPU, print frame/GPU timings, screenshot |
 | `deno task camshot out.png "query" '{…}'` | Like `shot`, with a posed camera; prints GPU errors                |
-| `deno task build`                         | Minified `dist/main.js` and `dist/worker.js`                       |
-| `deno task bridge`                        | Standalone MCP bridge on `:7777`, for a hosted game                |
+| `deno task build`                         | The static site in `dist/` (then `npx wrangler deploy`)            |
+| `deno task bridge`                        | Standalone MCP bridge on `:7777`                                   |
 
 Without a display (cloud VMs, CI), `shot` runs headless on SwiftShader: the pictures are real, the
 milliseconds are CPU emulation and only good for before/after comparisons. [`CLAUDE.md`](CLAUDE.md)

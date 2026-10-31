@@ -77,6 +77,13 @@ Saves may break freely until M14; save versioning and migrations come last befor
   done with `board`; never orders, never paid), panel weather and sound, synthesized positional
   audio with file slots for Ethan's soundtrack and voices, and the reverse CAPTCHA; playtest
   [0010](playtests/0010-m13.md).
+- **M14 — ship V1 (built, gate passed in software; two steps left for Ethan).** A relay with a
+  secret link per world (one Cloudflare Worker, a Durable Object per link), the connect card, world
+  slots with export and import, save version 3 with migrations, villagers held by the session
+  playing them, adaptive render scale; playtest [0011](playtests/0011-m14.md). Left:
+  `deno task
+  build && npx wrangler deploy` to a real Cloudflare account, and the 60 fps measure on
+  an integrated-GPU laptop at 1080p (with the standing hardware remeasure).
 
 ## V1
 
@@ -602,6 +609,60 @@ Decided in the build (M13):
 - A session can `join` as any villager's name and take over their body (playtest 0010); pairing
   should bind a villager to the session that made it.
 
+Grill outcome (2026-10-31):
+
+- **Cloudflare hosts it** (ADR 0006): one Worker serves the static site and the relay; each world's
+  relay room is a Durable Object that holds the tab's WebSocket (hibernating while idle, so a quiet
+  world costs nothing). Zero npm dependencies in the repo; Ethan deploys with `wrangler`.
+- **Pairing is a secret URL per world.** Each world slot has its own unguessable link,
+  `https://<site>/mcp/<code>`, that any MCP client takes as a plain HTTP server URL. It survives
+  reloads, so an agent's config never goes stale; a "new link" button cuts the old one off.
+- **A villager is held while active.** The session that joined a villager keeps it while it's active
+  (a call within about ten minutes at 1×, or a job running); another session asking for that name is
+  refused. After that it's free, so a restarted agent reattaches by name.
+- **Landing is an overlay on the live island.** The game loads at once; a first-visit card over it
+  explains the idea and shows the agent URL with copy buttons for Claude Code and other MCP clients.
+  The panel reopens it.
+
+Decided in the build (M14):
+
+- **The relay** (`relay/core.ts`) is one Room per world link, runtime-agnostic: the dev bridge
+  (`tools/bridge.ts`) runs Rooms on Deno, the hosted relay (`relay/worker.ts`) runs one in each
+  Durable Object. MCP sessions are stateless ids (made on `initialize`, any well-formed one taken
+  after), so a restarted or hibernated relay loses nothing. A tab connects to `/tab/<code>` and says
+  hello with its secret and its tools; the relay answers `tools/list` from the last tab's list (kept
+  in Durable Object storage), so new tools never need a redeploy, and a link no tab has opened says
+  the game isn't open whatever the tool. Messages over 256 KB travel in parts (a screenshot is ~260
+  KB); a call waits at most 10 minutes; 64 calls in flight per world; requests ≤ 1 MB; foreign
+  browser Origins refused.
+- **Links**: a slot's secret is 256 random bits in the browser's localStorage; its code is the first
+  128 bits of SHA-256 of it, base64url. A wrong secret closes the socket with 4001; the newest tab
+  with the right one wins (4000 to the old, as before). The dev page uses the bridge's local room
+  (`/mcp`, no secret) unless `?relay=1`. A new link also drops every villager hold, since agents on
+  the old link can't reach the world anymore.
+- **Holds**: a villager is held while its session's last call is under a game day old (12000 ticks,
+  10 minutes at 1×; it scales with speed, since the sim knows no wall clock) or a job is running.
+  The refusal says how long until it's free. Joining as a free villager lets go of every other
+  session's binding to it; switching your own session to a new name frees the old villager at once.
+- **World slots**: IndexedDB version 2, keys `slot0`-`slot2` plus a summary store for the panel; a
+  browser's pre-M14 `world` key becomes slot 1. The active slot is remembered per browser (`?slot=`
+  overrides). A `?seed=` that isn't the slot's world starts a new world in the first free slot and
+  is then dropped from the URL; with all three full it opens the current world and says so. The open
+  world can't be deleted. Worlds have names from their seed ("Golden Hollow").
+- **World files** are the save as JSON with a `format` tag, gzipped (~15 KB for a young world);
+  import takes gzip or plain JSON up to 64 MB unpacked, migrates and test-loads it before writing it
+  to a free slot, and opens it without catching up the time since it was saved. An imported world
+  gets a new link.
+- **Save version 3** (`sim/save.ts`): migrations step one version at a time; version 2 gains a name.
+  A save newer than the code is opened as a fresh island that isn't saved (the notice says why), so
+  the newer version can still open it; one older than version 2 starts afresh, as before. Saves are
+  checked (seed, clock, blocks, crops, villagers) before loading.
+- **Freeing villagers**: a restarted agent is a new session, so its own villager is held from it
+  (playtest 0011). The panel's **free villagers** button (and a new link) drops every hold; each
+  agent's next call says why and to join again by name. The refusal points a restarted agent at it.
+- **Render scale** adapts: two 2-second windows with most frames over 20 ms drop it 10% (to 50%),
+  three with headroom (on time, GPU timer under 7 ms) raise it back; `?scale=` fixes it.
+
 ## V2 (unordered)
 
 Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;
@@ -659,6 +720,14 @@ Pick these up in the gate of whichever milestone touches them.
 - From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
   (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
   all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
+- From playtest 0011: `look` says how many sheep have wool ready but not which; a tree on `look`'s
+  map at (142, 136) wasn't found by `interact` on that tile (a 3 × 3 area found it; not reproduced);
+  Catalog "Added" times use the clock's current offset, so the time slider moves old timestamps; the
+  join welcome is ~3000 characters every time. Lookalike names ("Nett1e") are allowed.
+- **M14, for Ethan:** deploy (`deno task build`, then `npx wrangler deploy`; ADR 0006) and check a
+  hosted link from Claude Code; the Durable Object's hibernation wake path (the tab's socket kept,
+  the Object's memory lost) only runs on Cloudflare, so try a world left quiet for a while. Measure
+  60 fps at 1080p on an integrated GPU (and whether the render scale steps in).
 - From playtest 0010: spectators can only unpin a whole Wish, not hide one villager's reply.
   `place_block` with `layers: 2` was seen laying one layer (not reproduced; check it). Listen to the
   synth sounds on the dev box (only built and played headless, with no ears on them).
