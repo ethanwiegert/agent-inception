@@ -613,6 +613,11 @@ Pick these up in the gate of whichever milestone touches them.
   drawn; the page relights moving lamps once a tick. Light, fire and sparks were only seen in
   software; check them on the dev box with the hardware remeasure.
 - From playtest 0008: `interact` walks to its targets without saying where you ended up.
+- From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
+  (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
+  all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
+  The dev panel's village section was only checked through its message path (headless tabs don't
+  draw the panel); look at it on the dev box.
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.
