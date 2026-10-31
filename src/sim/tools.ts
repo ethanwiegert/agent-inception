@@ -320,12 +320,21 @@ function heldBy(sim: Sim, agent: Agent): string | null {
       : ago < 1
       ? "they called just now"
       : `their last call was ${minutes(ago)} ago`
-  }). Join with a name of your own. A villager is free to rejoin once its agent has been away a ` +
-    `game day (about ten minutes at normal speed)${
-      agent.queue.length ? "" : `: ${agent.name} is free in ${minutes(freeIn)}`
+  }). Join with a name of your own. A villager is free to rejoin once its agent has made no call ` +
+    `for a game day${
+      agent.queue.length
+        ? ""
+        : `: ${agent.name} is free in ${minutes(freeIn)} (${
+          realMinutes(HOLD_TICKS - idle)
+        } at normal speed)`
     }.`;
 }
 
+/** Ticks as real time at 1×, rounded up: "about 1 real minute", "about 9 real minutes". */
+const realMinutes = (ticks: number) => {
+  const n = Math.max(1, Math.ceil(ticks / TICK_HZ / 60));
+  return n === 1 ? "about 1 real minute" : `about ${n} real minutes`;
+};
 const minutes = (n: number) =>
   n >= 90 ? `${Math.round(n / 60)} game hours` : n === 1 ? "1 game minute" : `${n} game minutes`;
 

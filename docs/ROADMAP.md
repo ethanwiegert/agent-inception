@@ -617,6 +617,42 @@ Grill outcome (2026-10-31):
   explains the idea and shows the agent URL with copy buttons for Claude Code and other MCP clients.
   The panel reopens it.
 
+Decided in the build (M14):
+
+- **The relay** (`relay/core.ts`) is one Room per world link, runtime-agnostic: the dev bridge
+  (`tools/bridge.ts`) runs Rooms on Deno, the hosted relay (`relay/worker.ts`) runs one in each
+  Durable Object. MCP sessions are stateless ids (made on `initialize`, any well-formed one taken
+  after), so a restarted or hibernated relay loses nothing. A tab connects to `/tab/<code>` and says
+  hello with its secret and its tools; the relay answers `tools/list` from the last tab's list (kept
+  in Durable Object storage), so new tools never need a redeploy, and a link no tab has opened says
+  the game isn't open whatever the tool. Messages over 256 KB travel in parts (a screenshot is ~260
+  KB); a call waits at most 10 minutes; 64 calls in flight per world; requests ≤ 1 MB; foreign
+  browser Origins refused.
+- **Links**: a slot's secret is 256 random bits in the browser's localStorage; its code is the first
+  128 bits of SHA-256 of it, base64url. A wrong secret closes the socket with 4001; the newest tab
+  with the right one wins (4000 to the old, as before). The dev page uses the bridge's local room
+  (`/mcp`, no secret) unless `?relay=1`. A new link also drops every villager hold, since agents on
+  the old link can't reach the world anymore.
+- **Holds**: a villager is held while its session's last call is under a game day old (12000 ticks,
+  10 minutes at 1×; it scales with speed, since the sim knows no wall clock) or a job is running.
+  The refusal says how long until it's free. Joining as a free villager lets go of every other
+  session's binding to it; switching your own session to a new name frees the old villager at once.
+- **World slots**: IndexedDB version 2, keys `slot0`-`slot2` plus a summary store for the panel; a
+  browser's pre-M14 `world` key becomes slot 1. The active slot is remembered per browser (`?slot=`
+  overrides). A `?seed=` that isn't the slot's world starts a new world in the first free slot and
+  is then dropped from the URL; with all three full it opens the current world and says so. The open
+  world can't be deleted. Worlds have names from their seed ("Golden Hollow").
+- **World files** are the save as JSON with a `format` tag, gzipped (~15 KB for a young world);
+  import takes gzip or plain JSON up to 64 MB unpacked, migrates and test-loads it before writing it
+  to a free slot, and opens it without catching up the time since it was saved. An imported world
+  gets a new link.
+- **Save version 3** (`sim/save.ts`): migrations step one version at a time; version 2 gains a name.
+  A save newer than the code is opened as a fresh island that isn't saved (the notice says why), so
+  the newer version can still open it; one older than version 2 starts afresh, as before. Saves are
+  checked (seed, clock, blocks, crops, villagers) before loading.
+- **Render scale** adapts: two 2-second windows with most frames over 20 ms drop it 10% (to 50%),
+  three with headroom (on time, GPU timer under 7 ms) raise it back; `?scale=` fixes it.
+
 ## V2 (unordered)
 
 Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;

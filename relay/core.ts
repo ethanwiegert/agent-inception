@@ -314,6 +314,17 @@ export class Room {
         const args = msg.params?.arguments ?? {};
         // A room no tab has opened yet knows no tools: say the game isn't open, not "unknown".
         const tools = await this.toolList();
+        if (!tools.length && this.options.code !== LOCAL) {
+          // No tab has ever proved this code: a mistyped or made-up link, not a closed tab.
+          return {
+            content: [{
+              type: "text",
+              text: "No world uses this link. Check it was copied whole from the game's " +
+                "connect card.",
+            }],
+            isError: true,
+          };
+        }
         if (tools.length && !tools.some((t) => t.name === name)) {
           throw rpcError(-32602, `Unknown tool: ${name}`);
         }

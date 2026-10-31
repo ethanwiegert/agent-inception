@@ -351,6 +351,7 @@ const connectCard = createConnectCard(
   async () => {
     // Agents on the old link are cut off, so they hold no villagers: anyone may join as anyone.
     client.send({ type: "forgetSessions" });
+    sessionAgents.clear();
     await link?.renew(linkSecret(client.slot, true));
   },
 );

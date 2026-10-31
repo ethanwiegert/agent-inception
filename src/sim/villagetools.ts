@@ -204,9 +204,10 @@ export const VILLAGE_HANDLERS: Record<string, Handler> = {
     const e = v.errands.find((x) => x.id === id);
     if (!e) {
       throw new Error(
-        `There's no errand #${id} on the board${
-          v.errands.length ? ` (open: #${v.errands.map((x) => x.id).join(", #")})` : ""
-        }.`,
+        (Number.isInteger(id) && id >= 1 && id <= v.serial
+          ? `Errand #${id} is off the board: it was done, or it lapsed`
+          : `There's no errand #${id} on the board`) +
+          `${v.errands.length ? ` (open: #${v.errands.map((x) => x.id).join(", #")})` : ""}.`,
       );
     }
     if (action === "take") return v.take(agent, e);

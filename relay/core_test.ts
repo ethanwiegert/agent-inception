@@ -123,6 +123,13 @@ Deno.test("relay: a link no tab has opened says the game isn't open, whatever th
   assertMatch(res.result.content[0].text, /isn't open/);
 });
 
+Deno.test("relay: a link no tab ever proved says no world uses it", async () => {
+  const room = new Room({ code: await pairingCode(newSecret()) });
+  const res = await call(room, await init(room), "look");
+  assert(res.result.isError);
+  assertMatch(res.result.content[0].text, /No world uses this link/);
+});
+
 Deno.test("relay: without a tab a call says the game isn't open", async () => {
   const room = new Room({ code: LOCAL, tools: TOOLS });
   const res = await call(room, await init(room), "look");

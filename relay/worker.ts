@@ -74,6 +74,8 @@ export class RoomObject {
     const url = new URL(req.url);
     const [, kind, code] = url.pathname.split("/");
     const room = this.get(code, url.origin);
+    // A room woken by a socket message first didn't know the site's origin yet.
+    room.options.origins = [url.origin];
     if (kind === "mcp") return room.handleMcp(req);
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected a WebSocket", { status: 426 });

@@ -371,6 +371,9 @@ Deno.test("the world posts three errands, the same for the same seed", () => {
   assertEquals(a.village.errands, b.village.errands);
   const board = ok(run(a, "a", "errands"));
   assert(board.includes("#1 ") && board.includes("a loaf of bread (open"), board);
+  // Playtest 0011: an errand that came down says so, rather than that it never was.
+  const gone = a.village.errands.shift()!;
+  err(run(a, "a", "errands", { action: "take", id: gone.id }), "off the board: it was done");
   a.village.setLife(false);
   err(run(a, "a", "errands"), "Sandbox");
 });

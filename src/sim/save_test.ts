@@ -95,7 +95,9 @@ Deno.test("join: a villager is free again a game day after its agent's last call
   results(sim);
   sim.tick += HOLD_TICKS - 20;
   callTool(sim, "new", "join", { name: "Fern" }, 2);
-  assert(/free in 3 game minutes\./.test(results(sim)[0].text));
+  assert(
+    /free in 3 game minutes \(about 1 real minute at normal speed\)\./.test(results(sim)[0].text),
+  );
   sim.tick += 20;
   callTool(sim, "new", "join", { name: "Fern" }, 3);
   const [back] = results(sim);
