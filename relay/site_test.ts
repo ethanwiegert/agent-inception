@@ -1,10 +1,13 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
 import {
   hasOriginMark,
+  MARKDOWN_TYPE,
+  noWorldText,
   ORIGIN_MARK,
   SITE_HEADERS,
   SITE_PAGES,
   siteOrigin,
+  wantsMarkdown,
   withOrigin,
 } from "./site.ts";
 import worker from "./worker.ts";
@@ -111,6 +114,73 @@ Deno.test("worker: fills in the site's address on its pages, with the site's hea
   assertEquals((await get("/sitemap.xml")).status, 404);
 });
 
+Deno.test("site: Markdown when the request prefers it, the page for browsers", () => {
+  for (
+    const accept of [
+      "text/markdown",
+      "text/markdown, text/html;q=0.9",
+      "text/html;q=0.5, TEXT/Markdown;q=0.8, */*;q=0.1",
+      "text/markdown, text/html",
+    ]
+  ) assert(wantsMarkdown(accept), accept);
+  for (
+    const accept of [
+      null,
+      "",
+      "*/*",
+      "text/*",
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8",
+      "text/markdown;q=0, text/html",
+      "text/markdown;q=0.4, text/html;q=0.9",
+      "text/markdown;q=nope",
+    ]
+  ) assert(!wantsMarkdown(accept), String(accept));
+});
+
+Deno.test("worker: the home page answers agents in Markdown and says where it is", async () => {
+  const { get, seen } = site({
+    "/": `<link rel="canonical" href="${ORIGIN_MARK}/">`,
+    "/llms.txt": `# agent-inception\n\nMCP: ${ORIGIN_MARK}/mcp/<code>`,
+  });
+  const md = await get("/", { headers: { accept: "text/markdown, text/html;q=0.9" } });
+  assertEquals(md.status, 200);
+  assertEquals(await md.text(), "# agent-inception\n\nMCP: https://w.example/mcp/<code>");
+  assertEquals(md.headers.get("content-type"), "text/markdown; charset=utf-8");
+  assertEquals(new URL(seen.at(-1)!.url).pathname, "/llms.txt");
+  // A browser gets the page; both carry the Markdown link and vary on Accept for caches.
+  const page = await get("/", { headers: { accept: "text/html,*/*;q=0.8" } });
+  assertEquals(await page.text(), `<link rel="canonical" href="https://w.example/">`);
+  assertEquals(page.headers.get("content-type"), "text/plain");
+  for (const res of [md, page]) {
+    assertEquals(res.headers.get("vary"), "Accept");
+    assertEquals(res.headers.get("link"), '</llms.txt>; rel="alternate"; type="text/markdown"');
+    assertEquals(res.headers.get("x-content-type-options"), "nosniff");
+  }
+  // HEAD negotiates too, with no body; only the home page has a Markdown form.
+  const head = await get("/", { method: "HEAD", headers: { accept: "text/markdown" } });
+  assertEquals([head.headers.get("content-type"), await head.text()], [MARKDOWN_TYPE, ""]);
+  const llms = await get("/llms.txt", { headers: { accept: "text/markdown" } });
+  assertEquals([llms.headers.get("vary"), llms.headers.get("link")], [null, null]);
+  // Other methods aren't negotiated: they reach the store as they came.
+  await get("/", { method: "POST", headers: { accept: "text/markdown" } });
+  assertEquals([seen.at(-1)!.method, new URL(seen.at(-1)!.url).pathname], ["POST", "/"]);
+});
+
+Deno.test("worker: an MCP client without a world link learns where links come from", async () => {
+  const { get, seen } = site({}, "https://ai.example");
+  for (const path of ["/mcp", "/mcp/", "/mcp/not-a-code"]) {
+    const res = await get(path, { method: "POST", body: "{}" });
+    assertEquals(res.status, 404, path);
+    const text = await res.text();
+    assertEquals(text, noWorldText("https://ai.example"));
+    assert(text.includes("https://ai.example/llms.txt") && text.includes("/mcp/<code>"), text);
+  }
+  assertEquals((await get("/tab/not-a-code")).status, 404);
+  // None of them touched the asset store or a room.
+  assertEquals(seen.length, 0);
+  assertEquals(await (await get("/mcp/abcdefghijklmnopqrstuv")).text(), "room");
+});
+
 Deno.test("worker: SITE_URL pins the canonical address", async () => {
   const { get } = site(
     { "/": `<link rel="canonical" href="${ORIGIN_MARK}/">` },
@@ -129,6 +199,7 @@ Deno.test("site: the page tells search engines, previews and agents what this is
       /<meta property="og:image" content="https:\/\/e\.example\/og\.jpg"/,
       /<meta name="twitter:card" content="summary_large_image"/,
       /<link rel="describedby" href="\/llms\.txt"/,
+      /<link rel="alternate" href="\/llms\.txt" type="text\/markdown"/,
     ]
   ) assert(tag.test(html), String(tag));
   // The structured data is valid JSON (a typo would silently drop it).

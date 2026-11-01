@@ -1,5 +1,12 @@
 /** Static file server for `web/` with `dist/` layered on top. */
-import { SITE_PAGES, withOrigin } from "../relay/site.ts";
+import {
+  HOME_HEADERS,
+  MARKDOWN_PAGE,
+  MARKDOWN_TYPE,
+  SITE_PAGES,
+  wantsMarkdown,
+  withOrigin,
+} from "../relay/site.ts";
 
 const roots = ["web", "dist"];
 const types: Record<string, string> = {
@@ -70,6 +77,10 @@ export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr
     }
     // Pages that name the site's own address get this server's, as the Worker does in production.
     const site = SITE_PAGES.includes(path);
+    // The home page answers agents that prefer Markdown with llms.txt, as in production.
+    const home = path === "/";
+    const markdown = home && wantsMarkdown(req.headers.get("accept"));
+    if (markdown) path = MARKDOWN_PAGE;
     if (path.endsWith("/")) path += "index.html";
     if (path.includes("..") || path.includes("\0")) {
       return new Response("bad path", { status: 400 });
@@ -83,9 +94,10 @@ export function serve(port: number, route?: Route): Deno.HttpServer<Deno.NetAddr
         const ext = path.slice(path.lastIndexOf(".") + 1);
         return new Response(body, {
           headers: {
-            "content-type": types[ext] ?? "application/octet-stream",
+            "content-type": markdown ? MARKDOWN_TYPE : types[ext] ?? "application/octet-stream",
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",
+            ...(home ? HOME_HEADERS : {}),
           },
         });
       } catch { /* try next root */ }

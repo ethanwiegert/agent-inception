@@ -5,7 +5,17 @@
  * while the world is quiet, so idle worlds cost nothing. Deploy with `npx wrangler deploy`.
  */
 import { CODE_RE, originAllowed, POLICY, Room, type Socket, type Tool } from "./core.ts";
-import { SITE_HEADERS, SITE_PAGES, siteOrigin, withOrigin } from "./site.ts";
+import {
+  HOME_HEADERS,
+  MARKDOWN_PAGE,
+  MARKDOWN_TYPE,
+  noWorldText,
+  SITE_HEADERS,
+  SITE_PAGES,
+  siteOrigin,
+  wantsMarkdown,
+  withOrigin,
+} from "./site.ts";
 
 // The few Cloudflare runtime types this file uses (no npm types package: zero dependencies).
 interface DurableObjectState {
@@ -42,20 +52,40 @@ export default {
   fetch(req: Request, env: Env): Promise<Response> | Response {
     const url = new URL(req.url);
     if (SITE_PAGES.includes(url.pathname)) return sitePage(req, env);
+    // Agents guessing the endpoint (`/mcp`) or holding a mangled link learn where links come from.
+    if (/^\/mcp\/?$/.test(url.pathname)) return noWorld(req, env);
     const m = url.pathname.match(/^\/(mcp|tab)\/([^/]+)$/);
     if (!m) return env.ASSETS.fetch(req);
-    if (!CODE_RE.test(m[2])) return new Response("no such world", { status: 404 });
+    if (!CODE_RE.test(m[2])) {
+      return m[1] === "mcp" ? noWorld(req, env) : new Response("no such world", { status: 404 });
+    }
     return env.ROOMS.get(env.ROOMS.idFromName(m[2])).fetch(req);
   },
 };
 
+function noWorld(req: Request, env: Env): Response {
+  return new Response(noWorldText(siteOrigin(req.url, env.SITE_URL)), {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
+}
+
 /**
  * A static page that names the site's own address (relay/site.ts): the asset with `{{origin}}`
- * filled in. Anything but a plain 200 (a redirect, a 405 for a POST) passes through as it is.
+ * filled in. Anything but a plain 200 (a redirect, a 405 for a POST) passes through as it is. The
+ * home page answers a request that prefers Markdown (`Accept: text/markdown`) with llms.txt.
  */
 async function sitePage(req: Request, env: Env): Promise<Response> {
   const head = req.method === "HEAD";
-  const res = await env.ASSETS.fetch(head ? new Request(req, { method: "GET" }) : req);
+  const home = new URL(req.url).pathname === "/";
+  const markdown = home && (head || req.method === "GET") &&
+    wantsMarkdown(req.headers.get("accept"));
+  const asset = markdown
+    ? new Request(new URL(MARKDOWN_PAGE, req.url), { headers: req.headers })
+    : head
+    ? new Request(req, { method: "GET" })
+    : req;
+  const res = await env.ASSETS.fetch(asset);
   if (res.status !== 200) return res;
   const text = withOrigin(await res.text(), siteOrigin(req.url, env.SITE_URL));
   const headers = new Headers(res.headers);
@@ -63,6 +93,10 @@ async function sitePage(req: Request, env: Env): Promise<Response> {
   headers.delete("content-length");
   headers.delete("etag");
   for (const [name, value] of Object.entries(SITE_HEADERS)) headers.set(name, value);
+  if (home) {
+    for (const [name, value] of Object.entries(HOME_HEADERS)) headers.append(name, value);
+  }
+  if (markdown) headers.set("content-type", MARKDOWN_TYPE);
   return new Response(head ? null : text, { status: 200, headers });
 }
 
