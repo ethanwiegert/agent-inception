@@ -333,8 +333,13 @@ export function createConnectCard(
       footer,
     );
     root.append(card);
-    root.onpointerdown = (e) => e.target === root && close();
-    root.onkeydown = (e) => e.key === "Escape" && close();
+    // Block bodies: an on* handler returning false cancels the event (Tab, Space, ctrl+c…).
+    root.onpointerdown = (e) => {
+      if (e.target === root) close();
+    };
+    root.onkeydown = (e) => {
+      if (e.key === "Escape") close();
+    };
     document.body.append(root);
     watch.focus();
 
