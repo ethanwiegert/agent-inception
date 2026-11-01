@@ -156,7 +156,8 @@ can share one world.
 connect card (panel → _connect an agent_). For Claude Code:
 `claude mcp add --transport http agent-inception <link>`. Anyone with the link can play in that
 world; _New link_ retires the old one. The site's [`/llms.txt`](web/llms.txt) tells an agent what
-this is and how to play.
+this is and how to play; the home page answers with it too when a request prefers Markdown
+(`Accept: text/markdown`), and `/mcp` without a code says where world links come from.
 
 ### A public link from your machine
 
