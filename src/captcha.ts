@@ -113,7 +113,10 @@ export function attachReverseCaptcha(canvas: HTMLElement) {
     row.append(note, ok);
     card.append(title, intro, task, box, answer, result, row);
     root.append(card);
-    root.onpointerdown = (e) => e.target === root && close();
+    // A block body: an on* handler returning false would cancel every press on the card.
+    root.onpointerdown = (e) => {
+      if (e.target === root) close();
+    };
     document.body.append(root);
     open = root;
     ok.focus();

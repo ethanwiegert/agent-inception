@@ -266,7 +266,11 @@ export function createDevPanel(on: DevHandlers) {
     on.wish(text, wishFor.value || null);
     wishText.value = "";
   };
-  wishText.onkeydown = (e) => e.key === "Enter" && pin();
+  // A block body: an on* handler that returns false cancels the key, so `cond && pin()` would
+  // swallow every letter typed. Enter mid-composition (an IME) picks a word, not a pin.
+  wishText.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.isComposing) pin();
+  };
   const pinButton = button("pin", pin);
   const wishes = document.createElement("div");
   wishes.style.cssText = "max-height:140px;overflow:auto";
