@@ -16,6 +16,8 @@ import {
   pairingCode,
   POLICY,
   Reassembler,
+  RELAY_ORIGIN,
+  relayFor,
   REPLACED,
   Room,
   sendFramed,
@@ -217,6 +219,24 @@ Deno.test("relay: agents, localhost, the site and itch embed CDNs may reach a ho
   assert(!originAllowed("https://html-classic.itch.zone"));
   assert(!originAllowed("https://html.itch.zone"));
   assert(!originAllowed("https://evil.example"));
+});
+
+Deno.test("relay: an itch embed page dials the production relay; every other page dials itself", () => {
+  const relay = { http: RELAY_ORIGIN, socket: "wss://agent-inception.com" };
+  assertEquals(relayFor("https://html-classic.itch.zone"), relay);
+  assertEquals(relayFor("https://html.itch.zone"), relay);
+  assertEquals(relayFor("https://agent-inception.com"), relay);
+  assertEquals(relayFor("http://localhost:5173"), {
+    http: "http://localhost:5173",
+    socket: "ws://localhost:5173",
+  });
+  assertEquals(relayFor("http://[::1]:5173"), {
+    http: "http://[::1]:5173",
+    socket: "ws://[::1]:5173",
+  });
+  // The parent itch.io page is not the game document, and a stranger stays on its own host.
+  assertEquals(relayFor("https://ethanwiegert.itch.io").socket, "wss://ethanwiegert.itch.io");
+  assertEquals(relayFor("https://evil.example").socket, "wss://evil.example");
 });
 
 Deno.test("relay: a newer tab replaces the old one, and calls waiting on the old one fail", async () => {
