@@ -44,9 +44,30 @@ const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 export const POLICY = 1008;
 
 /**
+ * itch.io's HTML embed CDNs. A game tab packaged for an itch page is served from one of these, so
+ * the WebSocket it opens (and any browser MCP from that page) carries this Origin.
+ *
+ * `html-classic.itch.zone` is the default player. `html.itch.zone` is the opt-in
+ * cross-origin-isolated player (SharedArrayBuffer). Exact origins: `html-beta.itch.zone` does not
+ * exist, the old `*.hwcdn.net` CDN is retired, and other `*.itch.zone` or `*.itch.io` names are
+ * not this tab. The hosted relay merges these with the site's own origin (`allowedOrigins`). The
+ * local bridge passes no extra origins, so its secretless room stays limited to this machine.
+ */
+export const ITCH_EMBED_ORIGINS = [
+  "https://html-classic.itch.zone",
+  "https://html.itch.zone",
+] as const;
+
+/** Browser origins a hosted room accepts: the site this request came in on, plus the itch CDNs. */
+export function allowedOrigins(site: string): string[] {
+  return [site, ...ITCH_EMBED_ORIGINS];
+}
+
+/**
  * Whether a browser `origin` may reach a room: none (an agent, not a browser), a page on this
- * machine, or one of `allowed` (the site's own). Browsers don't apply CORS to WebSockets or to
- * simple cross-site POSTs, so without this any web page could talk to a local bridge.
+ * machine, or one of `allowed` (exact origins — the site's own, and on the hosted relay the itch
+ * embed CDNs). Browsers don't apply CORS to WebSockets or to simple cross-site POSTs, so without
+ * this any web page could talk to a local bridge. Matching is exact, never a suffix.
  */
 export function originAllowed(origin: string | null, allowed: readonly string[] = []): boolean {
   return !origin || LOCAL_ORIGIN_RE.test(origin) || allowed.includes(origin);
@@ -189,7 +210,7 @@ export interface RoomOptions {
   /** Keep and restore the tab's tool list across restarts (Durable Object storage). */
   saveTools?: (tools: Tool[]) => unknown;
   loadTools?: () => Promise<Tool[] | undefined>;
-  /** Browser origins allowed to call besides none (agents) and localhost: the site's own. */
+  /** Browser origins allowed besides none (agents) and localhost. Exact origins. */
   origins?: string[];
   /** What a call says when no tab is connected. */
   closedText?: string;

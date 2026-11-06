@@ -10,7 +10,7 @@ import {
   wantsMarkdown,
   withOrigin,
 } from "./site.ts";
-import worker from "./worker.ts";
+import worker, { RoomObject } from "./worker.ts";
 import { mcpTools } from "../src/sim/tools.ts";
 
 const repo = (path: string) => new URL(`../${path}`, import.meta.url);
@@ -179,6 +179,77 @@ Deno.test("worker: an MCP client without a world link learns where links come fr
   // None of them touched the asset store or a room.
   assertEquals(seen.length, 0);
   assertEquals(await (await get("/mcp/abcdefghijklmnopqrstuv")).text(), "room");
+});
+
+Deno.test("worker: an itch embed may attach to a room; a random site is refused", async () => {
+  const accepted: unknown[] = [];
+  const state = {
+    acceptWebSocket(ws: WebSocket) {
+      accepted.push(ws);
+    },
+    getWebSockets: (): WebSocket[] => [],
+    storage: {
+      get: <T>(_key: string): Promise<T | undefined> => Promise.resolve(undefined),
+      put: (_key: string, _value: unknown) => Promise.resolve(),
+    },
+  };
+  // Cloudflare provides this global. The origin check returns before it is used on a refusal.
+  const socket = () => ({ serializeAttachment() {} }) as unknown as WebSocket;
+  (globalThis as unknown as { WebSocketPair: new () => { 0: WebSocket; 1: WebSocket } })
+    .WebSocketPair = class {
+      0 = socket();
+      1 = socket();
+    };
+  const room = new RoomObject(state);
+  const code = "AAAAAAAAAAAAAAAAAAAAAA";
+  const tab = (origin?: string) =>
+    room.fetch(
+      new Request(`https://agent-inception.com/tab/${code}`, {
+        headers: { upgrade: "websocket", ...(origin ? { origin } : {}) },
+      }),
+    );
+  const denied = await tab("https://evil.example");
+  assertEquals(denied.status, 403);
+  assertEquals(await denied.text(), "forbidden origin");
+  assertEquals(accepted.length, 0);
+  for (
+    const origin of [
+      "https://html-classic.itch.zone",
+      "https://html.itch.zone",
+      "https://agent-inception.com",
+      "http://localhost:8787",
+      undefined,
+    ]
+  ) {
+    assertEquals((await tab(origin)).status, 101, String(origin));
+  }
+  assertEquals(accepted.length, 5);
+
+  const mcp = (origin?: string) =>
+    room.fetch(
+      new Request(`https://agent-inception.com/mcp/${code}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(origin ? { origin } : {}),
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      }),
+    );
+  const evil = await mcp("https://evil.example");
+  assertEquals([evil.status, await evil.text()], [403, "forbidden origin"]);
+  for (
+    const origin of [
+      "https://html-classic.itch.zone",
+      "https://html.itch.zone",
+      "https://agent-inception.com",
+      undefined,
+    ]
+  ) {
+    const res = await mcp(origin);
+    assertEquals(res.status, 200, String(origin));
+    assertEquals((await res.json()).result, {});
+  }
 });
 
 Deno.test("worker: SITE_URL pins the canonical address", async () => {

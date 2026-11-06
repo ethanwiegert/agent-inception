@@ -20,6 +20,7 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
   (ADR 0002, from M6 on).
 - Agents are untrusted (`SECURITY.md`): validate every argument in the sim, render agent text as
   text, and keep the bridge and relay to agents, local pages and the site's own (`originAllowed`).
+  The hosted relay also allows itch.io's HTML embed CDNs (`ITCH_EMBED_ORIGINS` in `relay/core.ts`).
 
 ## Commands
 
@@ -130,7 +131,8 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     sun/moon, weather), lighttex.ts (the light field as a 3D texture),
                     particles.ts (flames, smoke, lamp halos, signal sparks)
 relay/              core.ts (the relay: a Room per world link pipes MCP over HTTP to the tab's
-                    socket; stateless sessions, pairing codes from secrets, framing), worker.ts
+                    socket; stateless sessions, pairing codes from secrets, framing,
+                    `originAllowed` and `ITCH_EMBED_ORIGINS`), worker.ts
                     (Cloudflare Worker + Durable Object running it; the site's assets), site.ts
                     (the site's own address filled into the pages that need it, for `{{origin}}`)
 web/                the static site beside the bundle: index.html (meta, social card, JSON-LD, the

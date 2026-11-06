@@ -4,7 +4,15 @@
  * named by the pairing code, which runs a relay Room (relay/core.ts). The tab's socket hibernates
  * while the world is quiet, so idle worlds cost nothing. Deploy with `npx wrangler deploy`.
  */
-import { CODE_RE, originAllowed, POLICY, Room, type Socket, type Tool } from "./core.ts";
+import {
+  allowedOrigins,
+  CODE_RE,
+  originAllowed,
+  POLICY,
+  Room,
+  type Socket,
+  type Tool,
+} from "./core.ts";
 import {
   HOME_HEADERS,
   MARKDOWN_PAGE,
@@ -117,7 +125,7 @@ export class RoomObject {
     const storage = this.state.storage;
     const room = new Room({
       code,
-      origins: origin ? [origin] : [],
+      origins: origin ? allowedOrigins(origin) : [],
       closedText: CLOSED_TEXT,
       saveTools: (tools) => storage.put("tools", tools),
       loadTools: () => storage.get<Tool[]>("tools"),
@@ -132,13 +140,15 @@ export class RoomObject {
     const url = new URL(req.url);
     const [, kind, code] = url.pathname.split("/");
     const room = this.get(code, url.origin);
-    // A room woken by a socket message first didn't know the site's origin yet.
-    room.options.origins = [url.origin];
+    // A room woken by a socket message first didn't know the site's origin yet. The list is the
+    // site this request came in on, plus itch.io's HTML embed CDNs (relay/core.ts).
+    const origins = allowedOrigins(url.origin);
+    room.options.origins = origins;
     if (kind === "mcp") return room.handleMcp(req);
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected a WebSocket", { status: 426 });
     }
-    if (!originAllowed(req.headers.get("origin"), [url.origin])) {
+    if (!originAllowed(req.headers.get("origin"), origins)) {
       return new Response("forbidden origin", { status: 403 });
     }
     // Sockets that haven't proved they're the tab can't pile up: past a few, the newest stays.

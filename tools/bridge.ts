@@ -45,7 +45,8 @@ export function createBridge() {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected a WebSocket", { status: 426 });
     }
-    // Browsers let any page open a WebSocket to localhost: only the game's own pages may be the tab.
+    // Browsers let any page open a WebSocket to localhost: only a page on this machine may be the
+    // tab. The hosted relay's itch-CDN list is not applied here; this room has no secret.
     if (!originAllowed(req.headers.get("origin"))) {
       return new Response("forbidden origin", { status: 403 });
     }
