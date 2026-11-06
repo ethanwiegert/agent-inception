@@ -4,9 +4,11 @@ import {
   ok as assert,
 } from "node:assert/strict";
 import {
+  allowedOrigins,
   BAD_SECRET,
   CODE_RE,
   FRAME,
+  ITCH_EMBED_ORIGINS,
   LOCAL,
   MAX_BODY,
   newSecret,
@@ -182,15 +184,39 @@ Deno.test("relay: a socket that isn't the tab gets one whole hello, never parts"
   assert(!room.open);
 });
 
-Deno.test("relay: only agents, local pages and the site's own pages may reach a room", () => {
-  assert(originAllowed(null));
-  assert(originAllowed("http://localhost:5173"));
-  assert(originAllowed("http://127.0.0.1:8787"));
-  assert(originAllowed("http://[::1]:5173"));
-  assert(originAllowed("https://site.example", ["https://site.example"]));
+Deno.test("relay: agents, localhost, the site and itch embed CDNs may reach a hosted room", () => {
+  const site = "https://site.example";
+  const allowed = allowedOrigins(site);
+  assertEquals(allowed, [site, ...ITCH_EMBED_ORIGINS]);
+  assert(originAllowed(null, allowed));
+  assert(originAllowed("http://localhost:5173", allowed));
+  assert(originAllowed("http://127.0.0.1:8787", allowed));
+  assert(originAllowed("http://[::1]:5173", allowed));
+  assert(originAllowed(site, allowed));
+  assert(originAllowed("https://html-classic.itch.zone", allowed));
+  assert(originAllowed("https://html.itch.zone", allowed));
+  for (
+    const rejected of [
+      "https://evil.example",
+      "https://evil.itch.zone",
+      "https://html-classic.itch.zone.evil.example",
+      "https://not-html.itch.zone",
+      "http://html-classic.itch.zone",
+      "https://html-classic.itch.zone/html/1",
+      "https://html-classic.itch.zone:443",
+      "https://itch.io",
+      "https://ethanwiegert.itch.io",
+      "https://static.itch.io",
+      "https://html-beta.itch.zone",
+      "https://v6p9d9t4.ssl.hwcdn.net",
+      "http://localhost.evil.example",
+      "null",
+    ]
+  ) assert(!originAllowed(rejected, allowed), rejected);
+  // Without the hosted list (the local bridge), the embed CDNs are refused too.
+  assert(!originAllowed("https://html-classic.itch.zone"));
+  assert(!originAllowed("https://html.itch.zone"));
   assert(!originAllowed("https://evil.example"));
-  assert(!originAllowed("http://localhost.evil.example"));
-  assert(!originAllowed("null"));
 });
 
 Deno.test("relay: a newer tab replaces the old one, and calls waiting on the old one fail", async () => {

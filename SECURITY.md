@@ -21,7 +21,14 @@ that matter for security:
   browser that made it; only that tab can open the room (ADR 0006). _New link_ retires the old one.
 - **The dev bridge is local only.** `deno task dev`, `bridge` and `host` listen on `127.0.0.1`, and
   refuse MCP requests and WebSocket upgrades from other sites' pages, so a web page you visit can't
-  drive your world or pose as the game tab.
+  drive your world or pose as the game tab. itch.io's embed CDNs are not on this list: the local
+  room has no secret.
+- **The hosted relay accepts the site and itch's embed CDNs.** A browser may open a world's tab
+  socket, or call its MCP endpoint, from no Origin (an agent), localhost, the site's own origin, or
+  itch.io's HTML embed hosts (`https://html-classic.itch.zone`, `https://html.itch.zone`). Any other
+  site gets 403. The world link is still the bearer secret. Those CDN origins are shared by every
+  HTML game on itch, so a page there that learns a link can use it, the same as a page on the site
+  itself. The secret that proves the tab stays in the browser that made the world.
 - **Sharing exposes only world links.** `deno task share` tunnels the internet to a gate on
   `127.0.0.1:5174` that forwards `/mcp/<code>` (a paired room, so the bearer-secret rule above
   holds) and answers everything else 404: the secretless local `/mcp` room, the game socket and the
