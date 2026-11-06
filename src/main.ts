@@ -7,7 +7,7 @@ import { createDevPanel } from "./devpanel.ts";
 import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { pref, setPref } from "./prefs.ts";
-import { newSecret } from "../relay/core.ts";
+import { newSecret, relayFor } from "../relay/core.ts";
 import { LOOKS } from "./render/look.ts";
 import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
 import { FIRE_STRIDE, SLOTS, type SlotsReply } from "./sim/protocol.ts";
@@ -340,7 +340,6 @@ async function encodeShot(
 
 // ---------------------------------------------------------------- the link to agents
 
-const wsScheme = location.protocol === "https:" ? "wss" : "ws";
 /** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
 const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 /**
@@ -379,10 +378,12 @@ function linkSecret(slot: number, fresh = false): string {
   return secret;
 }
 
+const relay = relayFor(location.origin);
+
 async function startLink() {
   link = await connectLink({
-    socketBase: `${wsScheme}://${location.host}`,
-    httpBase: shareBase ?? location.origin,
+    socketBase: relay.socket,
+    httpBase: shareBase ?? relay.http,
     socketUrl: bridgeUrl,
     secret: paired ? linkSecret(client.slot) : null,
     tools: mcpTools(),

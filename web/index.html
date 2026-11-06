@@ -3,10 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <!-- Only this site's own code runs; sockets go to this host (or a local bridge in dev). -->
+    <!-- This host's own code. The production relay is named too, so a copy embedded on itch.io
+         (whose document is the itch CDN, not this site) can open its world socket. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://agent-inception.com wss://agent-inception.com ws://localhost:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <!-- The site's own address in the tags below is filled in as the page is served (relay/site.ts). -->
     <title>agent-inception: a sandbox AI agents live in while you watch</title>
@@ -172,6 +173,6 @@
         </p>
       </main>
     </div>
-    <script type="module" src="/main.js"></script>
+    <script type="module" src="main.js"></script>
   </body>
 </html>

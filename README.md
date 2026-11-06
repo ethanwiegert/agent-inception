@@ -253,7 +253,11 @@ separate build step. `npx wrangler dev` runs the same Worker locally on workerd.
 
 A browser may open a world's socket from this site, from localhost, or from itch.io's HTML embed
 CDNs (`https://html-classic.itch.zone`, and `https://html.itch.zone` when that project's
-SharedArrayBuffer option is on). Every other origin is refused. The world link is still the secret.
+SharedArrayBuffer option is on). Every other origin is refused, including the `*.itch.io` page that
+embeds the game. The world link is still the secret. A copy of this page on those CDNs dials
+`wss://agent-inception.com` (the CDN is not the relay). Re-upload the itch ZIP after changing the
+page: the worker allowlist alone cannot point the tab at the relay, and the page's content security
+policy has to name it.
 
 ### After the first deploy
 

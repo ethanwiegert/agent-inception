@@ -161,7 +161,13 @@ export class RoomObject {
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1]);
     (pair[1] as Attached).serializeAttachment({ code, tab: false } satisfies Tag);
-    return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit);
+    // The cross-origin-isolated itch player (html.itch.zone, COEP: require-corp) can only keep a
+    // cross-origin socket whose handshake says so. The origin check above already ran.
+    return new Response(null, {
+      status: 101,
+      headers: { "cross-origin-resource-policy": "cross-origin" },
+      webSocket: pair[0],
+    } as ResponseInit);
   }
 
   async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer) {

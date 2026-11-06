@@ -155,14 +155,14 @@ export class SoundScape {
     const ctx = this.ctx!;
     let manifest: SoundManifest;
     try {
-      const res = await fetch("/audio/manifest.json");
+      const res = await fetch("audio/manifest.json");
       if (!res.ok) return;
       manifest = await res.json();
     } catch {
       return;
     }
     const decode = async (file: string) =>
-      await ctx.decodeAudioData(await (await fetch(`/audio/${file}`)).arrayBuffer());
+      await ctx.decodeAudioData(await (await fetch(`audio/${file}`)).arrayBuffer());
     for (const [id, file] of Object.entries(manifest.sounds ?? {})) {
       try {
         this.buffers.set(id, await decode(file!));

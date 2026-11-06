@@ -63,6 +63,22 @@ export function allowedOrigins(site: string): string[] {
   return [site, ...ITCH_EMBED_ORIGINS];
 }
 
+/** The production relay. An itch embed is hosted on a CDN, so its tab dials this. */
+export const RELAY_ORIGIN = "https://agent-inception.com";
+
+/**
+ * Where a page's tab socket and agent link point. The site and any other host talk to themselves.
+ * An itch HTML embed's document is one of `ITCH_EMBED_ORIGINS`, which is not the relay.
+ */
+export function relayFor(pageOrigin: string): { http: string; socket: string } {
+  const http = ITCH_EMBED_ORIGINS.some((origin) => origin === pageOrigin)
+    ? RELAY_ORIGIN
+    : new URL(pageOrigin).origin;
+  const u = new URL(http);
+  const ws = u.protocol === "https:" ? "wss" : "ws";
+  return { http, socket: `${ws}://${u.host}` };
+}
+
 /**
  * Whether a browser `origin` may reach a room: none (an agent, not a browser), a page on this
  * machine, or one of `allowed` (exact origins — the site's own, and on the hosted relay the itch

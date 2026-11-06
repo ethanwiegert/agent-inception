@@ -138,7 +138,9 @@ export class SimClient {
   private nextReq = 1;
 
   constructor(seed: number | undefined, slot: number) {
-    this.worker = new Worker("/worker.js", { type: "module" });
+    // Sibling of this bundle. An itch embed serves the game from a subdirectory, so a root path
+    // (`/worker.js`) would miss it. import.meta.url is the bundled main.js.
+    this.worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.send({ type: "init", seed, slot });
   }

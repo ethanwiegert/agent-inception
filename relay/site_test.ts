@@ -10,6 +10,7 @@ import {
   wantsMarkdown,
   withOrigin,
 } from "./site.ts";
+import { RELAY_ORIGIN } from "./core.ts";
 import worker, { RoomObject } from "./worker.ts";
 import { mcpTools } from "../src/sim/tools.ts";
 
@@ -221,7 +222,9 @@ Deno.test("worker: an itch embed may attach to a room; a random site is refused"
       undefined,
     ]
   ) {
-    assertEquals((await tab(origin)).status, 101, String(origin));
+    const res = await tab(origin);
+    assertEquals(res.status, 101, String(origin));
+    assertEquals(res.headers.get("cross-origin-resource-policy"), "cross-origin", String(origin));
   }
   assertEquals(accepted.length, 5);
 
@@ -258,6 +261,18 @@ Deno.test("worker: SITE_URL pins the canonical address", async () => {
     "https://ai.example",
   );
   assertEquals(await (await get("/")).text(), `<link rel="canonical" href="https://ai.example/">`);
+});
+
+Deno.test("page: an itch embed can load the bundles and open the production socket", () => {
+  const html = read("web/index.html");
+  const host = new URL(RELAY_ORIGIN).host;
+  // Relative, so a game served from /html/<id>/ still finds its bundle.
+  assert(html.includes('src="main.js"'));
+  assert(!html.includes('src="/main.js"'));
+  // The meta policy has to name the relay. 'self' on the itch CDN is not the relay.
+  assert(html.includes(`https://${host}`));
+  assert(html.includes(`wss://${host}`));
+  assert(!read("src/simclient.ts").includes('"/worker.js"'));
 });
 
 Deno.test("site: the page tells search engines, previews and agents what this is", () => {
