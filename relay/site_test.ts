@@ -210,12 +210,22 @@ Deno.test("worker: an itch embed may attach to a room; a random site is refused"
     );
   const denied = await tab("https://evil.example");
   assertEquals(denied.status, 403);
-  assertEquals(await denied.text(), "forbidden origin");
+  assertEquals(await denied.text(), "forbidden origin: https://evil.example");
+  assertEquals(denied.headers.get("x-denied-origin"), "https://evil.example");
   assertEquals(accepted.length, 0);
+  // A GET with no Upgrade is 426, whatever the Origin. A 403 means the upgrade was refused.
+  const plain = await room.fetch(
+    new Request(`https://agent-inception.com/tab/${code}`, {
+      headers: { origin: "https://evil.example" },
+    }),
+  );
+  assertEquals(plain.status, 426);
   for (
     const origin of [
       "https://html-classic.itch.zone",
       "https://html.itch.zone",
+      "https://html-classic.itch.zone/html/1/index.html",
+      "https://ethanwiegert.itch.io",
       "https://agent-inception.com",
       "http://localhost:8787",
       undefined,
@@ -223,7 +233,7 @@ Deno.test("worker: an itch embed may attach to a room; a random site is refused"
   ) {
     assertEquals((await tab(origin)).status, 101, String(origin));
   }
-  assertEquals(accepted.length, 5);
+  assertEquals(accepted.length, 7);
 
   const mcp = (origin?: string) =>
     room.fetch(
@@ -237,7 +247,10 @@ Deno.test("worker: an itch embed may attach to a room; a random site is refused"
       }),
     );
   const evil = await mcp("https://evil.example");
-  assertEquals([evil.status, await evil.text()], [403, "forbidden origin"]);
+  assertEquals(
+    [evil.status, await evil.text()],
+    [403, "forbidden origin: https://evil.example"],
+  );
   for (
     const origin of [
       "https://html-classic.itch.zone",

@@ -251,9 +251,10 @@ It builds `dist/` first (`deno task build`, through the `build` command in `wran
 Deno from npm), so the same command works as the deploy command of Cloudflare's Git builds, with no
 separate build step. `npx wrangler dev` runs the same Worker locally on workerd.
 
-A browser may open a world's socket from this site, from localhost, or from itch.io's HTML embed
-CDNs (`https://html-classic.itch.zone`, and `https://html.itch.zone` when that project's
-SharedArrayBuffer option is on). Every other origin is refused. The world link is still the secret.
+A browser may open a world's socket from this site, from localhost, or from an HTTPS page on
+`itch.io` or `itch.zone` (the embed CDNs and the project page). Every other origin is refused, and
+the 403 names the Origin it saw. The world link is still the secret. The literal Origin `null` (a
+sandboxed iframe, or the itch app playing a game off disk) is refused.
 
 ### After the first deploy
 

@@ -7,6 +7,7 @@ import {
   allowedOrigins,
   BAD_SECRET,
   CODE_RE,
+  forbiddenOrigin,
   FRAME,
   ITCH_EMBED_ORIGINS,
   LOCAL,
@@ -184,7 +185,7 @@ Deno.test("relay: a socket that isn't the tab gets one whole hello, never parts"
   assert(!room.open);
 });
 
-Deno.test("relay: agents, localhost, the site and itch embed CDNs may reach a hosted room", () => {
+Deno.test("relay: agents, localhost, the site and itch pages may reach a hosted room", async () => {
   const site = "https://site.example";
   const allowed = allowedOrigins(site);
   assertEquals(allowed, [site, ...ITCH_EMBED_ORIGINS]);
@@ -193,30 +194,41 @@ Deno.test("relay: agents, localhost, the site and itch embed CDNs may reach a ho
   assert(originAllowed("http://127.0.0.1:8787", allowed));
   assert(originAllowed("http://[::1]:5173", allowed));
   assert(originAllowed(site, allowed));
-  assert(originAllowed("https://html-classic.itch.zone", allowed));
-  assert(originAllowed("https://html.itch.zone", allowed));
   for (
-    const rejected of [
-      "https://evil.example",
-      "https://evil.itch.zone",
-      "https://html-classic.itch.zone.evil.example",
-      "https://not-html.itch.zone",
-      "http://html-classic.itch.zone",
-      "https://html-classic.itch.zone/html/1",
+    const ok of [
+      "https://html-classic.itch.zone",
+      "https://html.itch.zone",
+      "https://HTML-CLASSIC.itch.zone",
       "https://html-classic.itch.zone:443",
+      "https://html-classic.itch.zone/html/1/index.html",
       "https://itch.io",
       "https://ethanwiegert.itch.io",
       "https://static.itch.io",
-      "https://html-beta.itch.zone",
+      "https://img.itch.zone",
+    ]
+  ) assert(originAllowed(ok, allowed), ok);
+  for (
+    const rejected of [
+      "https://evil.example",
+      "https://html-classic.itch.zone.evil.example",
+      "https://itch.io.evil.example",
+      "http://html-classic.itch.zone",
       "https://v6p9d9t4.ssl.hwcdn.net",
       "http://localhost.evil.example",
       "null",
+      "chrome-extension://abcdefghijklmnop",
     ]
   ) assert(!originAllowed(rejected, allowed), rejected);
-  // Without the hosted list (the local bridge), the embed CDNs are refused too.
+  // Without the hosted list (the local bridge), itch pages are refused too. A missing Origin
+  // (not the string "null") is an agent, and stays allowed.
   assert(!originAllowed("https://html-classic.itch.zone"));
-  assert(!originAllowed("https://html.itch.zone"));
+  assert(!originAllowed("https://ethanwiegert.itch.io"));
+  assert(!originAllowed("null"));
   assert(!originAllowed("https://evil.example"));
+  const denied = forbiddenOrigin("https://evil.example\r\nX-Injected: 1");
+  assertEquals(denied.status, 403);
+  assertEquals(await denied.text(), "forbidden origin: https://evil.exampleX-Injected: 1");
+  assertEquals(denied.headers.get("x-denied-origin"), "https://evil.exampleX-Injected: 1");
 });
 
 Deno.test("relay: a newer tab replaces the old one, and calls waiting on the old one fail", async () => {

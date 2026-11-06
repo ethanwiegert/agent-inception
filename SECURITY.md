@@ -23,12 +23,12 @@ that matter for security:
   refuse MCP requests and WebSocket upgrades from other sites' pages, so a web page you visit can't
   drive your world or pose as the game tab. itch.io's embed CDNs are not on this list: the local
   room has no secret.
-- **The hosted relay accepts the site and itch's embed CDNs.** A browser may open a world's tab
-  socket, or call its MCP endpoint, from no Origin (an agent), localhost, the site's own origin, or
-  itch.io's HTML embed hosts (`https://html-classic.itch.zone`, `https://html.itch.zone`). Any other
-  site gets 403. The world link is still the bearer secret. Those CDN origins are shared by every
-  HTML game on itch, so a page there that learns a link can use it, the same as a page on the site
-  itself. The secret that proves the tab stays in the browser that made the world.
+- **The hosted relay accepts the site and itch's pages.** A browser may open a world's tab socket,
+  or call its MCP endpoint, from no Origin (an agent), localhost, the site's own origin, or any
+  HTTPS host of `itch.io` or `itch.zone` (the embed CDNs and the project page). A path or `:443` on
+  one of those hosts counts as the host. The literal Origin `null` is refused: any site can send it
+  from a sandboxed iframe. Any other site gets `403` naming the Origin it sent. The world link is
+  still the bearer secret. The local bridge does not accept itch hosts.
 - **Sharing exposes only world links.** `deno task share` tunnels the internet to a gate on
   `127.0.0.1:5174` that forwards `/mcp/<code>` (a paired room, so the bearer-secret rule above
   holds) and answers everything else 404: the secretless local `/mcp` room, the game socket and the

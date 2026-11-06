@@ -5,7 +5,14 @@
  *
  *   agent ──POST /mcp──▶ bridge ──ws /bridge──▶ game tab ──▶ sim worker
  */
-import { CODE_RE, LOCAL, originAllowed, Room, type Socket } from "../relay/core.ts";
+import {
+  CODE_RE,
+  forbiddenOrigin,
+  LOCAL,
+  originAllowed,
+  Room,
+  type Socket,
+} from "../relay/core.ts";
 import { mcpTools } from "../src/sim/tools.ts";
 
 /** The tools a local room lists before a tab connects (a tab sends its own when it does). */
@@ -48,7 +55,7 @@ export function createBridge() {
     // Browsers let any page open a WebSocket to localhost: only a page on this machine may be the
     // tab. The hosted relay's itch-CDN list is not applied here; this room has no secret.
     if (!originAllowed(req.headers.get("origin"))) {
-      return new Response("forbidden origin", { status: 403 });
+      return forbiddenOrigin(req.headers.get("origin"));
     }
     const { socket, response } = Deno.upgradeWebSocket(req);
     const s: Socket = socket;

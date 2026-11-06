@@ -7,6 +7,7 @@
 import {
   allowedOrigins,
   CODE_RE,
+  forbiddenOrigin,
   originAllowed,
   POLICY,
   Room,
@@ -149,7 +150,7 @@ export class RoomObject {
       return new Response("expected a WebSocket", { status: 426 });
     }
     if (!originAllowed(req.headers.get("origin"), origins)) {
-      return new Response("forbidden origin", { status: 403 });
+      return forbiddenOrigin(req.headers.get("origin"));
     }
     // Sockets that haven't proved they're the tab can't pile up: past a few, the newest stays.
     const waiting = this.state.getWebSockets().filter((ws) => !tag(ws)?.tab);

@@ -44,19 +44,30 @@ const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 export const POLICY = 1008;
 
 /**
- * itch.io's HTML embed CDNs. A game tab packaged for an itch page is served from one of these, so
- * the WebSocket it opens (and any browser MCP from that page) carries this Origin.
- *
- * `html-classic.itch.zone` is the default player. `html.itch.zone` is the opt-in
- * cross-origin-isolated player (SharedArrayBuffer). Exact origins: `html-beta.itch.zone` does not
- * exist, the old `*.hwcdn.net` CDN is retired, and other `*.itch.zone` or `*.itch.io` names are
- * not this tab. The hosted relay merges these with the site's own origin (`allowedOrigins`). The
- * local bridge passes no extra origins, so its secretless room stays limited to this machine.
+ * itch.io's HTML embed CDNs. The default player is `html-classic.itch.zone`. `html.itch.zone` is
+ * the opt-in cross-origin-isolated player. A hosted room also accepts any other HTTPS host of
+ * `itch.io` or `itch.zone` (the project page, a new CDN name). The literal Origin `null` stays
+ * refused: a sandboxed iframe on any site can send it. The local bridge passes no allowlist, so
+ * its secretless room stays limited to this machine.
  */
 export const ITCH_EMBED_ORIGINS = [
   "https://html-classic.itch.zone",
   "https://html.itch.zone",
 ] as const;
+
+/** An HTTPS host itch operates: `itch.io`, `ethanwiegert.itch.io`, `html-classic.itch.zone`. */
+const ITCH_HOST = /^(?:[a-z0-9-]+\.)*itch\.(?:io|zone)$/;
+
+function parsedOrigin(raw: string): URL | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (u.username || u.password) return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
 
 /** Browser origins a hosted room accepts: the site this request came in on, plus the itch CDNs. */
 export function allowedOrigins(site: string): string[] {
@@ -65,12 +76,31 @@ export function allowedOrigins(site: string): string[] {
 
 /**
  * Whether a browser `origin` may reach a room: none (an agent, not a browser), a page on this
- * machine, or one of `allowed` (exact origins — the site's own, and on the hosted relay the itch
- * embed CDNs). Browsers don't apply CORS to WebSockets or to simple cross-site POSTs, so without
- * this any web page could talk to a local bridge. Matching is exact, never a suffix.
+ * machine, one of `allowed` (the site's own), or — when `allowed` is non-empty, i.e. a hosted
+ * room — an HTTPS page on `itch.io` or `itch.zone`. A path or an explicit `:443` still counts as
+ * that host. Browsers don't apply CORS to WebSockets or to simple cross-site POSTs, so without
+ * this any web page could talk to a local bridge.
  */
 export function originAllowed(origin: string | null, allowed: readonly string[] = []): boolean {
-  return !origin || LOCAL_ORIGIN_RE.test(origin) || allowed.includes(origin);
+  if (!origin) return true;
+  const u = parsedOrigin(origin);
+  const canonical = u?.origin ?? origin;
+  if (LOCAL_ORIGIN_RE.test(canonical) || LOCAL_ORIGIN_RE.test(origin)) return true;
+  if (allowed.includes(canonical) || allowed.includes(origin)) return true;
+  return allowed.length > 0 && !!u && u.protocol === "https:" && ITCH_HOST.test(u.hostname);
+}
+
+/** 403 that names the Origin the room refused, for the browser panel and the worker log. */
+export function forbiddenOrigin(origin: string | null): Response {
+  const shown = (origin ?? "<none>").replace(/[^\t\x20-\x7e]/g, "").slice(0, 200) || "<empty>";
+  console.log(`relay: forbidden origin ${shown}`);
+  return new Response(`forbidden origin: ${shown}`, {
+    status: 403,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "x-denied-origin": shown,
+    },
+  });
 }
 
 export interface Tool {
@@ -435,7 +465,7 @@ export class Room {
   async handleMcp(req: Request): Promise<Response> {
     // Reject cross-site browser requests (DNS rebinding). Agents send no Origin or a local one.
     if (!originAllowed(req.headers.get("origin"), this.options.origins)) {
-      return new Response("forbidden origin", { status: 403 });
+      return forbiddenOrigin(req.headers.get("origin"));
     }
     if (req.method === "DELETE") return new Response(null, { status: 204 });
     if (req.method !== "POST") {
