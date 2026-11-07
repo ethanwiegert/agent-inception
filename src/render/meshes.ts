@@ -15,13 +15,19 @@ export const INSTANCE_FLOATS = 20;
 /**
  * How a primitive is painted. `sway` and `ao` run bottom → top over the primitive's own height:
  * a trunk sways [0, 0.3], a canopy 1; `ao` darkens the bottom by that fraction. `jitter` varies
- * brightness per vertex for organic surfaces.
+ * brightness per vertex for organic surfaces. `grain` bakes a smooth world-space tone variation
+ * into the vertex colors (bark ridges, leaf mottling, stone speckle) at no runtime cost;
+ * `grainScale` stretches it, so bark can run in vertical streaks.
  */
 export interface Style {
   color: Rgb;
   sway?: number | readonly [number, number];
   ao?: number;
   jitter?: number;
+  /** Baked surface tone variation, 0-1 (world-space value noise). */
+  grain?: number;
+  /** Noise frequency per axis; a small y stretches the grain along the primitive's height. */
+  grainScale?: readonly [number, number, number];
   /** Shines by itself (see VERTEX_BYTES): 0-1 always, or -1-0 while lit. */
   glow?: number;
 }
@@ -264,6 +270,8 @@ export class MeshBuilder {
       ? [style.sway, style.sway]
       : style.sway ?? [0, 0];
     const ao = style.ao ?? 0, jitter = style.jitter ?? 0;
+    const grain = style.grain ?? 0;
+    const gs = style.grainScale ?? [1, 1, 1];
     return {
       vertex: (x: number, y: number, z: number, nx: number, ny: number, nz: number) => {
         const t = y1 > y0 ? Math.max(0, Math.min(1, (y - y0) / (y1 - y0))) : 1;
@@ -282,7 +290,16 @@ export class MeshBuilder {
         const len = Math.hypot(nx, ny, nz) || 1;
         this.positions.push(px, py, pz);
         this.normals.push(nx / len, ny / len, nz / len);
-        const k = (1 - ao * (1 - t)) * (1 + jitter * (hash3(px, py, pz) * 2 - 1));
+        // Grain is smooth noise over the finished position, so a part carries the same tone map
+        // wherever it's instanced; jitter stays per-vertex for a finer speckle. Two octaves keep
+        // large shapes from looking flat: broad mottling plus a finer tooth on top.
+        const g = grain
+          ? 1 +
+            grain *
+              ((noise3(px * gs[0], py * gs[1], pz * gs[2], 11) * 2 - 1) * 0.7 +
+                (noise3(px * gs[0] * 2.7, py * gs[1] * 2.7, pz * gs[2] * 2.7, 23) * 2 - 1) * 0.3)
+          : 1;
+        const k = (1 - ao * (1 - t)) * (1 + jitter * (hash3(px, py, pz) * 2 - 1)) * g;
         this.colors.push(style.color[0] * k, style.color[1] * k, style.color[2] * k);
         this.sways.push(s0 + (s1 - s0) * t);
         this.glows.push(style.glow ?? 0);

@@ -198,17 +198,39 @@ export function defineFishModels(lib: MeshLibrary): FishModel[] {
     const body = lib.define(`fish.${def.name}.body`, (b) => {
       // Dark back over a pale belly and a dorsal fin; nose toward +z.
       b.sphere(at(0, 0.02 * l, 0), [0.16 * l, 0.17 * l, 0.5 * l], { color: look.back }, {
-        detail: 1,
+        detail: 2,
       });
       b.sphere(at(0, -0.05 * l, 0.02 * l), [0.14 * l, 0.12 * l, 0.42 * l], { color: look.belly }, {
-        detail: 1,
+        detail: 2,
       });
       b.box(at(0, 0.18 * l, 0), [0.02 * l, 0.12 * l, 0.3 * l], { color: look.fin });
-    });
-    const tail = lib.define(`fish.${def.name}.tail`, (b) => {
-      b.box(rotateY(at(0, 0, -0.13 * l), Math.PI / 4), [0.03 * l, 0.3 * l, 0.25 * l], {
+      // Pectoral fins tucked at the gills, and a pale chin so the head reads at a glance.
+      b.box(rotateY(at(-0.16 * l, -0.02 * l, 0.18 * l), 0.6), [0.02 * l, 0.08 * l, 0.14 * l], {
         color: look.fin,
       });
+      b.box(rotateY(at(0.16 * l, -0.02 * l, 0.18 * l), -0.6), [0.02 * l, 0.08 * l, 0.14 * l], {
+        color: look.fin,
+      });
+      b.sphere(at(0, -0.02 * l, 0.34 * l), [0.07 * l, 0.08 * l, 0.1 * l], { color: look.belly }, {
+        detail: 1,
+      });
+    });
+    const tail = lib.define(`fish.${def.name}.tail`, (b) => {
+      // A forked tail: two small fins angled off the hinge, not one slab.
+      b.box(rotateY(at(-0.06 * l, 0, -0.14 * l), Math.PI / 4 + 0.35), [
+        0.03 * l,
+        0.26 * l,
+        0.22 * l,
+      ], {
+        color: look.fin,
+      });
+      b.box(
+        rotateY(at(0.06 * l, 0, -0.14 * l), Math.PI / 4 - 0.35),
+        [0.03 * l, 0.26 * l, 0.22 * l],
+        {
+          color: look.fin,
+        },
+      );
     });
     return { body, tail, tailAt };
   });
