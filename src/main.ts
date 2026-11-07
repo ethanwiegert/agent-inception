@@ -595,7 +595,18 @@ function draw(now: number, out: RenderTarget, capture = false) {
   const followed = agents.find((a) => a.id === camera!.follow);
   if (followed) camera.track(followed.x, followed.z);
   client.updateLight();
-  if (!capture) sound.update(now, camera, agents, client.timeOfDay, client.clouds, nearestFire());
+  if (!capture) {
+    sound.update(
+      now,
+      camera,
+      agents,
+      client.timeOfDay,
+      client.clouds,
+      nearestFire(),
+      client.day,
+      client.hasClock ? `${client.slot}:${client.seed}` : "",
+    );
+  }
 
   renderer.render(
     camera,
