@@ -43,6 +43,24 @@ export interface MeshOptions {
 
 const m = mat4();
 
+/** Baked surface grain per pattern: amplitude and noise frequency (a small y makes streaks). */
+const GRAIN: Record<string, { grain: number; scale: readonly [number, number, number] }> = {
+  leaves: { grain: 0.3, scale: [9, 9, 9] },
+  log: { grain: 0.34, scale: [6, 0.7, 6] },
+  fleece: { grain: 0.3, scale: [12, 12, 12] },
+  stone: { grain: 0.24, scale: [10, 10, 10] },
+  cobble: { grain: 0.24, scale: [9, 9, 9] },
+  dirt: { grain: 0.18, scale: [8, 8, 8] },
+  farmland: { grain: 0.18, scale: [8, 8, 8] },
+  planks: { grain: 0.16, scale: [5, 1.2, 5] },
+  bricks: { grain: 0.14, scale: [8, 8, 8] },
+  thatch: { grain: 0.2, scale: [7, 2, 7] },
+  tiles: { grain: 0.14, scale: [8, 8, 8] },
+  sand: { grain: 0.12, scale: [9, 9, 9] },
+  grass: { grain: 0.14, scale: [8, 8, 8] },
+  plain: { grain: 0.07, scale: [10, 10, 10] },
+};
+
 /** Add `design`'s parts to `b`. Returns how many parts it drew. */
 export function meshDesign(
   b: MeshBuilder,
@@ -98,19 +116,22 @@ function meshPart(
   const base = override ?? materialRgb(mat.color);
   const bend = top ? Math.max(0, Math.min(1, 1 - mat.hardness / 4)) : 0;
   const lo = Math.max(0, (p.at[1] - sy / 2) / top), hi = Math.min(1, (p.at[1] + sy / 2) / top);
+  const gr = GRAIN[mat.pattern] ?? GRAIN.plain;
   const style: Style = {
     color: [base[0] * k, base[1] * k, base[2] * k],
     sway: [lo * bend, hi * bend],
     ao: lumpy ? 0.38 : rocky ? 0.3 : 0.25,
     jitter: mat.pattern === "leaves"
-      ? 0.2
+      ? 0.12
       : mat.pattern === "log"
-      ? 0.1
+      ? 0.08
       : lumpy
       ? 0.06
       : rocky
-      ? 0.1
+      ? 0.08
       : 0,
+    grain: gr.grain,
+    grainScale: gr.scale,
     // A lamp shines while its Object's lights are on; a glowing Material always does.
     glow: deviceKind(p.part) === "lamp" ? -Math.max(0.8, mat.glows ?? 0) : mat.glows ?? 0,
   };
@@ -121,13 +142,16 @@ function meshPart(
   rotateX(m, p.tilt * DEG);
   const thin = Math.min(sx, sz);
   const shape = shapeOf(p.part);
+  // Small parts stay low-poly (they're pixels on screen); anything bigger gets a smooth sphere.
+  const big = Math.max(sx, sy, sz);
+  const detail = big < 0.08 ? 0 : big < 0.2 ? 1 : big < 0.7 ? 2 : 3;
   switch (shape) {
     case "box":
-      b.box(m, p.size, style, Math.min(0.1, 0.3 * Math.min(sx, sy, sz)));
+      b.box(m, p.size, style, Math.min(0.16, 0.4 * Math.min(sx, sy, sz)));
       break;
     case "sphere":
       b.sphere(m, [sx / 2, sy / 2, sz / 2], style, {
-        detail: 1,
+        detail,
         noise: mat.pattern === "leaves" ? 0.3 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.3 : 0,
         seed: index * 13 + 5,
         flat: rocky,
@@ -138,7 +162,7 @@ function meshPart(
       // Unit primitives grown from y = 0, stretched to the part's size around its center.
       translate(m, 0, -sy / 2, 0);
       scale(m, sx, sy, sz);
-      const segments = thin < 0.06 ? 3 : thin < 0.2 ? 6 : thin < 0.6 ? 9 : 14;
+      const segments = thin < 0.05 ? 4 : thin < 0.15 ? 8 : thin < 0.4 ? 12 : thin < 0.8 ? 16 : 20;
       const opts = { segments, caps: thin >= 0.06 };
       if (shape === "cone") b.cone(m, 0.5, 1, style, opts);
       else b.cylinder(m, 0.5, 0.5, 1, style, opts);

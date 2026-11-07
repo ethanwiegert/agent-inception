@@ -280,14 +280,23 @@ add("design", "oak", "A broad oak with a round crown.", {
   mark: "T",
   habitat: { on: TREE_GROUND, zones: ["forest"], share: 0.65 },
   parts: [
+    part("cone", "bark", [0.5, 0.09, 0.5], [0.62, 0.28, 0.62]),
     part("cylinder", "bark", [0.5, 1.425, 0.5], [0.34, 2.85, 0.34]),
     part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 57, 46), [0.13, 0.9, 0.13], 57, 46),
     part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 195, 46), [0.13, 0.9, 0.13], 195, 46),
+    part("cylinder", "bark", lean([0.5, 1.8, 0.5], 0.85, 310, 40), [0.11, 0.85, 0.11], 310, 40),
+    part("cylinder", "bark", [0.5, 2.9, 0.5], [0.2, 1.1, 0.2]),
     part("sphere", "leaves", [0.45, 3.42, 0.48], [1.85, 1.65, 1.95]),
     part("sphere", "leaves", [1.22, 3.04, 0.72], [1.65, 1.35, 1.55]),
     part("sphere", "leaves", [-0.12, 3.17, 0.82], [1.7, 1.45, 1.75]),
     part("sphere", "leaves", [0.25, 2.9, -0.22], [1.55, 1.25, 1.5]),
     part("sphere", "leaves", [0.78, 3.65, 1.1], [1.35, 1.15, 1.4]),
+    part("sphere", "leaves", [0.5, 4.15, 0.5], [1.05, 0.85, 1.05]),
+    part("sphere", "leaves", [-0.55, 2.75, -0.35], [1.0, 0.85, 1.0]),
+    part("sphere", "leaves", [1.45, 3.55, -0.2], [0.95, 0.8, 0.95]),
+    part("sphere", "cattail", [0.3, 2.95, 1.05], [0.09, 0.12, 0.09]),
+    part("sphere", "cattail", [1.05, 3.3, -0.55], [0.09, 0.12, 0.09]),
+    part("sphere", "cattail", [-0.35, 3.35, 0.3], [0.09, 0.12, 0.09]),
   ],
 });
 
@@ -295,14 +304,27 @@ add("design", "birch", "A slim white birch with a tall, light crown.", {
   mark: "T",
   habitat: { on: TREE_GROUND, zones: ["forest"], share: 0.35 },
   parts: [
+    part("cone", "birch bark", [0.5, 0.08, 0.5], [0.34, 0.24, 0.34]),
     part("cylinder", "birch bark", [0.5, 1.85, 0.5], [0.2, 3.7, 0.2]),
     ...[0.42, 1.07, 1.72, 2.37, 3.02].map((y) =>
       part("cylinder", "dark bark", [0.5, y, 0.5], [0.25, 0.05, 0.25])
+    ),
+    part("cylinder", "birch bark", lean([0.5, 2.6, 0.5], 0.7, 40, 38), [0.06, 0.7, 0.06], 40, 38),
+    part(
+      "cylinder",
+      "birch bark",
+      lean([0.5, 2.9, 0.5], 0.65, 220, 42),
+      [0.06, 0.65, 0.06],
+      220,
+      42,
     ),
     part("sphere", "birch leaves", [0.48, 3.85, 0.48], [1.35, 1.8, 1.4]),
     part("sphere", "birch leaves", [0.98, 3.48, 0.62], [1.25, 1.5, 1.25]),
     part("sphere", "birch leaves", [0.18, 3.62, 0.88], [1.2, 1.55, 1.3]),
     part("sphere", "birch leaves", [0.38, 4.25, 0.05], [1.05, 1.35, 1.1]),
+    part("sphere", "birch leaves", [0.52, 4.7, 0.5], [0.7, 0.8, 0.7]),
+    part("sphere", "birch leaves", [-0.28, 3.1, -0.25], [0.95, 1.05, 0.95]),
+    part("sphere", "birch leaves", [1.25, 2.95, -0.15], [0.9, 1.0, 0.9]),
   ],
 });
 
@@ -310,11 +332,16 @@ add("design", "pine", "A dark evergreen of stacked cones; it grows up high.", {
   mark: "A",
   habitat: { on: TREE_GROUND, zones: ["highland"] },
   parts: [
+    part("cone", "bark", [0.5, 0.08, 0.5], [0.44, 0.24, 0.44]),
     part("cylinder", "bark", [0.5, 0.8, 0.5], [0.27, 1.6, 0.27]),
-    ...[0, 1, 2, 3].map((i) => {
-      const t = i / 4, h = 1.5 * (1 - t * 0.35), d = 2.5 * (1 - t * 0.75);
-      return part("cone", "pine needles", [0.5, 1.1 + i * 0.85 + h / 2, 0.5], [d, h, d]);
+    ...[0, 1, 2, 3, 4, 5].map((i) => {
+      const t = i / 6, h = 1.6 * (1 - t * 0.38), d = 2.6 * (1 - t * 0.78);
+      return part("cone", "pine needles", [0.5, 1.0 + i * 0.62 + h / 2, 0.5], [d, h, d]);
     }),
+    part("cone", "pine needles", [0.5, 5.05, 0.5], [0.16, 0.5, 0.16]),
+    part("sphere", "cattail", [0.55, 1.9, 0.85], [0.11, 0.14, 0.11]),
+    part("sphere", "cattail", [0.35, 2.6, 0.4], [0.11, 0.14, 0.11]),
+    part("sphere", "cattail", [0.65, 3.2, 0.55], [0.1, 0.13, 0.1]),
   ],
 });
 
@@ -322,9 +349,21 @@ add("design", "bush", "A round leafy shrub at the edges of woods.", {
   mark: "b",
   habitat: { on: ["grass"], zones: ["forest edge"] },
   parts: [
+    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.35, 30, 18), [0.05, 0.35, 0.05], 30, 18),
+    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.3, 150, 22), [0.045, 0.3, 0.045], 150, 22),
+    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.32, 270, 20), [0.045, 0.32, 0.045], 270, 20),
     part("sphere", "leaves", [0.5, 0.27, 0.5], [0.9, 0.72, 0.9]),
     part("sphere", "leaves", [0.72, 0.25, 0.62], [0.85, 0.68, 0.85]),
     part("sphere", "leaves", [0.3, 0.27, 0.35], [0.8, 0.64, 0.8]),
+    part("sphere", "leaves", [0.5, 0.5, 0.5], [0.7, 0.55, 0.7]),
+    part("sphere", "leaves", [0.85, 0.38, 0.3], [0.6, 0.5, 0.6]),
+    part("sphere", "leaves", [0.15, 0.36, 0.72], [0.6, 0.48, 0.6]),
+    part("sphere", "berries", [0.62, 0.42, 0.82], [0.08, 0.08, 0.08]),
+    part("sphere", "berries", [0.28, 0.38, 0.58], [0.08, 0.08, 0.08]),
+    part("sphere", "berries", [0.78, 0.3, 0.42], [0.08, 0.08, 0.08]),
+    part("sphere", "berries", [0.45, 0.55, 0.3], [0.07, 0.07, 0.07]),
+    part("sphere", "pink petals", [0.38, 0.48, 0.72], [0.07, 0.06, 0.07]),
+    part("sphere", "pink petals", [0.68, 0.5, 0.55], [0.07, 0.06, 0.07]),
   ],
 });
 
@@ -388,7 +427,13 @@ add("design", "rock", "A mossy boulder of stone; it blocks the way.", {
     on: ["grass", "sand", "dirt", "gravel", "stone"],
     zones: ["slope", "scattered", "riverbed"],
   },
-  parts: [part("sphere", "fieldstone", [0.5, 0.125, 0.5], [1.0, 0.6, 0.85])],
+  parts: [
+    part("sphere", "fieldstone", [0.5, 0.125, 0.5], [1.0, 0.6, 0.85]),
+    part("sphere", "fieldstone", [0.25, 0.06, 0.5], [0.5, 0.24, 0.45]),
+    part("sphere", "fieldstone", [0.72, 0.05, 0.68], [0.55, 0.22, 0.5]),
+    part("sphere", "leaves", [0.42, 0.42, 0.45], [0.4, 0.22, 0.4]),
+    part("sphere", "leaves", [0.62, 0.38, 0.6], [0.3, 0.18, 0.3]),
+  ],
 });
 
 /** Round leaves floating in a cluster. */
@@ -442,15 +487,22 @@ add("design", "farmer", "The villager look: straw hat, linen shirt, denim and bo
   parts: [
     limb("denim", 0.38, 0.39, 0.5, [0.2, 0.66, 0.22], "left leg"),
     limb("leather", 0.38, 0.06, 0.52, [0.21, 0.13, 0.27], "left leg"),
+    limb("leather", 0.38, 0.02, 0.56, [0.22, 0.05, 0.32], "left leg"),
     limb("denim", 0.62, 0.39, 0.5, [0.2, 0.66, 0.22], "right leg"),
     limb("leather", 0.62, 0.06, 0.52, [0.21, 0.13, 0.27], "right leg"),
+    limb("leather", 0.62, 0.02, 0.56, [0.22, 0.05, 0.32], "right leg"),
     limb("linen", 0.5, 1.02, 0.5, [0.5, 0.6, 0.3], "body"),
+    limb("leather", 0.5, 0.74, 0.5, [0.52, 0.09, 0.32], "body"),
+    limb("leather", 0.5, 1.06, 0.66, [0.09, 0.18, 0.03], "body"),
     limb("linen", 0.17, 1.02, 0.5, [0.16, 0.54, 0.16], "left arm"),
     part("sphere", "skin", [0.17, 0.68, 0.5], [0.16, 0.16, 0.16], 0, 0, "left arm"),
     limb("linen", 0.83, 1.02, 0.5, [0.16, 0.54, 0.16], "right arm"),
     part("sphere", "skin", [0.83, 0.68, 0.5], [0.16, 0.16, 0.16], 0, 0, "right arm"),
-    limb("skin", 0.5, 1.54, 0.5, [0.42, 0.42, 0.42], "head"),
-    limb("skin", 0.5, 1.5, 0.72, [0.07, 0.08, 0.06], "head"),
+    part("sphere", "skin", [0.5, 1.54, 0.5], [0.42, 0.42, 0.42], 0, 0, "head"),
+    part("sphere", "skin", [0.5, 1.5, 0.71], [0.1, 0.09, 0.08], 0, 0, "head"),
+    part("sphere", "skin", [0.29, 1.54, 0.5], [0.07, 0.09, 0.07], 0, 0, "head"),
+    part("sphere", "skin", [0.71, 1.54, 0.5], [0.07, 0.09, 0.07], 0, 0, "head"),
+    part("box", "leather", [0.5, 1.62, 0.29], [0.34, 0.22, 0.16], 0, 0, "head"),
     part("cylinder", "straw", [0.5, 1.76, 0.5], [0.8, 0.04, 0.8], 0, 0, "head"),
     part("cylinder", "straw", [0.5, 1.88, 0.5], [0.46, 0.22, 0.46], 0, 0, "head"),
     part("cylinder", "red cloth", [0.5, 1.82, 0.5], [0.49, 0.06, 0.49], 0, 0, "head"),
@@ -484,28 +536,42 @@ function legs(mat: string, dx: number, dz: number, top: number, len: number, w: 
 const sheepLegs = legs("dark hide", 0.13, 0.22, 0.38, 0.36, 0.09);
 add("design", "sheep", "A woolly sheep. Shear it for wool; it follows wheat.", {
   parts: [
+    part("sphere", "dark hide", [0.5, 0.56, 0.5], [0.55, 0.5, 0.55], 0, 0, "body"),
     part("sphere", "wool", [0.5, 0.58, 0.5], [0.68, 0.61, 0.68], 0, 0, "product"),
     part("sphere", "wool", [0.5, 0.62, 0.7], [0.56, 0.5, 0.56], 0, 0, "product"),
     part("sphere", "wool", [0.5, 0.61, 0.3], [0.6, 0.54, 0.6], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.72, 0.5], [0.5, 0.35, 0.5], 0, 0, "product"),
+    part("sphere", "wool", [0.28, 0.62, 0.55], [0.4, 0.42, 0.42], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.6, 0.08], [0.32, 0.3, 0.3], 0, 0, "tail"),
     part("box", "dark hide", [0.5, 0.66, 1.0], [0.19, 0.22, 0.28], 0, 0, "head"),
+    part("sphere", "dark hide", [0.5, 0.63, 1.06], [0.16, 0.16, 0.16], 0, 0, "head"),
     part("sphere", "wool", [0.5, 0.76, 0.92], [0.26, 0.16, 0.24], 0, 0, "head"),
     part("box", "dark hide", [0.37, 0.71, 0.94], [0.07, 0.04, 0.12], 90, 28.6, "head"),
     part("box", "dark hide", [0.63, 0.71, 0.94], [0.07, 0.04, 0.12], -90, 28.6, "head"),
     part("box", "amber", [0.42, 0.7, 1.08], [0.035, 0.035, 0.02], 0, 0, "head"),
     part("box", "amber", [0.58, 0.7, 1.08], [0.035, 0.035, 0.02], 0, 0, "head"),
+    part("box", "ink", [0.44, 0.62, 1.16], [0.02, 0.02, 0.02], 0, 0, "head"),
+    part("box", "ink", [0.56, 0.62, 1.16], [0.02, 0.02, 0.02], 0, 0, "head"),
     ...sheepLegs.parts,
   ],
-  joints: { product: [0.5, 0.58, 0.5], head: [0.5, 0.66, 0.88], ...sheepLegs.joints },
+  joints: {
+    product: [0.5, 0.58, 0.5],
+    head: [0.5, 0.66, 0.88],
+    tail: [0.5, 0.6, 0.3],
+    ...sheepLegs.joints,
+  },
 });
 
 const cowLegs = legs("cowhide", 0.2, 0.42, 0.62, 0.6, 0.14);
 add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
   parts: [
-    part("box", "cowhide", [0.5, 0.9, 0.5], [0.62, 0.6, 1.2], 0, 0, "body"),
+    part("sphere", "cowhide", [0.5, 0.9, 0.5], [0.62, 0.6, 1.2], 0, 0, "body"),
     part("sphere", "dark hide", [0.8, 0.95, 0.7], [0.1, 0.4, 0.4], 0, 0, "body"),
     part("sphere", "dark hide", [0.2, 0.88, 0.25], [0.12, 0.48, 0.48], 0, 0, "body"),
     part("sphere", "dark hide", [0.78, 1.0, 0.15], [0.075, 0.3, 0.3], 0, 0, "body"),
     part("sphere", "dark hide", [0.5, 1.2, 0.45], [0.44, 0.09, 0.44], 0, 0, "body"),
+    part("sphere", "snout", [0.5, 0.62, 0.15], [0.2, 0.16, 0.2], 0, 0, "body"),
+    part("sphere", "cowhide", [0.5, 1.08, 0.95], [0.42, 0.4, 0.42], 0, 0, "body"),
     part(
       "cylinder",
       "cowhide",
@@ -515,8 +581,10 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
       -154.7,
       "tail",
     ),
+    part("sphere", "dark hide", [0.5, 0.56, -0.36], [0.1, 0.14, 0.1], 0, 0, "tail"),
     part("box", "cowhide", [0.5, 1.05, 1.3], [0.32, 0.34, 0.42], 0, 0, "head"),
-    part("box", "snout", [0.5, 0.98, 1.52], [0.3, 0.2, 0.12], 0, 0, "head"),
+    part("sphere", "snout", [0.5, 1.0, 1.48], [0.28, 0.2, 0.18], 0, 0, "head"),
+    part("sphere", "dark hide", [0.5, 1.2, 1.3], [0.18, 0.12, 0.18], 0, 0, "head"),
     part("cone", "horn", lean([0.63, 1.2, 1.22], 0.18, 90, 63), [0.08, 0.18, 0.08], 90, 63, "head"),
     part(
       "cone",
@@ -531,6 +599,8 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
     part("box", "dark hide", [0.29, 1.12, 1.2], [0.08, 0.05, 0.14], 90, 22.9, "head"),
     part("box", "ink", [0.6, 1.11, 1.51], [0.04, 0.04, 0.02], 0, 0, "head"),
     part("box", "ink", [0.4, 1.11, 1.51], [0.04, 0.04, 0.02], 0, 0, "head"),
+    part("box", "ink", [0.44, 0.99, 1.6], [0.025, 0.025, 0.02], 0, 0, "head"),
+    part("box", "ink", [0.56, 0.99, 1.6], [0.025, 0.025, 0.02], 0, 0, "head"),
     ...cowLegs.parts,
     ...[-0.2, 0.2].flatMap((x) =>
       [0.42, -0.42].map((z) => {
@@ -553,15 +623,23 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
 add("design", "chicken", "A clucking chicken. Collect its eggs; it follows wheat.", {
   parts: [
     part("sphere", "feathers", [0.5, 0.27, 0.5], [0.3, 0.28, 0.38], 0, 0, "body"),
+    part("sphere", "feathers", [0.5, 0.28, 0.62], [0.22, 0.24, 0.22], 0, 0, "body"),
+    part("sphere", "feathers", [0.36, 0.3, 0.5], [0.08, 0.2, 0.26], 0, 0, "body"),
+    part("sphere", "feathers", [0.64, 0.3, 0.5], [0.08, 0.2, 0.26], 0, 0, "body"),
     part("box", "feathers", [0.5, 0.35, 0.33], [0.12, 0.16, 0.05], 0, -34.4, "body"),
+    part("box", "feathers", [0.44, 0.38, 0.3], [0.08, 0.14, 0.04], 20, -28, "body"),
+    part("box", "feathers", [0.56, 0.38, 0.3], [0.08, 0.14, 0.04], -20, -28, "body"),
     part("sphere", "feathers", [0.5, 0.42, 0.67], [0.15, 0.17, 0.15], 0, 0, "head"),
     part("box", "comb", [0.5, 0.51, 0.67], [0.025, 0.06, 0.09], 0, 0, "head"),
     part("box", "comb", [0.5, 0.36, 0.74], [0.025, 0.05, 0.025], 0, 0, "head"),
+    part("sphere", "comb", [0.5, 0.33, 0.72], [0.05, 0.07, 0.04], 0, 0, "head"),
     part("cone", "beak", [0.5, 0.41, 0.755], [0.05, 0.07, 0.05], 0, 90, "head"),
     part("box", "ink", [0.435, 0.44, 0.7], [0.015, 0.02, 0.02], 0, 0, "head"),
     part("box", "ink", [0.565, 0.44, 0.7], [0.015, 0.02, 0.02], 0, 0, "head"),
     part("cylinder", "beak", [0.45, 0.085, 0.5], [0.026, 0.17, 0.026], 0, 0, "left leg"),
     part("cylinder", "beak", [0.55, 0.085, 0.5], [0.026, 0.17, 0.026], 0, 0, "right leg"),
+    part("box", "beak", [0.45, 0.01, 0.56], [0.05, 0.02, 0.1], 0, 0, "left leg"),
+    part("box", "beak", [0.55, 0.01, 0.56], [0.05, 0.02, 0.1], 0, 0, "right leg"),
   ],
   joints: {
     head: [0.5, 0.36, 0.64],
@@ -573,9 +651,13 @@ add("design", "chicken", "A clucking chicken. Collect its eggs; it follows wheat
 add("design", "duck", "A duck paddling on calm water.", {
   parts: [
     part("sphere", "duck feathers", [0.5, 0.04, 0.5], [0.28, 0.22, 0.46], 0, 0, "body"),
+    part("sphere", "duck feathers", [0.38, 0.06, 0.5], [0.07, 0.14, 0.3], 0, 0, "body"),
+    part("sphere", "duck feathers", [0.62, 0.06, 0.5], [0.07, 0.14, 0.3], 0, 0, "body"),
     part("box", "duck feathers", [0.5, 0.11, 0.29], [0.1, 0.04, 0.1], 0, -28.6, "body"),
+    part("box", "feathers", [0.5, 0.16, 0.26], [0.08, 0.03, 0.08], 0, -35, "body"),
     part("cylinder", "feathers", [0.5, 0.13, 0.66], [0.085, 0.1, 0.085], 0, 0, "head"),
     part("sphere", "green feathers", [0.5, 0.22, 0.68], [0.14, 0.14, 0.16], 0, 0, "head"),
+    part("cylinder", "green feathers", [0.5, 0.16, 0.67], [0.1, 0.04, 0.1], 0, 0, "head"),
     part("box", "beak", [0.5, 0.2, 0.77], [0.06, 0.025, 0.08], 0, 0, "head"),
     part("box", "ink", [0.44, 0.24, 0.71], [0.015, 0.02, 0.02], 0, 0, "head"),
     part("box", "ink", [0.56, 0.24, 0.71], [0.015, 0.02, 0.02], 0, 0, "head"),

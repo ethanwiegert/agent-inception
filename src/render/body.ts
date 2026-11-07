@@ -44,21 +44,34 @@ export class BodyModels {
     const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
     this.cube = lib.define("cube", (b) => b.box(null, [1, 1, 1], { color: WHITE }));
     this.hoe = lib.define("tool.hoe", (b) => {
-      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
+      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD }, {
+        segments: 12,
+      });
       b.box(at(0, -0.72, 0.68), [0.2, 0.22, 0.04], { color: IRON }, 0.01);
     });
     this.rod = lib.define("tool.rod", (b) => {
       // Held in the right hand: the rod points forward and up, the line hangs straight down.
-      b.cylinder(rotateX(at(0, -0.6, 0), 2.214), 0.022, 0.01, 1.6, { color: WOOD, sway: [0, 0.3] });
+      b.cylinder(
+        rotateX(at(0, -0.6, 0), 2.214),
+        0.022,
+        0.01,
+        1.6,
+        { color: WOOD, sway: [0, 0.3] },
+        {
+          segments: 10,
+        },
+      );
       b.cylinder(rotateX(at(0, -1.56, 1.28), -1.845), 0.004, 0.004, 1.3, {
         color: [0.8, 0.8, 0.75],
       });
       b.sphere(translate(rotateX(at(0, -1.56, 1.28), -1.845), 0, 1.3, 0), [0.04, 0.04, 0.04], {
         color: [0.7, 0.05, 0.03],
-      }, { detail: 0 });
+      }, { detail: 1 });
     });
     this.hammer = lib.define("tool.hammer", (b) => {
-      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD });
+      b.cylinder(rotateX(at(0, -0.62, -0.08), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD }, {
+        segments: 12,
+      });
       b.box(at(0, -0.62, 0.66), [0.16, 0.16, 0.12], { color: IRON }, 0.02);
     });
   }

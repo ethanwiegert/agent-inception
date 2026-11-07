@@ -2,6 +2,10 @@ dist/
 *.png
 !docs/playtests/*.png
 !web/*.png
+# Render captures committed to a branch for visual review in a PR
+!devshot/
+!devshot/*.png
+!devshot/.gitkeep
 .wrangler/
 .host-profile/
 .env

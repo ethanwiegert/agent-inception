@@ -155,6 +155,23 @@ Deno.test("a cow's tail has its own joint for idle and walking motion", () => {
   ok(fauna.pieces(catalog, 1).some((p) => p.role === "tail"));
 });
 
+Deno.test("the detailed built-in designs all mesh, land zones, and keep their solidity", () => {
+  const catalog = Catalog.create();
+  for (
+    const name of ["oak", "birch", "pine", "bush", "farmer", "sheep", "cow", "chicken", "duck"]
+  ) {
+    const e = catalog.current(catalog.byName(name)!)!;
+    const d = e.content as DesignContent;
+    const b = new MeshBuilder();
+    assertEquals(meshDesign(b, catalog, d, { role: null }), d.parts.length, name);
+    ok(b.vertexCount > 200, `${name} has real geometry`);
+  }
+  // A bush is walk-through ground cover, not something solid; a sheep's tail wags on its joint.
+  const fauna = new FaunaModels(new MeshLibrary());
+  ok(fauna.pieces(catalog, 0).some((p) => p.role === "tail"), "sheep has a tail piece");
+  ok(fauna.pieces(catalog, 1).some((p) => p.role === "tail"), "cow has a tail piece");
+});
+
 Deno.test("a replaced animal design replaces the cached rig", () => {
   const catalog = Catalog.create();
   const fauna = new FaunaModels(new MeshLibrary());
