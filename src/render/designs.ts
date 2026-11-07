@@ -94,15 +94,23 @@ function meshPart(
   const lumpy = mat.pattern === "leaves" || mat.pattern === "fleece";
   const rocky = mat.pattern === "stone" || mat.pattern === "cobble";
   // Clumps of leaves vary a little in shade from part to part.
-  const k = mat.pattern === "leaves" ? 0.85 + hash2(index, 7, 31) * 0.3 : 1;
+  const k = mat.pattern === "leaves" ? 0.78 + hash2(index, 7, 31) * 0.44 : 1;
   const base = override ?? materialRgb(mat.color);
   const bend = top ? Math.max(0, Math.min(1, 1 - mat.hardness / 4)) : 0;
   const lo = Math.max(0, (p.at[1] - sy / 2) / top), hi = Math.min(1, (p.at[1] + sy / 2) / top);
   const style: Style = {
     color: [base[0] * k, base[1] * k, base[2] * k],
     sway: [lo * bend, hi * bend],
-    ao: lumpy ? 0.45 : rocky ? 0.3 : 0.25,
-    jitter: mat.pattern === "leaves" ? 0.12 : lumpy ? 0.06 : rocky ? 0.1 : 0,
+    ao: lumpy ? 0.38 : rocky ? 0.3 : 0.25,
+    jitter: mat.pattern === "leaves"
+      ? 0.2
+      : mat.pattern === "log"
+      ? 0.1
+      : lumpy
+      ? 0.06
+      : rocky
+      ? 0.1
+      : 0,
     // A lamp shines while its Object's lights are on; a glowing Material always does.
     glow: deviceKind(p.part) === "lamp" ? -Math.max(0.8, mat.glows ?? 0) : mat.glows ?? 0,
   };
@@ -120,7 +128,7 @@ function meshPart(
     case "sphere":
       b.sphere(m, [sx / 2, sy / 2, sz / 2], style, {
         detail: 1,
-        noise: mat.pattern === "leaves" ? 0.22 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.3 : 0,
+        noise: mat.pattern === "leaves" ? 0.3 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.3 : 0,
         seed: index * 13 + 5,
         flat: rocky,
       });

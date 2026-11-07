@@ -124,6 +124,12 @@ Settled with Ethan while workshopping M1; keep to it unless he asks otherwise.
 - Hills shade smoothly (per-vertex ground normals) and material edges (grass/sand) are organic
   curves, not block steps. Water is clear and teal over sand, darkening with depth.
 - Grass is dense, tall and fine: 64 blades per block, 0.6 tall, 0.05 wide, generated on the GPU.
+- Natural's 0.68-radian vertical spectator lens shows more of the village and meadow. Grass covers
+  the wider view with the original-density inner grid plus a sparse outer grid of wider blades,
+  rather than multiplying full-density candidates across the enlarged field.
+- Bark and foliage use stable per-vertex grain and irregular low-poly crowns, not texture assets or
+  extra geometry. Villager counter-swing, animal secondary motion and hinged fish tails add life
+  without changing the deterministic sim.
 - No lines across the screen: block grid outlines are off, and shadows get strong sky fill so step
   and cliff shadows read as soft shade, never black stripes.
 - Terrain mixes single steps with some multi-step cliffs, and one-block rises are smooth slopes

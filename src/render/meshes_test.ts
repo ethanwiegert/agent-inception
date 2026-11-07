@@ -1,7 +1,10 @@
 import { deepStrictEqual as assertEquals, ok } from "node:assert/strict";
 import { identity, mat4, rotateY, translate } from "../math.ts";
-import { Catalog } from "../sim/catalog.ts";
-import { FaunaModels } from "./fauna.ts";
+import { Catalog, type DesignContent } from "../sim/catalog.ts";
+import type { AgentView } from "../simclient.ts";
+import { BodyModels, buildBodies } from "./body.ts";
+import { meshDesign } from "./designs.ts";
+import { defineFishModels, FaunaModels } from "./fauna.ts";
 import {
   INSTANCE_FLOATS,
   InstanceBatch,
@@ -95,6 +98,61 @@ Deno.test("instance batches group by template without losing data", () => {
     assertEquals(batch.sorted[i * INSTANCE_FLOATS + 12], t);
     assertEquals(t % 3 === 0, i >= 133);
   }
+});
+
+Deno.test("bark has circumferential grain without adding vertices", () => {
+  const catalog = Catalog.create();
+  const oak = catalog.current(catalog.byName("oak")!)!;
+  const b = new MeshBuilder();
+  meshDesign(b, catalog, oak.content as DesignContent);
+  // The first two vertices sit beside each other at the same height around the trunk.
+  ok(Math.abs(b.positions[1] - b.positions[4]) < 1e-9);
+  const a = b.colors.slice(0, 3), c = b.colors.slice(3, 6);
+  ok(a.some((v, i) => Math.abs(v - c[i]) > 1e-6), "adjacent bark vertices vary in tone");
+});
+
+Deno.test("fish bodies and tails are separate templates for articulated swimming", () => {
+  const models = defineFishModels(new MeshLibrary()) as unknown as { body: number; tail: number }[];
+  assertEquals(models.length, 5);
+  for (const model of models) {
+    ok(Number.isInteger(model.body), "fish has a body template");
+    ok(Number.isInteger(model.tail), "fish has a tail template");
+    ok(model.body !== model.tail, "tail can move independently from the body");
+  }
+});
+
+Deno.test("a walking villager counter-rotates their torso through the stride", () => {
+  const catalog = Catalog.create();
+  const lib = new MeshLibrary();
+  const models = new BodyModels(lib);
+  const agent: AgentView = {
+    id: 1,
+    name: "Fern",
+    x: 0,
+    y: 0,
+    z: 0,
+    yaw: 0,
+    anim: 1,
+    stride: 0.25,
+    color: 0,
+    body: null,
+    carrying: false,
+    down: 0,
+  };
+  const out = new InstanceBatch();
+  buildBodies([agent], 1, out, models, catalog);
+  out.sort(lib.size);
+  const body = models.villager(catalog, null, 0, 3)!.pieces.body!;
+  ok(body);
+  const i = out.sortedIds.indexOf(body.id);
+  ok(i >= 0, "torso is drawn");
+  ok(Math.abs(out.sorted[i * INSTANCE_FLOATS + 2]) > 0.001, "torso twists around vertical");
+});
+
+Deno.test("a cow's tail has its own joint for idle and walking motion", () => {
+  const catalog = Catalog.create();
+  const fauna = new FaunaModels(new MeshLibrary());
+  ok(fauna.pieces(catalog, 1).some((p) => p.role === "tail"));
 });
 
 Deno.test("a replaced animal design replaces the cached rig", () => {

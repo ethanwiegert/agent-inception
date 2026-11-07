@@ -50,13 +50,37 @@ fn rand(seed: ptr<function, u32>) -> f32 {
 @compute @workgroup_size(${WORKGROUP}) fn cull(@builtin(global_invocation_id) gid: vec3u) {
   let bladesPerBlock = u32(frame.grass.z);
   let radius = i32(frame.grass.w);
-  let side = u32(radius * 2);
+  let innerRadius = min(radius, i32(f32(radius) / max(frame.wind.w, 1.0)));
+  let outerBlades = min(bladesPerBlock, max(1u, u32(f32(bladesPerBlock) * 0.125 + 0.5)));
+  let innerBlades = bladesPerBlock - outerBlades;
+  let outerSide = u32(radius * 2);
+  let innerSide = u32(innerRadius * 2);
+  let outerCount = outerSide * outerSide * outerBlades;
+  let innerCount = innerSide * innerSide * innerBlades;
   let ii = gid.x;
-  if (ii >= side * side * bladesPerBlock) { return; }
-  let cell = ii / bladesPerBlock;
-  let k = ii % bladesPerBlock;
-  let cx = i32(cell % side) - radius + i32(frame.grassCenter.x);
-  let cz = i32(cell / side) - radius + i32(frame.grassCenter.y);
+  if (ii >= outerCount + innerCount) { return; }
+  let centerX = i32(frame.grassCenter.x);
+  let centerZ = i32(frame.grassCenter.y);
+  var outer = true;
+  var k = 0u;
+  var cx = 0;
+  var cz = 0;
+  if (ii < outerCount) {
+    // The sparse canopy covers the whole wider grid, the central square included: there it adds
+    // the first outerBlades blades, and the inner grid below supplies the rest, so the near field
+    // keeps the original bladesPerBlock density rather than a thinner version.
+    let cell = ii / outerBlades;
+    k = ii % outerBlades;
+    cx = i32(cell % outerSide) - radius + centerX;
+    cz = i32(cell / outerSide) - radius + centerZ;
+  } else {
+    let j = ii - outerCount;
+    let cell = j / innerBlades;
+    k = j % innerBlades + outerBlades;
+    cx = i32(cell % innerSide) - innerRadius + centerX;
+    cz = i32(cell / innerSide) - innerRadius + centerZ;
+    outer = false;
+  }
   if (cx < 0 || cz < 0 || f32(cx) >= frame.grassCenter.z || f32(cz) >= frame.grassCenter.w) { return; }
 
   let s = textureLoad(surface, vec2i(cx, cz), 0);
@@ -64,18 +88,24 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   let natural = s.g == GRASS || s.g == 2u || s.g == 6u || s.g == 7u || s.g == 8u;
   if (!natural || s.a > s.r + 1u || (s.g != GRASS && (s.b >> 4u) == 0u)) { return; }
 
+  // Reject off-screen columns before hashing every blade in them. The two-block margin keeps
+  // the blade jitter and its wind bend safely inside the old per-blade frustum test's coverage.
+  let clip = frame.viewProj * vec4f(f32(cx) + 0.5, f32(s.r) + 1.0, f32(cz) + 0.5, 1.0);
+  if (clip.w <= 0.0 || any(abs(clip.xy) > vec2f(clip.w * 1.1 + 2.0))) { return; }
+
   var seed = pcg((u32(cx) * 73856093u) ^ (u32(cz) * 19349663u) ^ (k * 83492791u));
   let fx = rand(&seed);
   let fz = rand(&seed);
   let base = vec3f(f32(cx) + fx, f32(s.r) + 1.0 - slopeDrop(s.b & 15u, fx, fz), f32(cz) + fz);
 
-  // Thin out with distance from the view center and fade to nothing at the edge.
+  // Keep the old lens's density profile; only the newly visible outer band uses wider, fewer
+  // blades. This expands coverage without multiplying the number of drawn blades near the view.
   let d = distance(base.xz, frame.grassCenter.xy);
   let r = f32(radius);
-  let keep = mix(1.0, 0.3, smoothstep(r * 0.35, r, d));
-  if (f32(k) >= f32(bladesPerBlock) * keep) { return; }
-  let clip = frame.viewProj * vec4f(base, 1.0);
-  if (clip.w <= 0.0 || any(abs(clip.xy) > vec2f(clip.w * 1.1 + 1.5))) { return; }
+  let densityRadius = f32(innerRadius);
+  let innerKeep = mix(1.0, 0.3, smoothstep(densityRadius * 0.35, densityRadius, d));
+  let keep = select(innerKeep, f32(outerBlades) / f32(bladesPerBlock), outer);
+  if (!outer && f32(k) >= f32(bladesPerBlock) * innerKeep) { return; }
   if (!isGrassy(s, base.xz)) { return; }
   let fade = 1.0 - smoothstep(r * 0.75, r, d);
 
@@ -238,9 +268,11 @@ export class GrassRenderer {
     });
   }
 
-  /** Candidate blades for the current grass radius and density. */
-  static instanceCount(radius: number, bladesPerBlock: number) {
-    return (radius * 2) ** 2 * bladesPerBlock;
+  /** Candidate blades: a sparse full grid plus the extra blades in the original inner grid. */
+  static instanceCount(radius: number, bladesPerBlock: number, fovReach = 1) {
+    const innerRadius = Math.min(radius, Math.floor(radius / fovReach));
+    const outer = Math.min(bladesPerBlock, Math.max(1, Math.round(bladesPerBlock * 0.125)));
+    return (radius * 2) ** 2 * outer + (innerRadius * 2) ** 2 * (bladesPerBlock - outer);
   }
 
   /**

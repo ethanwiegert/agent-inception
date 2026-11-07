@@ -33,7 +33,8 @@ export class Camera {
   yaw = 0.7;
   pitch = 0.95;
   distance = 58;
-  fovY = 0.55;
+  /** A wider spectator lens: more meadow stays visible without pulling far away from the village. */
+  fovY = 0.68;
   /** Agent id to keep centered, or null for free look. Panning breaks the follow. */
   follow: number | null = null;
   /** Slow auto-orbit for a hands-off cinematic view. */
