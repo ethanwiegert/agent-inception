@@ -76,6 +76,8 @@ export class SimClient {
   tick = 0;
   day = 1;
   timeOfDay = 0;
+  /** True once `day` and `timeOfDay` came from a tick for the world currently loaded. */
+  hasClock = false;
   /** Village Life as the worker last told it. */
   village: VillageStatus | null = null;
   speed = 1;
@@ -267,6 +269,9 @@ export class SimClient {
       this.seed = msg.seed;
       this.slot = msg.slot;
       this.name = msg.name;
+      // The tick that follows carries this world's clock. Until then the old one must not look
+      // like a skip into the new world.
+      this.hasClock = false;
       this.catalog = Catalog.load(msg.catalog);
       // The worker's world and props as they stand: nothing to regenerate on the main thread.
       const world = World.fromData(msg.world);
@@ -311,6 +316,7 @@ export class SimClient {
     this.tick = msg.tick;
     this.day = msg.day;
     this.timeOfDay = msg.timeOfDay;
+    this.hasClock = true;
     this.speed = msg.speed;
     this.clouds = msg.clouds;
     this.heldClouds = msg.heldClouds;

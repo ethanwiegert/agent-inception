@@ -1,3 +1,4 @@
+import { advanceMidday, freshMidday, type MiddayState } from "./midday.ts";
 import { Anim, type SimEvent } from "./sim/sim.ts";
 
 /**
@@ -5,8 +6,9 @@ import { Anim, type SimEvent } from "./sim/sim.ts";
  * digging, building, splashes, munching, speech), sim events (a level up, a Wish, a knock) and
  * ambience that follows the day and the weather (birds, crickets, wind, fire crackling near the
  * camera). Every sound is synthesized here as a placeholder until its file lands: list files in
- * `web/audio/manifest.json` and they replace the synth, music included. Audio starts on the
- * spectator's first click or key (browsers' autoplay rule) and remembers being muted.
+ * `web/audio/manifest.json` and they replace the synth, music included. The manifest's `midday`
+ * track plays once each game day around noon, quietly, for whoever is watching. Audio starts on
+ * the spectator's first click or key (browsers' autoplay rule) and remembers being muted.
  */
 
 export type SoundId =
@@ -31,6 +33,11 @@ export interface SoundManifest {
   sounds?: Partial<Record<SoundId | LoopId, string>>;
   /** Short voice clips; each villager gets one by their id when they say something. */
   voices?: string[];
+  /**
+   * One track, played at most once each game day around noon. Not part of `music`: those loop
+   * under everything else.
+   */
+  midday?: string;
 }
 
 export interface Listener {
@@ -61,6 +68,13 @@ const STEP = 0.8;
 const HEAR = 70;
 const VOICES = 20;
 const STORE = "ai-sound";
+/**
+ * The midday song's peak, on the same bus as everything else. Birds reach about 0.35 and
+ * one-shots 0.5–1, so this stays under them. Fades are long so it arrives as ambience.
+ */
+const MIDDAY_GAIN = 0.15;
+const MIDDAY_FADE_IN = 8;
+const MIDDAY_FADE_OUT = 10;
 
 export class SoundScape {
   private ctx: AudioContext | null = null;
@@ -73,6 +87,11 @@ export class SoundScape {
   private ear: [number, number, number] = [0, 0, 0];
   /** Reused for each villager's position each frame (play reads it at once). */
   private at: [number, number, number] = [0, 0, 0];
+  private song: MiddayState = freshMidday();
+  private songBuffer: AudioBuffer | null = null;
+  private songSource: AudioBufferSourceNode | null = null;
+  /** `performance.now()` of the last clock sample, or -1 before the worker's clock arrives. */
+  private songAt = -1;
   muted: boolean;
 
   constructor() {
@@ -180,6 +199,11 @@ export class SoundScape {
       } catch { /* skip it */ }
     }
     if (music.length) this.playMusic(music, 0);
+    if (manifest.midday) {
+      try {
+        this.songBuffer = await decode(manifest.midday);
+      } catch { /* the day's song stays silent */ }
+    }
   }
 
   private playMusic(tracks: AudioBuffer[], i: number) {
@@ -236,8 +260,10 @@ export class SoundScape {
   }
 
   /**
-   * Once a frame: move the ear with the camera, voice what villagers are doing, and fade the
-   * ambience with the time of day, the clouds and the nearest fire.
+   * Once a frame: move the ear with the camera, voice what villagers are doing, fade the
+   * ambience with the time of day, the clouds and the nearest fire, and maybe start the midday
+   * song. `world` is empty until the worker's clock has arrived; a new id is a different world,
+   * not a skip of the clock.
    */
   update(
     now: number,
@@ -246,7 +272,10 @@ export class SoundScape {
     timeOfDay: number,
     clouds: number,
     nearestFire: [number, number, number] | null,
+    day: number,
+    world: string,
   ) {
+    this.advanceSong(now, day, timeOfDay, world);
     const ctx = this.ctx;
     if (!ctx || this.muted || document.hidden) return;
     const l = ctx.listener, e = listener.eye, t = listener.target;
@@ -278,10 +307,13 @@ export class SoundScape {
     }
 
     // Daylight 0-1 from the hour: birds by day, crickets by night, wind with the clouds.
-    const day = Math.max(0, Math.min(1, (Math.sin((timeOfDay - 0.25) * Math.PI * 2) + 0.15) * 2));
+    const daylight = Math.max(
+      0,
+      Math.min(1, (Math.sin((timeOfDay - 0.25) * Math.PI * 2) + 0.15) * 2),
+    );
     const height = Math.max(0, Math.min(1, (e[1] - 20) / 80));
-    this.fade("birds", day * (1 - clouds * 0.6) * (1 - height) * 0.35);
-    this.fade("crickets", (1 - day) * (1 - height) * 0.22);
+    this.fade("birds", daylight * (1 - clouds * 0.6) * (1 - height) * 0.35);
+    this.fade("crickets", (1 - daylight) * (1 - height) * 0.22);
     this.fade("wind", 0.05 + clouds * 0.18 + height * 0.2);
     const crackle = this.loops.get("crackle")!;
     if (nearestFire) {
@@ -295,6 +327,47 @@ export class SoundScape {
   private fade(id: LoopId, gain: number) {
     const g = this.loops.get(id)!.gain.gain;
     g.setTargetAtTime(gain, this.ctx!.currentTime, 0.8);
+  }
+
+  /** Track the game clock even while muted or before the first gesture, and start at most once. */
+  private advanceSong(now: number, day: number, time: number, world: string) {
+    if (!world) return;
+    const gap = this.songAt < 0 ? 0 : now - this.songAt;
+    this.songAt = now;
+    const start = advanceMidday(
+      this.song,
+      { world, day, time },
+      now,
+      gap,
+      this.songSource !== null,
+      this.ctx !== null && !this.muted && !document.hidden,
+      this.songBuffer !== null,
+    );
+    if (start) this.beginSong();
+  }
+
+  /** Play the decoded midday track through the master bus, fading in and out. */
+  private beginSong() {
+    const ctx = this.ctx, buffer = this.songBuffer, master = this.master;
+    if (!ctx || !buffer || !master || this.songSource) return;
+    const dur = buffer.duration;
+    if (!(dur > 0)) return;
+    const src = new AudioBufferSourceNode(ctx, { buffer });
+    const gain = new GainNode(ctx, { gain: 0 });
+    src.connect(gain).connect(master);
+    const t0 = ctx.currentTime;
+    const fadeIn = Math.min(MIDDAY_FADE_IN, dur / 3);
+    const fadeOut = Math.min(MIDDAY_FADE_OUT, dur / 3);
+    const g = gain.gain;
+    g.setValueAtTime(0, t0);
+    g.linearRampToValueAtTime(MIDDAY_GAIN, t0 + fadeIn);
+    g.linearRampToValueAtTime(MIDDAY_GAIN, t0 + dur - fadeOut);
+    g.linearRampToValueAtTime(0, t0 + dur);
+    this.songSource = src;
+    src.onended = () => {
+      if (this.songSource === src) this.songSource = null;
+    };
+    src.start();
   }
 }
 

@@ -80,8 +80,9 @@ src/support.ts      corner links, top left: GitHub, and Support (a short note an
 src/prefs.ts        guarded localStorage (active slot, link secrets, welcomed)
 src/camera.ts       orbit camera, follow/focus; src/overlay.ts name tags, speech, activity feed
 src/devpanel.ts     spectator panel: look, time, speed, seed, weather, sound, Notice Board, agents
-src/audio.ts        WebAudio: synthesized positional sounds and ambience, web/audio/manifest.json
-                    files replace them; src/captcha.ts the reverse CAPTCHA gag
+src/audio.ts        WebAudio: synthesized positional sounds and ambience, the once-a-day midday
+                    song (`web/audio/midday.ogg`, scheduled in src/midday.ts), manifest files
+                    replace the placeholders; src/captcha.ts the reverse CAPTCHA gag
 src/sim/            deterministic core — sim.ts (Sim, Agent, clock, weather, save), tools.ts (tool
                     defs + handlers as generator jobs), jobs.ts (walk/reach/work/inventory helpers
                     shared by handlers), blocks.ts (block ids for the Catalog's Materials, patterns),
