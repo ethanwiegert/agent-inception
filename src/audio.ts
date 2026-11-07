@@ -7,8 +7,9 @@ import { Anim, type SimEvent } from "./sim/sim.ts";
  * ambience that follows the day and the weather (birds, crickets, wind, fire crackling near the
  * camera). Every sound is synthesized here as a placeholder until its file lands: list files in
  * `web/audio/manifest.json` and they replace the synth, music included. The manifest's `midday`
- * track plays once each game day around noon, quietly, for whoever is watching. Audio starts on
- * the spectator's first click or key (browsers' autoplay rule) and remembers being muted.
+ * track plays once each game day around noon, gently and in front of the ambience, for whoever is
+ * watching. Audio starts on the spectator's first click or key (browsers' autoplay rule) and
+ * remembers being muted.
  */
 
 export type SoundId =
@@ -69,16 +70,21 @@ const HEAR = 70;
 const VOICES = 20;
 const STORE = "ai-sound";
 /**
- * The midday song's peak, on the same bus as everything else. Birds reach about 0.35 and
- * one-shots 0.5–1, so this stays under them. Fades are long so it arrives as ambience.
+ * Gain for the midday recording. The file itself peaks around -19 dB (its body is near -34 dB),
+ * so a fraction would leave it under the birds. This brings the body up to a quiet level on the
+ * master bus: present, still well under a footstep or a chime. Fades are long so it arrives softly.
  */
-const MIDDAY_GAIN = 0.15;
+const MIDDAY_GAIN = 6;
+/** Ambience (birds, crickets, wind, fire) while the song is up. One-shots stay on the master. */
+const AMBIENCE_UNDER_SONG = 0.35;
 const MIDDAY_FADE_IN = 8;
 const MIDDAY_FADE_OUT = 10;
 
 export class SoundScape {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Birds, crickets, wind and fire. Ducked while the midday song plays. */
+  private ambience: GainNode | null = null;
   private buffers = new Map<string, AudioBuffer>();
   private voiceClips: AudioBuffer[] = [];
   private loops = new Map<LoopId, { gain: GainNode; panner?: PannerNode }>();
@@ -135,6 +141,8 @@ export class SoundScape {
     comp.connect(ctx.destination);
     this.master = new GainNode(ctx, { gain: 0.8 });
     this.master.connect(comp);
+    this.ambience = new GainNode(ctx, { gain: 1 });
+    this.ambience.connect(this.master);
     for (const [id, make] of Object.entries(SYNTH)) this.buffers.set(id, make(ctx));
     for (const id of ["birds", "crickets", "wind"] as LoopId[]) this.loop(id, false);
     this.loop("crackle", true);
@@ -146,10 +154,11 @@ export class SoundScape {
     const ctx = this.ctx!;
     const gain = new GainNode(ctx, { gain: 0 });
     let panner: PannerNode | undefined;
+    const bus = this.ambience!;
     if (positional) {
       panner = this.panner(0, -100, 0);
-      gain.connect(panner).connect(this.master!);
-    } else gain.connect(this.master!);
+      gain.connect(panner).connect(bus);
+    } else gain.connect(bus);
     const src = new AudioBufferSourceNode(ctx, { buffer: this.buffers.get(id)!, loop: true });
     src.connect(gain);
     src.start();
@@ -346,10 +355,13 @@ export class SoundScape {
     if (start) this.beginSong();
   }
 
-  /** Play the decoded midday track through the master bus, fading in and out. */
+  /**
+   * Play the decoded midday track through the master bus, fading in and out, and lower the
+   * ambience with it so the song sits in front of the birds, wind and fire.
+   */
   private beginSong() {
-    const ctx = this.ctx, buffer = this.songBuffer, master = this.master;
-    if (!ctx || !buffer || !master || this.songSource) return;
+    const ctx = this.ctx, buffer = this.songBuffer, master = this.master, bed = this.ambience;
+    if (!ctx || !buffer || !master || !bed || this.songSource) return;
     const dur = buffer.duration;
     if (!(dur > 0)) return;
     const src = new AudioBufferSourceNode(ctx, { buffer });
@@ -363,6 +375,12 @@ export class SoundScape {
     g.linearRampToValueAtTime(MIDDAY_GAIN, t0 + fadeIn);
     g.linearRampToValueAtTime(MIDDAY_GAIN, t0 + dur - fadeOut);
     g.linearRampToValueAtTime(0, t0 + dur);
+    const under = bed.gain;
+    under.cancelScheduledValues(t0);
+    under.setValueAtTime(under.value, t0);
+    under.linearRampToValueAtTime(AMBIENCE_UNDER_SONG, t0 + fadeIn);
+    under.linearRampToValueAtTime(AMBIENCE_UNDER_SONG, t0 + dur - fadeOut);
+    under.linearRampToValueAtTime(1, t0 + dur);
     this.songSource = src;
     src.onended = () => {
       if (this.songSource === src) this.songSource = null;
