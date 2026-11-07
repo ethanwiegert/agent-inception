@@ -70,11 +70,11 @@ const HEAR = 70;
 const VOICES = 20;
 const STORE = "ai-sound";
 /**
- * Gain for the midday recording. The file peaks around -19.5 dB; this lands that peak near -12 dB
- * after the 0.8 master, about 6 dB above the birds and still under a footstep or a chime. Fades
- * are long so it arrives softly.
+ * Gain for the midday recording. The file peaks around -19.5 dB; this lands that peak near -18 dB
+ * after the 0.8 master, about level with the birds at their loudest. The ambience bus still ducks
+ * under it. Fades are long so it arrives softly.
  */
-const MIDDAY_GAIN = 3;
+const MIDDAY_GAIN = 1.5;
 /** Ambience (birds, crickets, wind, fire) while the song is up. One-shots stay on the master. */
 const AMBIENCE_UNDER_SONG = 0.35;
 const MIDDAY_FADE_IN = 8;
