@@ -81,7 +81,7 @@ material("cod", "item", "#7b6f5a", "plain", 1.05, 1, false, "A big sea fish.");
 
 // What plants are made of. Softer materials bend more in the wind; leaves are lumpy.
 material("bark", "item", "#6f5541", "log", 0.7, 3, true, "Rough brown bark of oaks and pines.");
-material("birch bark", "item", "#e4e1d9", "plain", 0.7, 3, true, "Papery white bark.");
+material("birch bark", "item", "#e4e1d9", "log", 0.7, 3, true, "Papery white bark.");
 material("dark bark", "item", "#474141", "plain", 0.7, 3, true, "The black bands on birches.");
 material("leaves", "item", "#517838", "leaves", 0.3, 0.2, true, "Broad green leaves.");
 material("birch leaves", "item", "#7b9841", "leaves", 0.3, 0.2, true, "Light, bright leaves.");
@@ -283,11 +283,11 @@ add("design", "oak", "A broad oak with a round crown.", {
     part("cylinder", "bark", [0.5, 1.425, 0.5], [0.34, 2.85, 0.34]),
     part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 57, 46), [0.13, 0.9, 0.13], 57, 46),
     part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 195, 46), [0.13, 0.9, 0.13], 195, 46),
-    part("sphere", "leaves", [0.5, 3.33, 0.5], [2.1, 1.8, 2.1]),
-    part("sphere", "leaves", [1.25, 3.0, 0.65], [1.7, 1.45, 1.7]),
-    part("sphere", "leaves", [-0.15, 3.15, 0.85], [1.8, 1.5, 1.8]),
-    part("sphere", "leaves", [0.35, 2.95, -0.2], [1.6, 1.35, 1.6]),
-    part("sphere", "leaves", [0.8, 3.5, 1.15], [1.5, 1.3, 1.5]),
+    part("sphere", "leaves", [0.45, 3.42, 0.48], [1.85, 1.65, 1.95]),
+    part("sphere", "leaves", [1.22, 3.04, 0.72], [1.65, 1.35, 1.55]),
+    part("sphere", "leaves", [-0.12, 3.17, 0.82], [1.7, 1.45, 1.75]),
+    part("sphere", "leaves", [0.25, 2.9, -0.22], [1.55, 1.25, 1.5]),
+    part("sphere", "leaves", [0.78, 3.65, 1.1], [1.35, 1.15, 1.4]),
   ],
 });
 
@@ -299,10 +299,10 @@ add("design", "birch", "A slim white birch with a tall, light crown.", {
     ...[0.42, 1.07, 1.72, 2.37, 3.02].map((y) =>
       part("cylinder", "dark bark", [0.5, y, 0.5], [0.25, 0.05, 0.25])
     ),
-    part("sphere", "birch leaves", [0.5, 3.8, 0.5], [1.5, 1.95, 1.5]),
-    part("sphere", "birch leaves", [0.95, 3.55, 0.6], [1.3, 1.7, 1.3]),
-    part("sphere", "birch leaves", [0.2, 3.7, 0.85], [1.3, 1.7, 1.3]),
-    part("sphere", "birch leaves", [0.45, 4.1, 0.1], [1.2, 1.6, 1.2]),
+    part("sphere", "birch leaves", [0.48, 3.85, 0.48], [1.35, 1.8, 1.4]),
+    part("sphere", "birch leaves", [0.98, 3.48, 0.62], [1.25, 1.5, 1.25]),
+    part("sphere", "birch leaves", [0.18, 3.62, 0.88], [1.2, 1.55, 1.3]),
+    part("sphere", "birch leaves", [0.38, 4.25, 0.05], [1.05, 1.35, 1.1]),
   ],
 });
 
@@ -513,7 +513,7 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
       [0.05, 0.6, 0.05],
       0,
       -154.7,
-      "body",
+      "tail",
     ),
     part("box", "cowhide", [0.5, 1.05, 1.3], [0.32, 0.34, 0.42], 0, 0, "head"),
     part("box", "snout", [0.5, 0.98, 1.52], [0.3, 0.2, 0.12], 0, 0, "head"),
@@ -547,7 +547,7 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
       })
     ),
   ],
-  joints: { head: [0.5, 1.05, 1.12], ...cowLegs.joints },
+  joints: { head: [0.5, 1.05, 1.12], tail: [0.5, 1.1, -0.1], ...cowLegs.joints },
 });
 
 add("design", "chicken", "A clucking chicken. Collect its eggs; it follows wheat.", {

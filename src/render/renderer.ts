@@ -10,7 +10,7 @@ import type { Camera } from "../camera.ts";
 import type { AgentView, AnimalView, BodyPose } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
-import { buildAnimals, buildFish, defineFishModels, FaunaModels } from "./fauna.ts";
+import { buildAnimals, buildFish, defineFishModels, FaunaModels, type FishModel } from "./fauna.ts";
 import { anyGrowing, buildObjects, buildProps, CropLooks, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
 import { GrassRenderer } from "./grass.ts";
@@ -114,7 +114,7 @@ export class Renderer {
   private bodies = new ModelBatch(new InstanceBatch());
   private floraModels: FloraModels;
   private faunaModels: FaunaModels;
-  private fishModels: number[];
+  private fishModels: FishModel[];
   /** Culled on the GPU twice: for the view (0) and for the shadow map (1). */
   private flora = new ModelBatch(new InstanceBatch(), 0, 2);
   private groundCover = new ModelBatch(new InstanceBatch(), 70, 1);
@@ -257,8 +257,12 @@ export class Renderer {
     this.updateLight(camera.target, camera.distance);
     frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
 
-    const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85)));
+    // Carry the meadow to the wider lens's edges instead of exposing a bare-ground band.
+    // The baseline radius covered the old 0.55 rad FOV; scale its reach, not its near density.
+    const fovReach = Math.tan(camera.fovY * 0.5) / Math.tan(0.55 * 0.5);
+    const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85 * fovReach)));
     fd[F.grass + 3] = radius;
+    fd[F.wind + 3] = fovReach;
     const density = Math.min(1, Math.max(0.05, this.grassDensity));
     const bladesPerBlock = Math.max(1, Math.round(look.bladesPerBlock * density));
     fd[F.grass + 1] *= Math.sqrt(look.bladesPerBlock / bladesPerBlock);
@@ -268,7 +272,7 @@ export class Renderer {
     fd[F.grassCenter + 2] = camera.worldSize[0];
     fd[F.grassCenter + 3] = camera.worldSize[1];
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
-    const blades = GrassRenderer.instanceCount(radius, bladesPerBlock);
+    const blades = GrassRenderer.instanceCount(radius, bladesPerBlock, fovReach);
     this.stats.grassBlades = blades;
 
     const encoder = device.createCommandEncoder();

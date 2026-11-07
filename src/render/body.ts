@@ -132,10 +132,10 @@ export function buildBodies(
     const work = 0.5 + 0.5 * Math.sin(t * 6);
     switch (a.anim) {
       case Anim.Walk:
-        legSwing = Math.sin(phase) * 0.65;
-        armL = -Math.sin(phase) * 0.5;
-        armR = Math.sin(phase) * 0.5;
-        bob = Math.abs(Math.cos(phase)) * 0.06;
+        legSwing = (Math.sin(phase) + Math.sin(phase * 2) * 0.1) * 0.58;
+        armL = -Math.sin(phase - 0.18) * 0.48;
+        armR = Math.sin(phase - 0.18) * 0.48;
+        bob = Math.abs(Math.cos(phase)) * 0.045;
         lean = 0.06;
         break;
       case Anim.Till:
@@ -211,6 +211,7 @@ export function buildBodies(
     identity(root);
     translate(root, a.x, a.y + bob - crouch, a.z);
     rotateY(root, a.yaw);
+    if (walking) translate(root, Math.sin(phase) * 0.025, 0, 0);
     if (fall) rotateX(root, -fall);
     const asleep = a.anim === Anim.Sleep;
     if (asleep) {
@@ -229,9 +230,11 @@ export function buildBodies(
     }
     if (!pieces.body) continue;
 
-    // The body leans from the hips.
+    // The torso counter-rotates and the arms lag a fraction behind the hips.
+    const torsoTwist = walking ? -Math.sin(phase) * 0.08 : 0;
     torso.set(root);
     joint(torso, "body");
+    rotateY(torso, torsoTwist);
     rotateX(torso, lean);
     add(pieces.body.id, torso);
 
@@ -251,8 +254,8 @@ export function buildBodies(
     if (!pieces.head) continue;
     head.set(torso);
     joint(head, "head", "body");
-    rotateY(head, headYaw);
-    rotateX(head, headPitch);
+    rotateY(head, headYaw - torsoTwist * 0.65);
+    rotateX(head, headPitch - (walking ? lean * 0.5 : 0));
     add(pieces.head.id, head);
     if (pieces.eyes) {
       const blink = asleep || (t % 4.3) < 0.12 ? 0.15 : 1;

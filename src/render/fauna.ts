@@ -1,4 +1,4 @@
-import { identity, mat4, rotateX, rotateY, scale, translate } from "../math.ts";
+import { identity, mat4, rotateX, rotateY, rotateZ, scale, translate } from "../math.ts";
 import { AnimalAnim, SPECIES } from "../sim/animals.ts";
 import type { Catalog, DesignContent, Role, Vec3 } from "../sim/catalog.ts";
 import { FISH } from "../sim/fish.ts";
@@ -135,10 +135,15 @@ export function buildAnimals(
           // Sheared sheep look trimmed until the wool grows back.
           const k = a.flags & ANIMAL_READY ? 1 : 0.78;
           scale(m, k, k, k);
+          rotateZ(m, walking ? swing * 0.02 : 0);
           break;
         }
         case "body":
+          rotateZ(m, walking ? swing * 0.025 : Math.sin(t * 1.6) * 0.008);
+          break;
         case "tail":
+          rotateY(m, Math.sin(t * 3.1) * 0.3 + (walking ? swing * 0.15 : 0));
+          rotateX(m, Math.sin(t * 2.2) * 0.08);
           break;
         default:
           if (asleep) scale(m, 1, 0.3, 1);
@@ -177,25 +182,35 @@ const FISH_LOOKS: Record<string, { length: number; back: Rgb; belly: Rgb; fin: R
   cod: { length: 0.5, back: [0.2, 0.16, 0.1], belly: [0.55, 0.52, 0.45], fin: [0.2, 0.17, 0.12] },
 };
 
-/** Template id per fish species (`FISH` order), or -1. */
-export function defineFishModels(lib: MeshLibrary): number[] {
+export interface FishModel {
+  body: number;
+  tail: number;
+  /** Tail hinge on the body's local z axis; the nose points toward +z. */
+  tailAt: number;
+}
+
+/** Articulated templates per fish species (`FISH` order). */
+export function defineFishModels(lib: MeshLibrary): FishModel[] {
   return FISH.map((def) => {
     const look = FISH_LOOKS[def.name];
-    if (!look) return -1;
     const l = look.length;
-    return lib.define(`fish.${def.name}`, (b) => {
-      // Dark back over a pale belly, a tail fin and a dorsal fin; nose toward +z.
+    const tailAt = -0.42 * l;
+    const body = lib.define(`fish.${def.name}.body`, (b) => {
+      // Dark back over a pale belly and a dorsal fin; nose toward +z.
       b.sphere(at(0, 0.02 * l, 0), [0.16 * l, 0.17 * l, 0.5 * l], { color: look.back }, {
         detail: 1,
       });
       b.sphere(at(0, -0.05 * l, 0.02 * l), [0.14 * l, 0.12 * l, 0.42 * l], { color: look.belly }, {
         detail: 1,
       });
-      b.box(rotateY(at(0, 0, -0.55 * l), Math.PI / 4), [0.03 * l, 0.3 * l, 0.25 * l], {
-        color: look.fin,
-      });
       b.box(at(0, 0.18 * l, 0), [0.02 * l, 0.12 * l, 0.3 * l], { color: look.fin });
     });
+    const tail = lib.define(`fish.${def.name}.tail`, (b) => {
+      b.box(rotateY(at(0, 0, -0.13 * l), Math.PI / 4), [0.03 * l, 0.3 * l, 0.25 * l], {
+        color: look.fin,
+      });
+    });
+    return { body, tail, tailAt };
   });
 }
 
@@ -212,12 +227,12 @@ export function buildFish(
   world: World,
   time: number,
   out: InstanceBatch,
-  ids: number[],
+  models: FishModel[],
 ) {
   for (let i = 0; i < schools.length; i += SCHOOL_STRIDE) {
     const id = schools[i], species = schools[i + 1], count = schools[i + 4];
-    const tid = ids[species];
-    if (tid === undefined || tid < 0) continue;
+    const model = models[species];
+    if (!model) continue;
     const sx = schools[i + 2], sz = schools[i + 3];
     const key = Math.floor(sz) * world.sizeX + Math.floor(sx);
     if (world.waterTop[key] < 0) continue;
@@ -242,16 +257,18 @@ export function buildFish(
       }
       identity(m);
       translate(m, x, y, z);
-      // Facing along the circle, plus a tail-driven wiggle.
-      rotateY(
-        m,
-        Math.atan2(-Math.sin(a) * dir, Math.cos(a) * dir) + Math.sin(time * 11 + f) * 0.18,
-      );
+      // The body follows the path; only the tail supplies the swimming stroke.
+      const swim = time * 11 + f;
+      rotateY(m, Math.atan2(-Math.sin(a) * dir, Math.cos(a) * dir) + Math.sin(swim) * 0.06);
       rotateX(m, pitch);
       // The water shader doesn't tint what's under it, so fish take the water's color themselves.
       const depth = Math.min(1, (surface - y) / 1.5);
       const k = 1 - wet * (0.35 + depth * 0.3);
-      out.add(tid, m, k * 0.75 + 0.25 * (1 - wet), k * 0.95 + 0.05 * (1 - wet), k);
+      const tintR = k * 0.75 + 0.25 * (1 - wet), tintG = k * 0.95 + 0.05 * (1 - wet);
+      out.add(model.body, m, tintR, tintG, k);
+      translate(m, 0, 0, model.tailAt);
+      rotateY(m, Math.sin(swim - 0.7) * 0.48 * wet);
+      out.add(model.tail, m, tintR, tintG, k);
     }
   }
 }
