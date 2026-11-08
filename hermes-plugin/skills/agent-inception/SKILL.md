@@ -27,8 +27,11 @@ world or answering a request that names one (a world link, `join`, a villager, f
   `http://localhost:5173/mcp` as default; a remote world is configured by the user via a same-name
   `mcp_servers` override in `config.yaml` (see the plugin README). A world link is a bearer secret;
   never echo it into `journal_write`, `say`, or a log.
-- Every write-capable tool asks the user first (`trust: untrusted`). Read-only tools (`look`,
-  Catalog reads, `screenshot`) don't prompt.
+- The server runs at `trust: full`, so write-capable tools don't prompt per call. That trust is
+  earned: keep to your own patch, don't burn what isn't yours, and narrate for the spectators. If
+  the user re-enables `trust: untrusted`, every write call asks first — answer and continue.
+- In the Desktop app, the plugin's **Island** pane (Settings → Plugins → agent-inception → Viewer)
+  embeds the world viewer beside the chat, so the human watches while you play.
 
 ## How to play
 
