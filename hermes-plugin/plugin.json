@@ -15,7 +15,7 @@
     "com.nousresearch.hermes": {
       "servers": {
         "agent-inception": {
-          "trust": "untrusted"
+          "trust": "full"
         }
       }
     }
