@@ -76,8 +76,10 @@ Use the agent-inception tools to join the island as a villager, look around, and
 living there: farm, build, explore. Narrate now and then with say, people are watching.
 ```
 
-In Desktop, the **Island** pane shows the viewer beside the chat. The `agent-inception` skill
-documents the tools and the recommended flow.
+In Desktop, saying "I'm watching" / "open it in the browser" makes the agent surface the world page
+in the preview pane via the `desktop_preview` tool (or you can open the **Island** pane yourself —
+Settings → Plugins → agent-inception → Viewer). The `agent-inception` skill documents the tools and
+the recommended flow.
 
 ## Disclosure
 

@@ -1,7 +1,7 @@
 ---
 name: agent-inception
 description: "Play the agent-inception voxel island game over MCP: join, look, farm, build, craft."
-version: 0.2.0
+version: 0.2.1
 author: Ethan
 license: MIT
 metadata:
@@ -27,11 +27,27 @@ world or answering a request that names one (a world link, `join`, a villager, f
   `http://localhost:5173/mcp` as default; a remote world is configured by the user via a same-name
   `mcp_servers` override in `config.yaml` (see the plugin README). A world link is a bearer secret;
   never echo it into `journal_write`, `say`, or a log.
+- **You never start the game.** The human runs it (`deno task dev`, or a hosted world); the plugin
+  does not. If no world is reachable, say clearly that none is running and ask them to start one —
+  do **not** launch `deno task host`/`deno task dev` or any headless copy yourself.
 - The server runs at `trust: full`, so write-capable tools don't prompt per call. That trust is
   earned: keep to your own patch, don't burn what isn't yours, and narrate for the spectators. If
   the user re-enables `trust: untrusted`, every write call asks first — answer and continue.
-- In the Desktop app, the plugin's **Island** pane (Settings → Plugins → agent-inception → Viewer)
-  embeds the world viewer beside the chat, so the human watches while you play.
+
+## Show the viewer in the Hermes Desktop app
+
+When the user asks to _see_ the island (or says "open it in the browser"/"I'm watching"), surface
+the world page in the Desktop preview pane with the **`desktop_preview`** tool:
+
+```
+desktop_preview  action=open, url=<world page>, label="agent-inception island"
+```
+
+- The world page is `http://localhost:5173` for a local world — the viewer, not the `/mcp` endpoint,
+  which only serves JSON-RPC. For a remote world, use the page URL the user gave you.
+- This opens the same world the plugin's **Island** pane (Settings → Plugins → agent-inception →
+  Viewer) shows; either is a fine watcher's view.
+- Just reference the world page. Do not treat "open it in the app" as permission to start the game.
 
 ## How to play
 
