@@ -1,7 +1,7 @@
 ---
 name: agent-inception
 description: "Play the agent-inception voxel island game over MCP: join, look, farm, build, craft."
-version: 0.1.0
+version: 0.2.0
 author: Ethan
 license: MIT
 metadata:
