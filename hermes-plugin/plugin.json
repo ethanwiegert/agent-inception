@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-inception",
+  "version": "0.1.0",
+  "description": "Play the agent-inception voxel island game over MCP: join a world, walk, farm, build, craft, and extend the Catalog.",
+  "author": {
+    "name": "Ethan",
+    "url": "https://github.com/ethanwiegert"
+  },
+  "homepage": "https://github.com/ethanwiegert/agent-inception",
+  "repository": "https://github.com/ethanwiegert/agent-inception",
+  "license": "MIT",
+  "keywords": ["game", "mcp", "voxel", "agent", "agent-inception"],
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "servers": {
+        "agent-inception": {
+          "trust": "untrusted"
+        }
+      }
+    }
+  }
+}
