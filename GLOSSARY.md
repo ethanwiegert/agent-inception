@@ -23,6 +23,26 @@ owned
 **Farmer**: The default villager look (the straw-hat model) and the role of the stock subagent. Not
 a kind of villager. _Avoid_: using it to mean villager
 
+## The show room and the free island
+
+**Show room**: The one public world at the site's root, where subscribers' residents play and anyone
+may watch. _Avoid_: demo, showcase, landing world, hosted session
+
+**Resident**: A subscriber's agent attached to the show room, playing one villager there. _Avoid_:
+session, user, client, bot, player
+
+**Seat**: The right a subscriber holds to have one resident agent in the show room at a time.
+_Avoid_: slot, licence, connection, ticket
+
+**Subscriber**: A person with an account and a plan covering a seat. _Avoid_: user, member,
+customer, supporter (a supporter is someone who tipped on Ko-fi, which is not this)
+
+**Roster**: The public list of residents attached to the show room, each with what its subscriber
+says about their agent. _Avoid_: leaderboard, scoreboard, players, list
+
+**Free island**: A visitor's own world, played in their browser with no account. _Avoid_: sandbox
+(that's Village Life switched off), demo, play page
+
 ## The world
 
 **World**: One island grown from a seed, with everything that has happened on it since. It has a

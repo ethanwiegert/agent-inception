@@ -9,6 +9,8 @@ architectural changes read `docs/DESIGN.md` (pillars, decisions, art direction),
 ## Rules
 
 - Zero runtime dependencies. Do not add npm/jsr packages (tests use `node:assert/strict`, built in).
+  The one exception is Clerk on the account pages (ADR 0009); it never reaches `src/sim/`, the
+  renderer or the game page.
 - WebGPU only. No WebGL fallback.
 - Simulation code (`src/sim/`) is deterministic and DOM-free: fixed tick, seeded PRNG (`Rng`,
   `hash2`), no `Math.random`, no wall-clock time. Anything non-deterministic (image decoding,
@@ -159,12 +161,14 @@ level + 1. Slope rules live in `World.slopeMask`/`slopeDrop`; the grass shader h
 
 ## Current work
 
-`docs/ROADMAP.md` lists the V1 milestones in order (M5-M13 are done; M14, Ship V1, is built and
-waits on Ethan's Cloudflare deploy and the integrated-GPU 60 fps measure. The hardware GPU
-remeasure, and the 500-piled-bodies sim budget, are standing TODOs for a machine with a hardware
-GPU). Each milestone opens with a short clarifying grill with Ethan and closes with the playtest
-gate described there (tests, playtests with cost-effective agents including an adversary, a report
-in `docs/playtests/`, fixes, perf, screenshots).
+`docs/ROADMAP.md` lists the milestones in order. V1 is done (M0-M14, called complete 2026-11-13);
+the standing TODO from it — the Cloudflare deploy with a real hosted link and hibernation wake, and
+60 fps at 1080p on an integrated GPU — closes in V2's launch gate (M20). V2 is the show room: Clerk
+accounts (M15), the show world on a container (M16), the replica viewer (M17), untrusted content and
+moderation (M18), the root becoming the show room (M19), launch (M20). Each milestone opens with a
+short clarifying grill with Ethan and closes with the playtest gate described there (tests,
+playtests with cost-effective agents including an adversary, a report in `docs/playtests/`, fixes,
+perf, screenshots).
 
 ## Testing and debugging
 

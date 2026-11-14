@@ -8,5 +8,6 @@ dist/
 !devshot/.gitkeep
 .wrangler/
 .host-profile/
+.host-profile*/
 .env
 .dev.vars

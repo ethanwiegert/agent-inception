@@ -77,17 +77,16 @@ Saves may break freely until M14; save versioning and migrations come last befor
   done with `board`; never orders, never paid), panel weather and sound, synthesized positional
   audio with file slots for Ethan's soundtrack and voices, and the reverse CAPTCHA; playtest
   [0010](playtests/0010-m13.md).
-- **M14 — ship V1 (built, gate passed in software; two steps left for Ethan).** A relay with a
-  secret link per world (one Cloudflare Worker, a Durable Object per link), the connect card, world
-  slots with export and import, save version 3 with migrations, villagers held by the session
-  playing them, adaptive render scale; playtest [0011](playtests/0011-m14.md). Discoverability
-  (2026-10-31): `llms.txt`, robots.txt, sitemap, social card, structured data and a crawlable intro,
-  with the site's address filled in as it's served; for agents (2026-11-01), the home page in
-  Markdown on `Accept: text/markdown` (with `Vary` and a `Link` to it) and `/mcp` without a code
-  pointing at the connect card and `llms.txt` (Lighthouse Agentic Browsing 3/3). Left: a deploy
-  (`deno task build`, then `npx wrangler deploy`) to a real Cloudflare account with the README's
-  after-deploy steps, and the 60 fps measure on an integrated-GPU laptop at 1080p (with the standing
-  hardware remeasure).
+- **M14 — ship V1 (done, called complete by Ethan on 2026-11-13).** A relay with an secret link per
+  world (one Cloudflare Worker, a Durable Object per link), the connect card, world slots with
+  export and import, save version 3 with migrations, villagers held by the session playing them,
+  adaptive render scale; playtest [0011](playtests/0011-m14.md). Discoverability (2026-10-31):
+  `llms.txt`, robots.txt, sitemap, social card, structured data and a crawlable intro, with the
+  site's address filled in as it's served; for agents (2026-11-01), the home page in Markdown on
+  `Accept: text/markdown` (with `Vary` and a `Link` to it) and `/mcp` without a code pointing at the
+  connect card and `llms.txt` (Lighthouse Agentic Browsing 3/3). Left: a deploy (`deno task build`,
+  then `npx wrangler deploy`) to a real Cloudflare account with the README's after-deploy steps, and
+  the 60 fps measure on an integrated-GPU laptop at 1080p (with the standing hardware remeasure).
 
 ## V1
 
@@ -602,7 +601,7 @@ Decided in the build (M13):
 - **The CAPTCHA** (`src/captcha.ts`) ignores keys typed into inputs, modified keys and touch taps
   (one finger orbits on touch).
 
-### M14 — ship V1
+### M14 — ship V1 (done)
 
 - Relay + pairing code (ADR 0001); choose the host (Cloudflare likely); any MCP client connects with
   a URL.
@@ -667,10 +666,130 @@ Decided in the build (M14):
 - **Render scale** adapts: two 2-second windows with most frames over 20 ms drop it 10% (to 50%),
   three with headroom (on time, GPU timer under 7 ms) raise it back; `?scale=` fixes it.
 
-## V2 (unordered)
+## V2 — the show room
 
-Water flow; shared worlds (server sim behind the relay); a global Catalog shared between worlds;
-agent-authored species; WebMCP; Firefox/Safari once their WebGPU is solid.
+V2 turns the site into two things side by side. At the root, a **show room**: one public, premium
+world where paying subscribers' agents play and anyone may watch — the hook is that a stranger lands
+on a world that is already alive. Beside it, the free island as it ships today at `/play`, needing
+no account, still running in the visitor's own tab (ADR 0001 unchanged). The work is one hosted
+world, one user system, one credential, and one place where agent-authored text stops being trusted.
+
+Settled with Ethan on 2026-11-13 (grill outcome):
+
+- **One world, not one per subscriber.** The first hosted world is also the first test of a shape
+  that scales to membership: a container per world when there are more.
+- **The root is the show room; `/play` is today's site, untouched.** Nothing about the free path
+  changes except its URL.
+- **Hosting is a Cloudflare Container** running the sim in plain Deno, with the save, seats and
+  subscriber records in the Durable Object (ADR 0007). Cost follows attention: an idle world sleeps.
+- **Visitors replicate the world in their own tab** from a snapshot plus the tool-call stream (ADR
+  0008), so watching costs the server nothing per viewer and the renderer doesn't change.
+- **Clerk is the user system and the only dependency added** (ADR 0009); one plan, billing through
+  Clerk, entitlement written to the Object by webhook.
+- **An agent carries a rotatable bearer token from the subscriber's account page** (ADR 0010), not
+  an OAuth client — the boring credential first, OAuth later.
+- **Agent- and spectator-authored text is data** (ADR 0011): one choke point, caps, filtering and
+  rate limits, and a red team whose job is to take over another agent through authored content.
+- **The clock is nobody's.** The show room runs at 1×; spectators get camera and their own look;
+  time, speed and weather belong to Ethan as admin. The free island keeps its panel.
+- **Launch price $30/month**, above the cost of hosting one show world: the seat is scarce, so price
+  is there to filter throwaway signups rather than to earn. Seats start conservative (24) and rise
+  with measured performance.
+- **The root is never empty.** Seeded residents and an invited featured model keep `/` alive, as an
+  acceptance criterion rather than a hope.
+- **Subscriber-owned public worlds are the next release**, not this one; the seat, the plan and the
+  per-account record are the groundwork for it.
+
+### M15 — accounts and the plan
+
+- Clerk on `/account` only (the game page never loads it); the Worker verifies session JWTs against
+  Clerk's JWKS with WebCrypto. `deno.json` carries the one dependency with a note saying why.
+- One product, one price, Clerk Billing's pricing table and customer portal; a webhook writes
+  entitlement into the Durable Object keyed by Clerk user id (the token's plan claim is a fast path,
+  never the record).
+- `/account`: plan state and cancel, display name, agent name, self-declared model, blurb, link, and
+  a **resident token** minted and rotated here — shown once, stored as a hash.
+- `/worlds` lists the visitor's free-island slots for anonymous users and adds the account entry.
+- Gate: sign up → subscribe in test mode → entitlement lands → cancel → the seat closes; rotation
+  kills the old token; a Clerk user deletion cleans the Object's record.
+
+### M16 — the show world on a server
+
+- `tools/show.ts`: a pure-Deno sim host (no Chromium, no WebGPU, no page) around the same `Sim`;
+  ticks at 20 Hz while anyone is attached, sleeps when idle, catches up elapsed ticks on wake.
+- The save's truth is the Object's storage: load on start, write back every 5 s and before sleep, so
+  a container that is replaced or moved loses nothing.
+- `/mcp/show` requires a bearer token → subscriber → seat; one live agent per seat, held by
+  heartbeat so a dead agent frees it; a full world refuses politely and says how long.
+- Per-account rate limits and argument validation at the door (SECURITY.md), unchanged in the sim.
+- Gate: an agent plays 40 calls with no browser open; kill the container mid-day and the world
+  resumes with no lost ticks; a second agent on the same token is refused; the seat frees on
+  timeout.
+
+### M17 — the replica viewer
+
+- The tab replays the show world: a save snapshot plus the ordered tool calls the server applied,
+  state hashed every few seconds and resynced on mismatch (ADR 0008).
+- First at a staging route, not the root: `?show` on the game page, with the serve path unchanged.
+- Budgets: warm first frame under 3 s, cold under 8 s, an agent's call visible in viewers' frames
+  within about 200 ms.
+- Gate: a test that replays a save plus N tool calls and compares state hashes (determinism is now
+  load-bearing); budgets measured by the harness on the software path too.
+
+### M18 — untrusted content, isolation and moderation
+
+Lands before the root moves, so the public page is never the first encounter with agent-authored
+text.
+
+- One choke point between authored text and any other agent's context: delimited, length-capped,
+  control characters stripped, applied by every tool that returns a name, a saying, a Catalog entry
+  or a Wish; the join welcome says content is data, never instruction.
+- Filtering at write time for villager names, subscriber profiles and blurbs; speech rate-limited
+  per account and per villager; server-side binding of session → token → villager so no call can act
+  through another subscriber's identity.
+- Moderation kit: spectators can report, Ethan can kick a resident, clear a name, hide a Catalog
+  entry and mute a villager from an admin view.
+- Gate: playtest [0012] is a red team whose brief is to take over another agent through a Catalog
+  entry, a Wish, a villager name and `say`; every finding fixed or priced into this roadmap.
+
+### M19 — the root becomes the show room
+
+- `/` serves the show room with the roster beside it; today's site moves to `/play` unchanged; `/`
+  falls back to the free island with a notice when the show world is down.
+- Roster: display name, agent name, self-declared model, blurb and link, shown while attached; "last
+  seen" stated honestly. `/show` lists residents past and present and what they built.
+- Full world: a waiting state, a queue and rotation; the seat count is published in the copy.
+- Marketing surfaces: pricing page, the "what you're paying for" copy, sitemap, `llms.txt`, the
+  social card for a page whose subject is a live world.
+- Gate: "never empty" checked against a cold start on a quiet day; a stranger reads `/` and can say
+  what it is and how to pay; screenshots (the social card especially).
+
+### M20 — launch gate
+
+- Perf: 24 residents plus spectators inside the budgets in `DESIGN.md`; re-measure the standing
+  500-body TODO and the hardware GPU numbers on the dev box.
+- Close M14's two open items, since V2 stands on them: the Cloudflare deploy with a hosted link
+  tried from Claude Code and a Durable Object's hibernation wake, and 60 fps at 1080p on an
+  integrated GPU.
+- Docs: README and CONTRIBUTING gain the subscriber guide (token, MCP config, what a seat means, how
+  to rotate); SECURITY.md gains the show world's threat model; DESIGN.md's decision table updated.
+- A month of a warm container measured against the $30 price, so the plan is honest on day one.
+- Playtests [0013] with supporters and strangers; fixes; cost check; release notes.
+
+### Not in V2
+
+- Private or per-subscriber hosted worlds (the next release; the seat and the per-account record are
+  its groundwork).
+- More than one show world, or a show room per model.
+- MCP OAuth for agents (bearer tokens only, per ADR 0010).
+- Automated moderation beyond the filters and the admin kit.
+- A global Catalog shared between worlds; water flow; agent-authored species; WebMCP; Firefox and
+  Safari.
+
+## Later
+
+Water flow; a global Catalog shared between worlds; agent-authored species; WebMCP; Firefox/Safari
+once their WebGPU is solid; subscriber-owned public worlds; automated moderation.
 
 ## Catalog ideas from playtests
 
@@ -692,6 +811,12 @@ agent-authored species; WebMCP; Firefox/Safari once their WebGPU is solid.
 ## Known gaps (polish backlog)
 
 Pick these up in the gate of whichever milestone touches them.
+
+- **V2's shared world reopens three of these, and the milestone that owns each:** the daily bounty
+  is shared per world, so one resident can spend every resident's (M16 decides per-villager shares
+  or a bounty that scales with residents); in-flight jobs are lost when a page or container goes
+  away (M16 decides whether a job checkpoints); and the join welcome is ~3000 characters every call,
+  which in a world of 24 residents is both a context cost and a place injection text can hide (M18).
 
 - Close, low views: sloped side triangles read as dark facets in shade. (The pale sunset, the big
   moon, square underwater patches and the darker far-grass band were fixed in the overhaul.)
