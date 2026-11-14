@@ -312,7 +312,9 @@ async function encodeShot(
   type: string,
 ): Promise<string> {
   const c = new OffscreenCanvas(shot.width, shot.height);
-  const ctx = c.getContext("2d")!;
+  // A CPU canvas: it is only written once and encoded, and a GPU-backed one loses putImageData
+  // on some adapters (Chromium on Vulkan), which left hardware screenshots blank.
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
   ctx.putImageData(new ImageData(shot.data, shot.width, shot.height), 0, 0);
   ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "center";
