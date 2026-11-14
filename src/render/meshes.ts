@@ -315,6 +315,11 @@ export interface MeshRange {
   baseVertex: number;
   /** Bounding radius around the template origin, for culling. */
   radius: number;
+  /**
+   * The coarser mesh drawn for shadows and far-away instances: its own slice appended after all
+   * the full meshes, or this range's slice again when the template has no low mesh.
+   */
+  low: { firstIndex: number; indexCount: number; baseVertex: number };
 }
 
 /**
@@ -325,11 +330,21 @@ export class MeshLibrary {
   version = 0;
   private names = new Map<string, number>();
   private meshes: MeshBuilder[] = [];
+  private lows: (MeshBuilder | null)[] = [];
 
-  /** Add or replace a template; returns its id. */
-  define(name: string, build: (b: MeshBuilder) => void): number {
+  /**
+   * Add or replace a template; returns its id. `low` builds a coarser mesh of the same shape,
+   * kept only if it has fewer indices than the full one.
+   */
+  define(name: string, build: (b: MeshBuilder) => void, low?: (b: MeshBuilder) => void): number {
     const b = new MeshBuilder();
     build(b);
+    let l: MeshBuilder | null = null;
+    if (low) {
+      const lb = new MeshBuilder();
+      low(lb);
+      if (lb.indices.length < b.indices.length) l = lb;
+    }
     let id = this.names.get(name);
     if (id === undefined) {
       id = this.meshes.length;
@@ -338,6 +353,7 @@ export class MeshLibrary {
     } else {
       this.meshes[id] = b;
     }
+    this.lows[id] = l;
     this.version++;
     return id;
   }
@@ -359,6 +375,9 @@ export class MeshLibrary {
   } {
     let vertexCount = 0, indexCount = 0;
     for (const m of this.meshes) vertexCount += m.vertexCount, indexCount += m.indices.length;
+    for (const m of this.lows) {
+      if (m) vertexCount += m.vertexCount, indexCount += m.indices.length;
+    }
     const vertices = new Uint8Array(Math.max(1, vertexCount) * VERTEX_BYTES);
     const view = new DataView(vertices.buffer);
     const indices = new Uint32Array(Math.max(1, indexCount));
@@ -366,7 +385,7 @@ export class MeshLibrary {
     let v = 0, ix = 0;
     const snorm = (x: number) => Math.round(Math.max(-1, Math.min(1, x)) * 127);
     const srgb = (x: number) => Math.round(Math.pow(Math.max(0, Math.min(1, x)), 1 / 2.2) * 255);
-    for (const m of this.meshes) {
+    const emit = (m: MeshBuilder) => {
       let radius = 0;
       for (let i = 0; i < m.vertexCount; i++) {
         const o = (v + i) * VERTEX_BYTES;
@@ -381,10 +400,23 @@ export class MeshLibrary {
         view.setUint8(o + 19, Math.round(Math.max(0, Math.min(1, m.sways[i])) * 255));
       }
       indices.set(m.indices, ix);
-      ranges.push({ firstIndex: ix, indexCount: m.indices.length, baseVertex: v, radius });
+      const r = { firstIndex: ix, indexCount: m.indices.length, baseVertex: v, radius };
       v += m.vertexCount;
       ix += m.indices.length;
+      return r;
+    };
+    // Full meshes first so their slices never move when a low mesh appears; the lows follow.
+    for (const m of this.meshes) {
+      const r = emit(m);
+      ranges.push({
+        ...r,
+        low: { firstIndex: r.firstIndex, indexCount: r.indexCount, baseVertex: r.baseVertex },
+      });
     }
+    this.meshes.forEach((_, i) => {
+      const low = this.lows[i];
+      if (low) ranges[i].low = emit(low);
+    });
     return { vertices, indices, ranges };
   }
 }

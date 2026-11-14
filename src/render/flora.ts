@@ -35,6 +35,7 @@ export class FloraModels {
       id = this.lib.define(
         `design:${design}`,
         (b) => meshDesign(b, catalog, e.content as DesignContent, { role: null }),
+        (b) => meshDesign(b, catalog, e.content as DesignContent, { role: null, low: true }),
       );
     }
     this.ids.set(design, id);
@@ -60,6 +61,12 @@ export class FloraModels {
           meshDesign(b, catalog, d, {
             only: (p, i) => of[i] === piece && !movesAlone(p.part),
             sway: false,
+          }),
+        (b) =>
+          meshDesign(b, catalog, d, {
+            only: (p, i) => of[i] === piece && !movesAlone(p.part),
+            sway: false,
+            low: true,
           }),
       );
     }

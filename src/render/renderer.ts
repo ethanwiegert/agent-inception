@@ -36,6 +36,9 @@ export interface Layouts {
 }
 
 const SHADOW_SIZE = 2048;
+/** Blocks from the eye past which props draw with their low mesh (a crown is then too small on
+ *  screen for its baked grain to show). The shadow map passes 0: every shadow draws low. */
+const LOD_DISTANCE = 110;
 
 /** What's in the world this frame besides terrain. */
 export interface SceneState {
@@ -278,9 +281,9 @@ export class Renderer {
     const encoder = device.createCommandEncoder();
     if (!this.debug.has("props")) {
       const cull = encoder.beginComputePass({ label: "models-cull" });
-      this.models.cull(cull, this.flora, 0, this.planes, camera.eye);
-      this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye);
-      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye);
+      this.models.cull(cull, this.flora, 0, this.planes, camera.eye, LOD_DISTANCE);
+      this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye, 0);
+      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye, LOD_DISTANCE);
       cull.end();
     }
 

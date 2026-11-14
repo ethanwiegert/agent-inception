@@ -96,7 +96,7 @@ struct Args {
   baseVertex: i32,
   firstInstance: u32,
 };
-struct Cull { planes: array<vec4f, 6>, eye: vec3f, fade: f32, count: u32 };
+struct Cull { planes: array<vec4f, 6>, eye: vec3f, fade: f32, count: u32, templates: u32, lod: f32 };
 @group(0) @binding(0) var<uniform> cull: Cull;
 @group(0) @binding(1) var<storage, read> src: array<Instance>;
 @group(0) @binding(2) var<storage, read> templates: array<u32>;
@@ -117,9 +117,12 @@ struct Cull { planes: array<vec4f, 6>, eye: vec3f, fade: f32, count: u32 };
     let plane = cull.planes[p];
     if (dot(plane.xyz, c) + plane.w < -r * length(plane.xyz)) { return; }
   }
-  if (cull.fade > 0.0 && distance(c, cull.eye) > cull.fade) { return; }
-  let k = atomicAdd(&args[t].instanceCount, 1u);
-  dst[args[t].firstInstance + k] = inst;
+  let d = distance(c, cull.eye);
+  if (cull.fade > 0.0 && d > cull.fade) { return; }
+  // Near survivors pack into template t's record, far ones into its low-mesh record.
+  let slot = select(t, cull.templates + t, d >= cull.lod);
+  let k = atomicAdd(&args[slot].instanceCount, 1u);
+  dst[args[slot].firstInstance + k] = inst;
 }
 `;
 
@@ -152,14 +155,15 @@ export class ModelBatch {
   bindGroup: GPUBindGroup | null = null;
   /** Template ids per instance, read by the cull pass. */
   private ids: GPUBuffer | null = null;
-  /** Templates the instances were sorted for. */
-  private templates = 0;
+  /** Templates the instances were sorted for; the args buffer holds 2 records per template. */
+  templates = 0;
   /** Fresh draw arguments (no instances yet) per template, copied in before each cull. */
   private argsInit = new Uint32Array(0);
   views: CullView[] = [];
   /** The template radii the cull bind groups read; rebound when the library repacks. */
   private boundRadii: GPUBuffer | null = null;
   private cullData = new Float32Array(32);
+  private cullU32 = new Uint32Array(this.cullData.buffer);
 
   /**
    * `fade`: instances farther than this from the camera aren't drawn (0 = always drawn).
@@ -190,7 +194,7 @@ export class ModelBatch {
       );
     }
     const views = cull ? this.cullViews : 0;
-    const argsTooSmall = views > 0 && (this.views[0]?.args.size ?? 0) < templates * ARGS_BYTES;
+    const argsTooSmall = views > 0 && (this.views[0]?.args.size ?? 0) < templates * 2 * ARGS_BYTES;
     if (!this.buffer || this.buffer.size < bytes || this.views.length !== views || argsTooSmall) {
       this.buffer?.destroy();
       this.ids?.destroy();
@@ -208,9 +212,10 @@ export class ModelBatch {
       });
       this.views = [];
       for (let v = 0; v < views; v++) {
-        const instances = device.createBuffer({ size, usage: GPUBufferUsage.STORAGE });
+        // The low records' survivors pack into a second region starting at instance `count`.
+        const instances = device.createBuffer({ size: size * 2, usage: GPUBufferUsage.STORAGE });
         const args = device.createBuffer({
-          size: Math.max(ARGS_BYTES, templates * ARGS_BYTES),
+          size: Math.max(ARGS_BYTES, templates * 2 * ARGS_BYTES),
           usage: GPUBufferUsage.INDIRECT | storage,
         });
         const uniform = device.createBuffer({
@@ -249,6 +254,7 @@ export class ModelBatch {
     eye: Vec3,
     ranges: MeshRange[],
     cull: { layout: GPUBindGroupLayout; radii: GPUBuffer },
+    lod: number,
   ) {
     const view = this.views[v];
     if (!view || !this.instances.count) return;
@@ -273,7 +279,9 @@ export class ModelBatch {
     d.set(planes, 0);
     d.set(eye, 24);
     d[27] = this.fade;
-    new Uint32Array(d.buffer)[28] = this.instances.count;
+    this.cullU32[28] = this.instances.count;
+    this.cullU32[29] = this.templates;
+    d[30] = lod;
     device.queue.writeBuffer(view.uniform, 0, d);
     device.queue.writeBuffer(view.args, 0, this.argsInit);
     pass.setBindGroup(0, view.cullGroup!);
@@ -282,7 +290,7 @@ export class ModelBatch {
 
   private fillArgs(ranges: MeshRange[]) {
     const n = this.templates, b = this.instances;
-    if (this.argsInit.length !== n * 5) this.argsInit = new Uint32Array(n * 5);
+    if (this.argsInit.length !== n * 10) this.argsInit = new Uint32Array(n * 10);
     const args = this.argsInit;
     for (let t = 0; t < n; t++) {
       const r = ranges[t];
@@ -291,6 +299,13 @@ export class ModelBatch {
       args[t * 5 + 2] = r ? r.firstIndex : 0;
       args[t * 5 + 3] = r ? r.baseVertex : 0;
       args[t * 5 + 4] = b.first[t];
+      // The low mesh's record: survivors pack after all `count` of the full records' region.
+      const l = r?.low;
+      args[(n + t) * 5] = l ? l.indexCount : 0;
+      args[(n + t) * 5 + 1] = 0;
+      args[(n + t) * 5 + 2] = l ? l.firstIndex : 0;
+      args[(n + t) * 5 + 3] = l ? l.baseVertex : 0;
+      args[(n + t) * 5 + 4] = b.count + b.first[t];
     }
   }
 }
@@ -306,6 +321,8 @@ export class ModelRenderer {
   /** GPU culling needs indirect draws that start at an instance offset. */
   private culling: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout } | null = null;
   private radii: GPUBuffer | null = null;
+  /** The bind-group inputs every batch's cull shares; rebuilt when the radii buffer moves. */
+  private cullBind: { layout: GPUBindGroupLayout; radii: GPUBuffer } | null = null;
 
   constructor(private device: GPUDevice, layouts: Layouts, readonly library: MeshLibrary) {
     if (device.features.has("indirect-first-instance")) {
@@ -395,37 +412,39 @@ export class ModelRenderer {
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
       this.device.queue.writeBuffer(this.radii, 0, radii);
+      this.cullBind = { layout: this.culling.layout, radii: this.radii };
     }
   }
 
   upload(batch: ModelBatch) {
     this.syncLibrary();
-    const cull = this.culling && this.radii
-      ? { layout: this.culling.layout, radii: this.radii }
-      : null;
-    batch.upload(this.device, this.layout, this.library.size, cull);
+    batch.upload(this.device, this.layout, this.library.size, this.cullBind);
   }
 
-  /** Cull `batch` for its view `view` against `planes`; draw it with the same view index. */
+  /**
+   * Cull `batch` for its view `view` against `planes`; draw it with the same view index. `lod` is
+   * the distance from `eye` at and beyond which an instance is drawn with its low mesh; 0 draws
+   * every instance low.
+   */
   cull(
     pass: GPUComputePassEncoder,
     batch: ModelBatch,
     view: number,
     planes: Float32Array,
     eye: Vec3,
+    lod: number,
   ) {
-    if (!this.culling || !this.radii) return;
+    if (!this.culling || !this.cullBind) return;
     pass.setPipeline(this.culling.pipeline);
-    const cull = { layout: this.culling.layout, radii: this.radii };
-    batch.cull(this.device, pass, view, planes, eye, this.ranges, cull);
+    batch.cull(this.device, pass, view, planes, eye, this.ranges, this.cullBind, lod);
   }
 
   draw(pass: GPURenderPassEncoder, batch: ModelBatch, view = 0) {
-    this.drawWith(pass, this.pipeline, batch, view);
+    this.drawWith(pass, this.pipeline, batch, view, false);
   }
 
   drawShadow(pass: GPURenderPassEncoder, batch: ModelBatch, view = 0) {
-    this.drawWith(pass, this.shadowPipeline, batch, view);
+    this.drawWith(pass, this.shadowPipeline, batch, view, true);
   }
 
   private drawWith(
@@ -433,6 +452,7 @@ export class ModelRenderer {
     pipeline: GPURenderPipeline,
     batch: ModelBatch,
     view: number,
+    low: boolean,
   ) {
     const b = batch.instances;
     if (!b.count || !batch.bindGroup || !this.vertices || !this.indices) return;
@@ -446,9 +466,10 @@ export class ModelRenderer {
       if (!n) continue;
       if (culled) {
         pass.drawIndexedIndirect(culled.args, t * ARGS_BYTES);
+        pass.drawIndexedIndirect(culled.args, (batch.templates + t) * ARGS_BYTES);
         continue;
       }
-      const r = this.ranges[t];
+      const r = low ? this.ranges[t].low : this.ranges[t];
       pass.drawIndexed(r.indexCount, n, r.firstIndex, r.baseVertex, b.first[t]);
     }
   }
