@@ -276,15 +276,8 @@ function posed(pose: BodyPose) {
 /** One piece's template at its pose; `lit` below 0 darkens its lamps. */
 function addPose(out: InstanceBatch, pose: BodyPose, tid: number, lit = 1) {
   if (tid < 0) return;
-  const [x, y, z, w] = pose.rot;
   // translate(pos) · R(rot) · translate(ANCHOR): the template's origin is the Design's anchor.
-  m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y + z * w), m[2] = 2 * (x * z - y * w);
-  m[3] = 0;
-  m[4] = 2 * (x * y - z * w), m[5] = 1 - 2 * (x * x + z * z), m[6] = 2 * (y * z + x * w);
-  m[7] = 0;
-  m[8] = 2 * (x * z + y * w), m[9] = 2 * (y * z - x * w), m[10] = 1 - 2 * (x * x + y * y);
-  m[11] = 0;
-  m[12] = pose.pos[0], m[13] = pose.pos[1], m[14] = pose.pos[2], m[15] = 1;
+  posed(pose);
   translate(m, ANCHOR[0], ANCHOR[1], ANCHOR[2]);
   out.add(tid, m, 1, 1, 1, lit);
 }
