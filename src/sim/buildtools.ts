@@ -199,10 +199,14 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           leftInColumn--;
         }
       }
-      const rest = cols.slice(i);
+      // A column run out of mid-stack is re-asked for: with a picked y it resumes whole (its
+      // filled cells refuse and the missing layers land); stacking on the ground, the call
+      // needs only the layers still missing.
       const carry = carryOn(
-        ranOut && leftInColumn ? [[cols[i - 1][0], cols[i - 1][1], leftInColumn]] : [],
-        rest,
+        ranOut && leftInColumn && y0 === undefined
+          ? [[cols[i - 1][0], cols[i - 1][1], leftInColumn]]
+          : [],
+        cols.slice(ranOut && y0 === undefined ? i : ranOut ? i - 1 : i),
       );
       const again = [
         block.name,

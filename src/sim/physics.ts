@@ -263,6 +263,15 @@ export function yawQuat(a: number): Quat {
   return [0, Math.sin(a / 2), 0, Math.cos(a / 2)];
 }
 
+/**
+ * The poseBoxes origin for a body Design a villager wears at (x, y, z): the renderer draws
+ * part `at` at pos + R·(at − ANCHOR), so a matching pose passes pos − R·[0.5, 0, 0.5].
+ */
+export function wornPos(x: number, y: number, z: number, yaw: number): Vec3 {
+  const R = quatMatrix(yawQuat(yaw), new Float64Array(9));
+  return [x - (R[0] + R[2]) / 2, y - (R[3] + R[5]) / 2, z - (R[6] + R[8]) / 2];
+}
+
 export function quatMul(a: ArrayLike<number>, b: ArrayLike<number>): Quat {
   return [
     a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],

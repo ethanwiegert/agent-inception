@@ -342,7 +342,11 @@ export class SimClient {
       this.fires = msg.fires;
       this.firesVersion++;
     }
-    if (msg.objects || msg.bodies || msg.fires || msg.catalog || msg.edits.length) {
+    // Villagers' worn-body lights ride on positions and profiles, which stream every tick.
+    if (
+      msg.objects || msg.bodies || msg.fires || msg.catalog || msg.agents || msg.profiles ||
+      msg.edits.length
+    ) {
       this.lightStale = true;
     }
     if (msg.bodies) {

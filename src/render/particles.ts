@@ -6,7 +6,7 @@ import {
 } from "../sim/catalog.ts";
 import { deviceLit } from "../sim/light.ts";
 import type { Objects } from "../sim/objects.ts";
-import { poseBoxes, yawQuat } from "../sim/physics.ts";
+import { poseBoxes, wornPos, yawQuat } from "../sim/physics.ts";
 import { FIRE_STRIDE } from "../sim/protocol.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { BodyPose } from "../simclient.ts";
@@ -296,14 +296,22 @@ export class ParticleRenderer {
     }
     // The same for a body a villager wears: its flame and lamp parts burn, never switched.
     for (const a of agents) {
-      if (a.body === null) continue;
-      const e = catalog.get(a.body);
-      if (e?.kind !== "design") continue;
-      const des = e.content as DesignContent;
+      // The body shown: the Design they chose while it lives and is a body, else the farmer.
+      const chosen = a.body === null ? undefined : catalog.get(a.body);
+      let design = chosen && catalog.current(chosen);
+      if (
+        design?.kind !== "design" ||
+        !(design.content as DesignContent).parts.some((p) => p.role === "body")
+      ) {
+        const farmer = catalog.byName("farmer");
+        design = farmer && catalog.current(farmer);
+      }
+      if (design?.kind !== "design") continue;
+      const des = design.content as DesignContent;
       if (!des.parts.some((p) => deviceKind(p.part) === "flame" || deviceKind(p.part) === "lamp")) {
         continue;
       }
-      shine(~a.id, des, poseBoxes(des, [a.x, a.y, a.z], yawQuat(a.yaw)), () => true);
+      shine(~a.id, des, poseBoxes(des, wornPos(a.x, a.y, a.z, a.yaw), yawQuat(a.yaw)), () => true);
     }
     // Wild fire: flames over what burns, smoke rising from it.
     for (let i = 0; i < fires.length; i += FIRE_STRIDE) {

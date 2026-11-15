@@ -1,6 +1,6 @@
 import type { Catalog, DesignContent, MaterialContent } from "./catalog.ts";
 import { deviceKind } from "./catalog.ts";
-import { poseBoxes, type Quat, yawQuat } from "./physics.ts";
+import { poseBoxes, type Quat, wornPos, yawQuat } from "./physics.ts";
 import type { BlockRegistry } from "./blocks.ts";
 import type { WorldObject } from "./objects.ts";
 import { solid, type World } from "./world.ts";
@@ -402,12 +402,20 @@ export function lightSources(inp: LightInputs): LightSource[] {
   }
   // A body Design's lit parts shine too (they can't be switched: a villager's lamp always burns).
   for (const a of inp.agents ?? []) {
-    if (a.body === null) continue;
-    const e = inp.catalog.get(a.body);
-    if (e?.kind !== "design") continue;
-    const d = e.content as DesignContent;
+    // The body shown: the Design they chose while it lives and is a body, else the farmer.
+    const chosen = a.body === null ? undefined : inp.catalog.get(a.body);
+    let design = chosen && inp.catalog.current(chosen);
+    if (
+      design?.kind !== "design" ||
+      !(design.content as DesignContent).parts.some((p) => p.role === "body")
+    ) {
+      const farmer = inp.catalog.byName("farmer");
+      design = farmer && inp.catalog.current(farmer);
+    }
+    if (design?.kind !== "design") continue;
+    const d = design.content as DesignContent;
     if (!emits(d)) continue;
-    emit(`a${a.id}`, d, poseBoxes(d, [a.x, a.y, a.z], yawQuat(a.yaw)), () => true);
+    emit(`a${a.id}`, d, poseBoxes(d, wornPos(a.x, a.y, a.z, a.yaw), yawQuat(a.yaw)), () => true);
   }
   // Glowing blocks light in groups of 2 × 2 × 2 cells (a glowing wall isn't a hundred lamps):
   // from the middle of a group's blocks that aren't buried, at the brightest of them.

@@ -247,7 +247,7 @@ Deno.test("build never shuts the builder inside their own hut or strands them on
 });
 
 Deno.test("place_block running out names the columns and layers left to call for", () => {
-  const { sim, fern, x, z, h } = site();
+  const { sim, fern, x, z, h } = site(8, 4);
   // 20 planks over 4×4 columns three high: six columns whole, the seventh one short.
   fern.inventory.planks = 20;
   const text = ok(
@@ -263,6 +263,25 @@ Deno.test("place_block running out names the columns and layers left to call for
   fern.inventory.planks = 28;
   carryOnAll(sim, "place_block", { block: "planks", layers: 3 }, text);
   for (let dx = 0; dx < 4; dx++) {
+    for (let dz = 0; dz < 4; dz++) assert(sim.world.get(x + dx, h + 3, z + dz) === Block.Planks);
+  }
+  // With a picked y the short column re-asks whole, and the carry-on tops it off.
+  fern.inventory.planks = 20;
+  const again = ok(
+    run(sim, "a", "place_block", {
+      x: x + 4,
+      z,
+      width: 4,
+      depth: 4,
+      layers: 3,
+      y: h + 1,
+      block: "planks",
+    }),
+  );
+  assert(again.includes("call place_block again"), again);
+  fern.inventory.planks = 28;
+  carryOnAll(sim, "place_block", { block: "planks", layers: 3, y: h + 1 }, again);
+  for (let dx = 4; dx < 8; dx++) {
     for (let dz = 0; dz < 4; dz++) assert(sim.world.get(x + dx, h + 3, z + dz) === Block.Planks);
   }
 });
