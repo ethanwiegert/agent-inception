@@ -68,26 +68,32 @@ fn floorAt(xz: vec2f) -> f32 {
   return mix(mix(h[0], h[1], f.x), mix(h[2], h[3], f.x), f.y);
 }
 
-fn waveSlope(xz: vec2f, t: f32) -> vec2f {
+/**
+ * The water's slope at xz. reach is how far xz moves across one pixel: a wave finer than the
+ * pixels it lands on fades out, where it used to alias into moiré rings on the far sea.
+ */
+fn waveSlope(xz: vec2f, t: f32, reach: f32) -> vec2f {
   var g = vec2f(0.0);
   let dirs = array<vec2f, 4>(vec2f(0.8, 0.6), vec2f(-0.4, 0.9), vec2f(0.95, -0.3), vec2f(-0.7, -0.7));
   let freqs = array<f32, 4>(0.9, 1.7, 3.1, 5.3);
   let amps = array<f32, 4>(0.05, 0.03, 0.016, 0.008);
   for (var i = 0; i < 4; i++) {
     let phase = dot(dirs[i], xz) * freqs[i] + t * (1.2 + f32(i) * 0.4);
-    g += dirs[i] * cos(phase) * amps[i] * freqs[i];
+    // freqs[i] * reach: the radians this wave turns from one pixel to the next, at most.
+    g += dirs[i] * cos(phase) * amps[i] * freqs[i] * (1.0 - smoothstep(0.5, 1.6, freqs[i] * reach));
   }
   // Fine noise ripples break up the regular sines.
   let e = 0.15;
   let r = xz * 2.3 + vec2f(t * 0.6, -t * 0.45);
   g += vec2f(valueNoise(r + vec2f(e, 0.0)) - valueNoise(r - vec2f(e, 0.0)),
-             valueNoise(r + vec2f(0.0, e)) - valueNoise(r - vec2f(0.0, e))) * 0.12;
+             valueNoise(r + vec2f(0.0, e)) - valueNoise(r - vec2f(0.0, e))) * 0.12 *
+    (1.0 - smoothstep(0.25, 0.8, 2.3 * reach));
   return g;
 }
 
 fn shadeWater(world: vec3f) -> vec4f {
   let t = frame.cameraPos.w;
-  let g = waveSlope(world.xz, t);
+  let g = waveSlope(world.xz, t, max(length(dpdx(world.xz)), length(dpdy(world.xz))));
   let n = normalize(vec3f(-g.x, 1.0, -g.y));
   let toEye = frame.cameraPos.xyz - world;
   let view = normalize(toEye);
@@ -112,8 +118,10 @@ fn shadeWater(world: vec3f) -> vec4f {
   let foam = smoothstep(0.35, 0.0, depth) * smoothstep(0.08, 0.25, foamNoise + 0.15);
   color = mix(color, (ambient + frame.sunColor.rgb * frame.sunDir.w * light * 0.5) * 0.9, foam);
 
-  // The floor below is already darkened by absorption, so the surface itself can stay fairly clear.
-  let alpha = clamp(max(mix(0.25, 0.85, smoothstep(0.0, 3.5, depth)), fresnel) + foam, 0.0, 1.0);
+  // The floor below is already darkened by absorption, so the surface itself can stay fairly
+  // clear. Deep water hides its floor: the open sea has none, and the world's edge would show.
+  let clear = mix(0.25, 0.85, smoothstep(0.0, 3.5, depth)) + 0.15 * smoothstep(3.5, 6.5, depth);
+  let alpha = clamp(max(clear, fresnel) + foam, 0.0, 1.0);
   return vec4f(fog(color, world), alpha);
 }
 
@@ -122,9 +130,11 @@ fn shadeWater(world: vec3f) -> vec4f {
 }
 
 @fragment fn fsOcean(in: Out) -> @location(0) vec4f {
-  // Inside the world the per-column water takes over.
+  // Inside the world the per-column water takes over. The two overlap by a pixel, or the sky
+  // would show between them as a dotted line.
   let size = vec2f(textureDimensions(surface));
-  if (all(in.world.xz >= vec2f(0.0)) && all(in.world.xz <= size)) { discard; }
+  let edge = fwidth(in.world.xz);
+  if (all(in.world.xz >= edge) && all(in.world.xz <= size - edge)) { discard; }
   return shadeWater(in.world);
 }
 `;
