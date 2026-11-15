@@ -244,3 +244,15 @@ export function clock(t: number): string {
   const m = Math.floor(t * 24 * 60);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+
+/** Game time in words: "just now", "1 game minute", then minutes, hours (from 90) and days. */
+export const gameMinutes = (n: number) =>
+  n < 1
+    ? "just now"
+    : n < 2
+    ? "1 game minute"
+    : n < 90
+    ? `${Math.floor(n)} game minutes`
+    : n < 2160
+    ? `${Math.round(n / 60)} game hours`
+    : `${Math.round(n / 1440)} game days`;

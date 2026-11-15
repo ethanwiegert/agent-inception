@@ -109,6 +109,35 @@ Deno.test("a lamp lights the night around it; walls stop the light; use switches
   assert(sim.lightAt(x + 3, g, z + 10) > 0.4, "daylight");
 });
 
+Deno.test("look reads the light above a slope, not a roof over it", () => {
+  const { sim, fern, x, z, h } = site();
+  sim.setTimeOfDay(0.5);
+  const w = sim.world;
+  const fx = Math.floor(fern.x), fz = Math.floor(fern.z);
+  let sx = -1, sz = -1;
+  outer: for (let r = 0; r < 80 && sx < 0; r++) {
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const tx = fx + dx, tz = fz + dz;
+        if (!w.slopeMask(tx, tz)) continue;
+        if (w.surfaceY(tx + 0.5, tz + 0.5) !== w.heightAt(tx, tz)) continue;
+        if (w.waterTop[tz * w.sizeX + tx] >= 0 || w.blocked(tx, tz)) continue;
+        sx = tx, sz = tz;
+        break outer;
+      }
+    }
+  }
+  assert(sx >= 0, "a sloped tile in reach");
+  fern.x = sx + 0.5, fern.z = sz + 0.5, fern.y = w.surfaceY(fern.x, fern.z);
+  const open = ok(run(sim, "a", "look")).split("\n")[0];
+  assert(open.includes("(daylight)") && !open.includes("under a roof"), open);
+  fern.x = x + 0.5, fern.z = z + 0.5, fern.y = w.surfaceY(fern.x, fern.z);
+  sim.setBlock(x, h + 3, z, Block.Stone);
+  const roofed = ok(run(sim, "a", "look")).split("\n")[0];
+  assert(roofed.includes("(under a roof)"), roofed);
+});
+
 Deno.test("glowing blocks light a room unless they're buried; light conditions in Rules", () => {
   const { sim, fern, x, z, g } = site();
   sim.setTimeOfDay(0.95);

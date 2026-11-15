@@ -260,3 +260,21 @@ Deno.test("a world holds a capped number of villagers, so joins can't swell a sa
   assert(r.isError && r.text.includes("villagers"), r.text);
   assertEquals(sim.agents.length, MAX_VILLAGERS);
 });
+
+Deno.test("a call that moved the villager says where they are now", () => {
+  const sim = new Sim(1337);
+  run(sim, "a", "join", { name: "Fern" });
+  const fern = sim.agents[0];
+  const home = [Math.floor(fern.x), Math.floor(fern.z)];
+  const till = run(sim, "a", "till", { x: home[0] + 2, z: home[1] - 1, width: 3, depth: 2 });
+  const at = `You're now at x=${Math.floor(fern.x)} z=${Math.floor(fern.z)}.`;
+  assert(!till.isError && till.text.includes(at), till.text);
+  assert(
+    Math.floor(fern.x) !== home[0] || Math.floor(fern.z) !== home[1],
+    "tilling walked the villager off the home tile",
+  );
+  const waited = run(sim, "a", "wait", { seconds: 1 });
+  assert(!waited.isError && !waited.text.includes("You're now at"), waited.text);
+  const walked = run(sim, "a", "walk_to", { x: home[0], z: home[1] });
+  assertEquals(walked.text, `You arrive. You're now at x=${home[0]} z=${home[1]}.`);
+});

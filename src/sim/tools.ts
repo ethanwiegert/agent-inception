@@ -5,6 +5,7 @@ import {
   areaArgs,
   type Args,
   clock,
+  gameMinutes,
   give,
   type Handler,
   inventoryText,
@@ -308,9 +309,11 @@ function join(sim: Sim, session: string, args: Args): string {
   }
   let agent = sim.agents.find((a) => a.name.toLowerCase() === name.toLowerCase());
   const returning = !!agent;
-  if (agent && sim.sessions.get(session) !== agent) {
-    const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
-    const held = given && agent.key && given === normalKey(agent.key) ? null : heldBy(sim, agent);
+  const same = !!agent && sim.sessions.get(session) === agent;
+  const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
+  const keyed = !!agent && !!given && !!agent.key && given === normalKey(agent.key);
+  if (agent && !same) {
+    const held = keyed ? null : heldBy(sim, agent);
     if (held) {
       throw new Error(
         given ? `That rejoin key isn't ${agent.name}'s latest one. ${held}` : held,
@@ -330,8 +333,23 @@ function join(sim: Sim, session: string, args: Args): string {
   agent.key = rejoinKey(session, agent.id, sim.tick);
   const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
   sim.fire("joined", agent, fx, sim.world.heightAt(fx, fz), fz, agent.name);
-  return (returning ? `Welcome back, ${agent.name}.` : `Welcome, ${agent.name}.`) +
-    ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
+  const hello = `${returning ? "Welcome back" : "Welcome"}, ${agent.name}.` +
+    ` You're standing at x=${fx} z=${fz} in a meadow.\n`;
+  const rejoin = `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
+    `${agent.name} is held, join with your name and this key to step straight back in.`;
+  if (returning && (same || keyed)) {
+    return hello +
+      "Your inventory and journal are as you left them. This is a slow, peaceful village " +
+      "that people watch: farm, build, craft and add to the Catalog with your tools (each " +
+      "tool's description says how), and narrate now and then with say. " +
+      `${catalogSummary(sim)}\n` +
+      `${villageText(sim, agent)}\n` +
+      (agent.journal.length
+        ? "Start with look, and journal_read for your notes from before."
+        : "Start with look.") +
+      rejoin;
+  }
+  return hello +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
     "to ripen, harvest, and build what you like: place_block lays a floor or raises a wall in " +
     "one call, break_block digs, and build puts up a whole Design (its blocks, and its parts as " +
@@ -357,8 +375,7 @@ function join(sim: Sim, session: string, args: Args): string {
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "") +
-    `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
-    `${agent.name} is held, join with your name and this key to step straight back in.`;
+    rejoin;
 }
 
 const KEY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -404,13 +421,13 @@ function heldBy(sim: Sim, agent: Agent): string | null {
       ? "busy right now"
       : ago < 1
       ? "they called just now"
-      : `their last call was ${minutes(ago)} ago`
+      : `their last call was ${gameMinutes(ago)} ago`
   }). If that was you before your connection reset, join again with the rejoin key your last ` +
     `join gave you, or ask the human watching to free the villagers (the panel's agents section). Otherwise join with a name of your own. A villager is ` +
     `free to rejoin once its agent has made no call for a game day${
       agent.queue.length
         ? ""
-        : `: ${agent.name} is free in ${minutes(freeIn)} (${
+        : `: ${agent.name} is free in ${gameMinutes(freeIn)} (${
           realMinutes(HOLD_TICKS - idle)
         } at normal speed)`
     }.`;
@@ -421,8 +438,6 @@ const realMinutes = (ticks: number) => {
   const n = Math.max(1, Math.ceil(ticks / TICK_HZ / 60));
   return n === 1 ? "about 1 real minute" : `about ${n} real minutes`;
 };
-const minutes = (n: number) =>
-  n >= 90 ? `${Math.round(n / 60)} game hours` : n === 1 ? "1 game minute" : `${n} game minutes`;
 
 /** What join says about Village Life, or that the world is a Sandbox. */
 function villageIntro(sim: Sim): string {
@@ -488,7 +503,7 @@ const HANDLERS: Record<string, Handler> = {
     }
     return (function* () {
       yield* walk(sim, agent, (cx, cz) => cx === x && cz === z, octile(x, z), `(${x}, ${z})`);
-      return `You arrive at x=${x} z=${z}.`;
+      return `You arrive.`;
     })();
   },
 
@@ -951,13 +966,16 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     heights.push(hrow);
   }
 
-  const light = sim.lightAt(ax, Math.floor(agent.y + 0.05), az);
-  const day = daylight(w, t, sim.clouds(), ax, Math.floor(agent.y + 0.05), az);
+  // On a slope the feet dip into the top block's own cell; the light is the open cell's above it.
+  const feet = Math.floor(agent.y + 0.05);
+  const cell = feet === ah ? ah + 1 : feet;
+  const light = sim.lightAt(ax, cell, az);
+  const day = daylight(w, t, sim.clouds(), ax, cell, az);
   const how = light < 0.08
     ? "dark"
     : light > day + 1e-6
     ? "lamplight"
-    : day < 0.6 && w.heightAt(ax, az) >= Math.floor(agent.y + 0.05)
+    : day < 0.6 && w.heightAt(ax, az) >= cell
     ? "under a roof"
     : "daylight";
   const lines = [
@@ -1071,8 +1089,14 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       const n = mine[0].a;
       const body = sim.catalog.byName(def.name);
       const product = def.productEvery && body ? sim.drops(body)[0]?.[0] : undefined;
+      const mature = mine.filter(({ a }) => sim.tick >= a.readyAt);
       const ready = product
-        ? `, ${mine.filter(({ a }) => sim.tick >= a.readyAt).length} with ${product} ready`
+        ? `, ${mature.length} with ${product} ready` +
+          (mature.length
+            ? ` (the nearest of them at x=${Math.floor(mature[0].a.x)} z=${
+              Math.floor(mature[0].a.z)
+            })`
+            : "")
         : "";
       lines.push(
         `  ${mine.length} ${def.name}${
