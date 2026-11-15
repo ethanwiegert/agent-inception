@@ -140,4 +140,8 @@ export class CropRenderer {
     pass.setBindGroup(1, this.bindGroup);
     pass.draw(7, this.count * STALKS);
   }
+
+  destroy() {
+    this.buffer?.destroy();
+  }
 }

@@ -26,6 +26,8 @@ export interface Reply {
   by: string;
   text: string;
   tick: number;
+  /** A spectator hid it: villagers don't see it on the board. */
+  hidden?: true;
 }
 
 export interface Wish {
@@ -109,6 +111,16 @@ export class Board {
       text: `pinned #${wish.id}${target ? ` for ${target.name}` : ""}: “${text}”`,
     });
     return wish;
+  }
+
+  /** A spectator hides one reply (or shows it again), without touching the Wish. */
+  hideReply(id: number, index: number, hidden = true): boolean {
+    const r = this.wishes.find((w) => w.id === id)?.replies[index];
+    if (!r) return false;
+    if (hidden) r.hidden = true;
+    else delete r.hidden;
+    this.version++;
+    return true;
   }
 
   /** A spectator takes a Wish down. False if there's no such Wish. */
@@ -197,7 +209,7 @@ export class Board {
     let s = `#${w.id} ${who}, ${when}: “${w.text}”`;
     // A done Wish is one line: who did it and their note, its replies folded away.
     if (w.done) return s + ` — done by ${w.done.by}${w.done.note ? `: “${w.done.note}”` : ""}`;
-    for (const r of w.replies) s += `\n    ${r.by}: “${r.text}”`;
+    for (const r of w.replies) if (!r.hidden) s += `\n    ${r.by}: “${r.text}”`;
     return s;
   }
 

@@ -118,6 +118,8 @@ client.onReady = (world, caughtUp, notice) => {
   }
   void refreshWorlds();
   if (!link) void startLink();
+  // A new world replaces the renderer; free the old one's GPU resources.
+  renderer?.destroy();
   renderer = new Renderer(device, world);
   readyMs ||= performance.now();
   renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
@@ -491,6 +493,7 @@ const panel = createDevPanel({
   weather: (clouds) => client.send({ type: "weather", clouds }),
   wish: (text, forName) => client.send({ type: "wish", text, for: forName }),
   unpin: (id) => client.send({ type: "unpin", id }),
+  hideReply: (wish, index, hidden) => client.send({ type: "hideReply", wish, index, hidden }),
   sound: (muted) => sound.setMuted(muted),
 });
 

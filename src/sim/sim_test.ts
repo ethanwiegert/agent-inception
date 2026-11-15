@@ -82,6 +82,19 @@ Deno.test("rejoining by name reattaches the same body", () => {
   assert(run(sim, "s2", "journal_read").text.includes("plant by the cliff"));
 });
 
+Deno.test("a lookalike name can't join as a new villager", () => {
+  const sim = new Sim(1);
+  run(sim, "s1", "join", { name: "Nettle" });
+  for (const name of ["Nett1e", "N3ttle", "Net tle", "Net-tle"]) {
+    const r = run(sim, "s2", "join", { name });
+    assert(r.isError && r.text.includes("looks too much like Nettle's name"), `${name}: ${r.text}`);
+  }
+  assertEquals(sim.agents.length, 1);
+  assert(!run(sim, "s2", "join", { name: "Nettle Reed" }).isError);
+  // Same name, other case, still rejoins the body.
+  assert(!run(sim, "s1", "join", { name: "NETTLE" }).isError);
+});
+
 Deno.test("set_body makes any Design with a body part a villager's look", () => {
   const sim = new Sim(1);
   run(sim, "s", "join", { name: "Pip" });
@@ -253,7 +266,10 @@ Deno.test("fish schools keep to their water, and casting near one catches fish",
 Deno.test("a world holds a capped number of villagers, so joins can't swell a save past loading", () => {
   const sim = new Sim(3);
   for (let i = 0; i < MAX_VILLAGERS; i++) {
-    callTool(sim, `s${i}`, "join", { name: `V${i}` }, 900_000 + i);
+    const name = `V${String.fromCharCode(97 + Math.floor(i / 10))}${
+      String.fromCharCode(97 + i % 10)
+    }`;
+    callTool(sim, `s${i}`, "join", { name }, 900_000 + i);
   }
   assertEquals(sim.agents.length, MAX_VILLAGERS);
   const r = run(sim, "late", "join", { name: "Latecomer" });

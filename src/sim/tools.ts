@@ -100,7 +100,8 @@ export const TOOL_DEFS: ToolDef[] = [
       "Using a name that already exists puts you back in that body, with its inventory and " +
       "journal, unless another agent is playing it (a villager is held while its agent is " +
       "active). Each join gives you a rejoin key: if your connection resets and your name is " +
-      "held, join again with it to step straight back in.",
+      "held, join again with it to step straight back in. A name that only looks like a " +
+      "villager's (Nett1e for Nettle) is refused.",
     inputSchema: {
       type: "object",
       properties: {
@@ -303,12 +304,34 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
 /** Villagers one world holds: plenty for a crowd, and far under what a save may carry. */
 export const MAX_VILLAGERS = 100;
 
+/** A name with its look-alikes folded in: "Nett1e" and "Net tle" both read "nettle". */
+function lookalike(name: string): string {
+  const digit: Record<string, string> = {
+    "0": "o",
+    "1": "l",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "6": "g",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+  };
+  return name.toLowerCase().replace(/[ _-]/g, "").replace(/\d/g, (d) => digit[d] ?? d);
+}
+
 function join(sim: Sim, session: string, args: Args): string {
   const name = String(args.name ?? "").trim();
   if (!/^[\w -]{1,20}$/.test(name)) {
     throw new Error("Name must be 1-20 letters, digits, spaces, - or _.");
   }
   let agent = sim.agents.find((a) => a.name.toLowerCase() === name.toLowerCase());
+  if (!agent) {
+    const twin = sim.agents.find((a) => lookalike(a.name) === lookalike(name));
+    if (twin) {
+      throw new Error(`"${name}" looks too much like ${twin.name}'s name. Pick another.`);
+    }
+  }
   const returning = !!agent;
   const same = !!agent && sim.sessions.get(session) === agent;
   const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
@@ -883,6 +906,28 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
   }
   const built = new Map<number, string>();
+  // Every covered tile in view per Object: each marks the tile nearest its center, once, so a
+  // multi-tile Object doesn't read as several.
+  const covered = new Map<number, [number, number][]>();
+  for (let z = az - r; z <= az + r; z++) {
+    for (let x = ax - r; x <= ax + r; x++) {
+      const o = sim.objects.at(x, z);
+      if (!o) continue;
+      const tiles = covered.get(o.id) ?? covered.set(o.id, []).get(o.id)!;
+      tiles.push([x, z]);
+    }
+  }
+  const spots = new Map<number, number>();
+  for (const [id, tiles] of covered) {
+    const o = sim.objects.get(id)!;
+    const c = sim.physics.center(o);
+    let best = tiles[0], bd = Infinity;
+    for (const t of tiles) {
+      const d = (t[0] + 0.5 - c[0]) ** 2 + (t[1] + 0.5 - c[2]) ** 2;
+      if (d < bd) bd = d, best = t;
+    }
+    spots.set(id, best[1] * w.sizeX + best[0]);
+  }
   /** Marks for Objects in view by Design, and how bodies get past each. */
   const objMarks = new Map<number, { mark: string; name: string; how: string }>();
   const objectMark = (x: number, z: number): string | null => {
@@ -943,8 +988,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         const names = marks.get(c) ?? new Set();
         marks.set(c, names.add(young ? `young ${info.entry.name}` : info.entry.name));
       }
-      const om = objectMark(x, z);
-      if (om) c = om;
+      const o = sim.objects.at(x, z);
+      const om = o ? objectMark(x, z) : null;
+      if (om && o && spots.get(o.id) === z * w.sizeX + x) c = om;
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
         const g = sim.cropGrowth(crop);
@@ -1134,10 +1180,13 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         ? "push"
         : "too heavy to move";
       const motion = !o.asleep && !o.held && Math.hypot(...o.vel) > 0.3 ? ", moving" : "";
+      const on = o.held ? undefined : sim.objects.restsOn(o);
       lines.push(
         `  ${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
           Math.floor(c[2])
-        } (${Math.round(d)} tiles, ${kg(mass)}: ${how}${motion})`,
+        } (${Math.round(d)} tiles, ${kg(mass)}: ${how}${motion})${
+          on ? `, on the ${sim.catalog.get(on.design)?.name ?? "Object"}` : ""
+        }`,
       );
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);

@@ -253,4 +253,8 @@ export class WaterRenderer {
       pass.draw(4, n, 0, this.first[c]);
     }
   }
+
+  destroy() {
+    this.wet?.destroy();
+  }
 }

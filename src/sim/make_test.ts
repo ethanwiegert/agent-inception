@@ -258,6 +258,27 @@ Deno.test("interact takes an Object apart for its Materials, whoever built it", 
   assertEquals(sim.world.objLift[z * sim.world.sizeX + x], 0);
 });
 
+Deno.test("interact reaches a plant under an Object on its tile", () => {
+  const { sim, fern, x, z } = site();
+  fern.inventory.planks = 4;
+  const id = (name: string) => sim.catalog.byName(name)!.id;
+  add(sim, "design", "deck", {
+    parts: [{ part: "box", material: "planks", at: [1, 0.2, 1], size: [2, 0.4, 2] }],
+  });
+  ok(run(sim, "a", "build", { design: "deck", x, z }));
+  sim.props.set(x + 1, z + 1, { design: id("oak"), planted: GROWN, grow: 0 });
+  // Named: the Object doesn't fit, the oak under it does.
+  const chopped = ok(run(sim, "a", "interact", { x: x + 1, z: z + 1, target: "oak" }));
+  assert(chopped.includes("chopped down the oak"), chopped);
+  assert(sim.objects.list.length === 1, "the deck stays");
+  // Untargeted: the Object comes apart and the plant beneath is gathered too.
+  sim.props.set(x, z + 1, { design: id("poppies"), planted: GROWN, grow: 0 });
+  const text = ok(run(sim, "a", "interact", { x, z, width: 2, depth: 2 }));
+  assert(text.includes("took apart the deck"), text);
+  assert(text.includes("picked the poppies"), text);
+  assertEquals(sim.props.at(x, z + 1), undefined);
+});
+
 Deno.test("interact shears sheep when their wool is ready, approaching slowly", () => {
   const { sim, fern, x, z } = site();
   const sheep = sim.animals.find((a) => a.species === 0)!;

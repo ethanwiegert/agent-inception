@@ -695,12 +695,9 @@ Pick these up in the gate of whichever milestone touches them.
 
 - Close, low views: sloped side triangles read as dark facets in shade. (The pale sunset, the big
   moon, square underwater patches and the darker far-grass band were fixed in the overhaul.)
-- A new seed rebuilds the `Renderer` without destroying the old GPU resources.
 - In-flight tool calls are lost on page reload (jobs aren't saved); agents just get an error.
 - Tree LODs: props are GPU-culled now, but a wide view still draws every visible tree at full
   detail.
-- A 48-block `break_block` or `place_block` with long walks can run past a minute (each block is 1-2
-  s of work by design). `build` stops at ~50 s and resumes; area digs and lays don't resume.
 - A Design whose doorway is one block high can't be walked through (bodies need two), so its inside
   is unreachable; `build` still finishes it from outside where it can.
 - Playtests: spawn cheap players as an agent type limited to Bash, so they can't stray into
@@ -709,32 +706,29 @@ Pick these up in the gate of whichever milestone touches them.
 - **500 piled bodies** cost 6-9 ms a sim tick on the cloud VM (budget 4 ms; 500 spread out cost ~3.7
   ms). Measure on the dev box first; if still over, warm-started contacts or islands that sleep
   together (both tried in M9 without enough gain to keep), or Zig→WASM for the solver.
-- From playtest 0006: an Object covering two tiles shows as two marks on the look map; the look map
-  stops at radius 12.
+- From playtest 0006: the look map stops at radius 12.
 - From playtest 0007: `push` on a loaded cart's tile pushes the load (the top of the stack), so
-  carts are pushed from a tile only they cover; `look` could say what rests on what ("crate on the
-  hand cart"). Riding a cart or boat (`ride`/`get_off`) was left out of M10 by the grill.
+  carts are pushed from a tile only they cover. Riding a cart or boat (`ride`/`get_off`) was left
+  out of M10 by the grill.
 - 100 hand carts dropped at once (500 bodies, 400 axles) cost 5-6 ms a tick while they settle;
   measure with the pile budget below.
 - From M11: only blocks stop light, not Objects' parts (a lamp in a plank-part hut lights the
-  meadow); lamps and flames on a villager's body don't light anything, and flames on bodies aren't
-  drawn; the page relights moving lamps once a tick. Light, fire and sparks were only seen in
-  software; check them on the dev box with the hardware remeasure.
+  meadow); the page relights moving lamps once a tick. Light, fire and sparks were only seen in
+  software; check them on the dev box with the hardware remeasure (body-borne flames and lamps now
+  shine and are drawn, unverified on real hardware).
 - From playtest 0008: `interact` walks to its targets without saying where you ended up.
 - From playtest 0009: `look` said "under a roof" at the foot of a cliff with nothing overhead
   (daylight's roof test). Villagers' Rules share one daily bounty, so one villager can spend it for
   all (kept: per-villager shares would grow with every name joined; revisit for V2's shared worlds).
-- From playtest 0011: `look` says how many sheep have wool ready but not which; a tree on `look`'s
-  map at (142, 136) wasn't found by `interact` on that tile (a 3 × 3 area found it; not reproduced);
-  Catalog "Added" times use the clock's current offset, so the time slider moves old timestamps; the
-  join welcome is ~3000 characters every time. Lookalike names ("Nett1e") are allowed.
+- From playtest 0011: Catalog "Added" times use the clock's current offset, so the time slider moves
+  old timestamps; the join welcome is ~3000 characters every time.
 - **M14, for Ethan:** deploy (`deno task build`, then `npx wrangler deploy`; ADR 0006) and check a
   hosted link from Claude Code; the Durable Object's hibernation wake path (the tab's socket kept,
   the Object's memory lost) only runs on Cloudflare, so try a world left quiet for a while. Measure
   60 fps at 1080p on an integrated GPU (and whether the render scale steps in).
-- From playtest 0010: spectators can only unpin a whole Wish, not hide one villager's reply.
-  `place_block` with `layers: 2` was seen laying one layer (not reproduced; check it). Listen to the
-  synth sounds on the dev box (only built and played headless, with no ears on them).
+- From playtest 0010: `place_block` with `layers: 2` was seen laying one layer (not reproduced;
+  checked, it lays both). Listen to the synth sounds on the dev box (only built and played headless,
+  with no ears on them).
 - **Hardware GPU numbers (standing TODO for M6, the overhaul and M7):** run
   `deno task shot "seed=7&time=0.62&speed=0"` on the dev box and add `gpuMs` to playtests 0003 and
   0004. Cloud VMs only have SwiftShader, so only software numbers exist so far.

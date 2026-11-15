@@ -1,7 +1,12 @@
-import { type DesignContent, deviceKind, type MaterialContent } from "../sim/catalog.ts";
+import {
+  type Catalog,
+  type DesignContent,
+  deviceKind,
+  type MaterialContent,
+} from "../sim/catalog.ts";
 import { deviceLit } from "../sim/light.ts";
 import type { Objects } from "../sim/objects.ts";
-import { poseBoxes } from "../sim/physics.ts";
+import { poseBoxes, yawQuat } from "../sim/physics.ts";
 import { FIRE_STRIDE } from "../sim/protocol.ts";
 import { hash2 } from "../sim/rng.ts";
 import type { BodyPose } from "../simclient.ts";
@@ -181,6 +186,15 @@ export class ParticleRenderer {
   update(
     objects: Objects | null,
     poses: Map<number, BodyPose>,
+    agents: readonly {
+      id: number;
+      x: number;
+      y: number;
+      z: number;
+      yaw: number;
+      body: number | null;
+    }[],
+    catalog: Catalog,
     fires: Float32Array,
     now: number,
   ) {
@@ -207,29 +221,21 @@ export class ParticleRenderer {
       a[o + 6] = seed, a[o + 7] = fade, a[o + 8] = r, a[o + 9] = g, a[o + 10] = b;
       a[o + 11] = strength;
     };
-    // Tame flames and lit lamps on Objects, where their pieces are this frame.
-    for (const o of objects?.list ?? []) {
-      const e = objects!.catalog.get(o.design);
-      if (e?.kind !== "design") continue;
-      const des = e.content as DesignContent;
-      if (!des.parts.some((p) => deviceKind(p.part) === "flame" || deviceKind(p.part) === "lamp")) {
-        continue;
-      }
-      const root = poses.get(o.id * 16);
-      if (!root) continue;
-      const pieces = o.pieces?.map((p, k) => {
-        const at = poses.get(o.id * 16 + k + 1);
-        return at ? { ...p, pos: at.pos, rot: at.rot } : p;
-      });
-      const boxes = poseBoxes(des, root.pos, root.rot, pieces);
+    // Tame flames and lit lamps on Objects and bodies, where their pieces are this frame.
+    const shine = (
+      id: number,
+      des: DesignContent,
+      boxes: number[][],
+      lit: (i: number) => boolean,
+    ) =>
       des.parts.forEach((p, i) => {
         const kind = deviceKind(p.part);
-        if ((kind !== "flame" && kind !== "lamp") || !deviceLit(o, i)) return;
+        if ((kind !== "flame" && kind !== "lamp") || !lit(i)) return;
         const b = boxes[i];
         const cx = (b[0] + b[1]) / 2,
           cz = (b[4] + b[5]) / 2,
           w = Math.max(b[1] - b[0], b[5] - b[4]);
-        const seed = hash2(o.id, i, 5);
+        const seed = hash2(id, i, 5);
         if (kind === "flame") {
           const h = b[3] - b[2];
           put(cx, b[2], cz, Kind.Flame, w * 1.5, h * 1.6, seed, 1, 1, 1, 1, 3);
@@ -254,7 +260,7 @@ export class ParticleRenderer {
             }
           }
         } else {
-          const m = objects!.catalog.byName(p.material)?.content as MaterialContent | undefined;
+          const m = catalog.byName(p.material)?.content as MaterialContent | undefined;
           const c = parseInt((m?.color ?? "#ffffff").slice(1), 16);
           const lin = (v: number) => Math.pow(v / 255, 2.2);
           put(
@@ -273,6 +279,31 @@ export class ParticleRenderer {
           );
         }
       });
+    for (const o of objects?.list ?? []) {
+      const e = catalog.get(o.design);
+      if (e?.kind !== "design") continue;
+      const des = e.content as DesignContent;
+      if (!des.parts.some((p) => deviceKind(p.part) === "flame" || deviceKind(p.part) === "lamp")) {
+        continue;
+      }
+      const root = poses.get(o.id * 16);
+      if (!root) continue;
+      const pieces = o.pieces?.map((p, k) => {
+        const at = poses.get(o.id * 16 + k + 1);
+        return at ? { ...p, pos: at.pos, rot: at.rot } : p;
+      });
+      shine(o.id, des, poseBoxes(des, root.pos, root.rot, pieces), (i) => deviceLit(o, i));
+    }
+    // The same for a body a villager wears: its flame and lamp parts burn, never switched.
+    for (const a of agents) {
+      if (a.body === null) continue;
+      const e = catalog.get(a.body);
+      if (e?.kind !== "design") continue;
+      const des = e.content as DesignContent;
+      if (!des.parts.some((p) => deviceKind(p.part) === "flame" || deviceKind(p.part) === "lamp")) {
+        continue;
+      }
+      shine(~a.id, des, poseBoxes(des, [a.x, a.y, a.z], yawQuat(a.yaw)), () => true);
     }
     // Wild fire: flames over what burns, smoke rising from it.
     for (let i = 0; i < fires.length; i += FIRE_STRIDE) {
@@ -365,5 +396,9 @@ export class ParticleRenderer {
       pass.setPipeline(this.glow);
       pass.draw(6, this.glowCount, 0, 0);
     }
+  }
+
+  destroy() {
+    this.buffer.destroy();
   }
 }

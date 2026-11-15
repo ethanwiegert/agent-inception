@@ -109,6 +109,35 @@ Deno.test("a lamp lights the night around it; walls stop the light; use switches
   assert(sim.lightAt(x + 3, g, z + 10) > 0.4, "daylight");
 });
 
+Deno.test("a flame on a villager's body lights the night around them", () => {
+  const { sim, fern, x, z, g } = site();
+  sim.setTimeOfDay(0.95);
+  ok(run(sim, "a", "catalog_add", {
+    kind: "design",
+    name: "torchbearer",
+    description: "",
+    content: {
+      parts: [
+        {
+          part: "box",
+          material: "planks",
+          role: "body",
+          at: [0.5, 0.9, 0.5],
+          size: [0.6, 1.8, 0.5],
+        },
+        { part: "flame", material: "planks", at: [0.5, 2.1, 0.5], size: [0.3, 0.4, 0.3] },
+      ],
+    },
+  }));
+  fern.x = x + 0.5, fern.z = z + 0.5, fern.y = g;
+  assert(sim.lightAt(x + 3, g, z + 3) < 0.05, "dark before");
+  ok(run(sim, "a", "set_body", { design: "torchbearer" }));
+  assert(
+    sim.lightAt(x + 1, g, z + 1) > 0.1,
+    `lit by the body's flame: ${sim.lightAt(x + 1, g, z + 1)}`,
+  );
+});
+
 Deno.test("look reads the light above a slope, not a roof over it", () => {
   const { sim, fern, x, z, h } = site();
   sim.setTimeOfDay(0.5);

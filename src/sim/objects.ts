@@ -179,6 +179,28 @@ export class Objects {
     return ids.map((id) => this.get(id)!).filter(Boolean).sort((a, b) => top(b.id) - top(a.id));
   }
 
+  /** The Object `o` rests on: the highest other top just under its bottom over a shared tile. */
+  restsOn(o: WorldObject): WorldObject | undefined {
+    const bottom = Math.min(...(this.boxes.get(o.id) ?? []).map((b) => b[2]));
+    if (!isFinite(bottom)) return undefined;
+    let best: WorldObject | undefined, bestTop = -Infinity;
+    for (const key of this.tiles.get(o.id) ?? []) {
+      const tx = key % this.world.sizeX, tz = Math.floor(key / this.world.sizeX);
+      for (const id of this.columns.get(key) ?? []) {
+        if (id === o.id) continue;
+        const top = Math.max(
+          ...(this.boxes.get(id) ?? []).filter((b) => Objects.covers(b, tx, tz)).map((b) => b[3]),
+          -Infinity,
+        );
+        if (top <= bottom + 0.25 && bottom - top <= 0.3 && top > bestTop) {
+          best = this.get(id)!;
+          bestTop = top;
+        }
+      }
+    }
+    return best;
+  }
+
   /** The top of the highest Object over tile (x, z), other than `except`; -Infinity if none. */
   topAt(x: number, z: number, except = 0): number {
     const w = this.world;

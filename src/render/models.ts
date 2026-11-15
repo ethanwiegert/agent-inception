@@ -308,6 +308,13 @@ export class ModelBatch {
       args[(n + t) * 5 + 4] = b.count + b.first[t];
     }
   }
+
+  destroy() {
+    this.buffer?.destroy();
+    this.params?.destroy();
+    this.ids?.destroy();
+    for (const v of this.views) v.instances.destroy(), v.args.destroy(), v.uniform.destroy();
+  }
 }
 
 export class ModelRenderer {
@@ -414,6 +421,12 @@ export class ModelRenderer {
       this.device.queue.writeBuffer(this.radii, 0, radii);
       this.cullBind = { layout: this.culling.layout, radii: this.radii };
     }
+  }
+
+  destroy() {
+    this.vertices?.destroy();
+    this.indices?.destroy();
+    this.radii?.destroy();
   }
 
   upload(batch: ModelBatch) {

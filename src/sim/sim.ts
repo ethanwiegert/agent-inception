@@ -577,6 +577,7 @@ export class Sim {
     this.light.update(lightSources({
       catalog: this.catalog,
       objects: this.objects.list,
+      agents: this.agents,
       world: this.world,
       blocks: this.blocks,
       glowing: this.glowing,

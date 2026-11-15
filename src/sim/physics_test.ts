@@ -125,6 +125,29 @@ Deno.test("crates stack, and a tall plank pushed over at the top topples", () =>
   assert(lean(p.rot) > 1.3, `toppled: ${lean(p.rot)}`);
 });
 
+Deno.test("look marks a multi-tile Object once and says what rests on what", () => {
+  const { sim, x, z, g } = site();
+  const sled = design(sim, "low sled", [box("planks", [1.8, 0.5, 0.9])]);
+  const crate = design(sim, "crate", [box("planks", [0.8, 0.8, 0.8])]);
+  const c = spawn(sim, sled, [x + 2, g, z + 2]);
+  // Half over the sled's edge: the crate tops one of its tiles and one plain one.
+  const k = spawn(sim, crate, [x + 3.3, g + 0.55, z + 2.05]);
+  ok(run(sim, "a", "walk_to", { x: x + 2, z }));
+  steps(sim, 200);
+  assert(c.asleep && k.asleep, "settled");
+  assert(sim.objects.restsOn(k)?.id === c.id, "the crate rests on the sled");
+  const look = ok(run(sim, "a", "look", { radius: 12 }));
+  assert(look.includes("on the low sled"), look);
+  const rows = look.split("\n").filter((l) => /^ *\d+ /.test(l)).map((l) => l.slice(5, 30));
+  // Each Object covers two tiles but marks the map once, on the tile nearest its center.
+  for (const name of ["low sled", "crate"]) {
+    const mark = new RegExp(`Objects:.* (\\S) ${name}`).exec(look)?.[1];
+    assert(mark, look);
+    const seen = rows.join("").split(mark).length - 1;
+    assert(seen === 1, `mark ${mark} for ${name} seen ${seen} times in:\n${rows.join("\n")}`);
+  }
+});
+
 Deno.test("a ball rolls on when shoved and down a slope; wood floats and stone sinks", () => {
   const { sim, x, z, g } = site();
   const ball = design(sim, "ball", [{

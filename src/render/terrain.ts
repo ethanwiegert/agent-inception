@@ -210,6 +210,7 @@ const srgbToLinear = (c: number) => Math.pow(c / 255, 2.2);
 export class TerrainRenderer {
   private chunks: ChunkMesh[];
   private indexBuffer: GPUBuffer | null = null;
+  private originBuffer: GPUBuffer;
   private indexQuads = 0;
   private bindGroup: GPUBindGroup;
   private paletteBuffer: GPUBuffer;
@@ -234,11 +235,11 @@ export class TerrainRenderer {
       origins[i * 4] = (i % world.chunksX) * CHUNK;
       origins[i * 4 + 2] = Math.floor(i / world.chunksX) * CHUNK;
     }
-    const originBuffer = device.createBuffer({
+    this.originBuffer = device.createBuffer({
       size: origins.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(originBuffer, 0, origins);
+    device.queue.writeBuffer(this.originBuffer, 0, origins);
     this.paletteBuffer = device.createBuffer({
       size: this.palette.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -259,7 +260,7 @@ export class TerrainRenderer {
     this.bindGroup = device.createBindGroup({
       layout: chunkLayout,
       entries: [
-        { binding: 0, resource: { buffer: originBuffer } },
+        { binding: 0, resource: { buffer: this.originBuffer } },
         { binding: 1, resource: { buffer: this.paletteBuffer } },
         { binding: 2, resource: surface.view },
       ],
@@ -395,5 +396,12 @@ export class TerrainRenderer {
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     });
     this.device.queue.writeBuffer(this.indexBuffer, 0, indices);
+  }
+
+  destroy() {
+    for (const chunk of this.chunks) chunk.buffer?.destroy();
+    this.indexBuffer?.destroy();
+    this.originBuffer.destroy();
+    this.paletteBuffer.destroy();
   }
 }
