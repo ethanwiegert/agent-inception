@@ -730,7 +730,9 @@ export class Sim {
     agent.anim = Anim.Fall;
     const held = this.carried(agent);
     if (held) this.release(agent, held);
-    const by = o.mover ? `${o.mover}'s ${name}` : `a ${name}`;
+    const by = o.mover
+      ? `${o.mover}'s ${name}`
+      : `${/^\W*[aeiou]/i.test(name) ? "an" : "a"} ${name}`;
     agent.notes.push(
       `Knocked over by ${by}! You were back on your feet after a moment${
         held ? ", but dropped what you carried" : ""

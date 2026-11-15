@@ -7,7 +7,7 @@ import {
   rigOf,
   type Vec3,
 } from "./catalog.ts";
-import { face, type Handler, MAX_REACH, num, reach, work } from "./jobs.ts";
+import { an, face, type Handler, MAX_REACH, num, reach, work } from "./jobs.ts";
 import type { WorldObject } from "./objects.ts";
 import {
   type Assembly,
@@ -565,9 +565,9 @@ export const JOINT_HANDLERS: Record<string, Handler> = {
           : who
           ? `${who.name} is in its way`
           : heavy > SERVO_TORQUE * 0.8
-          ? `it's too heavy for its ${j.kind} (its weight pulls with about ${
-            Math.round(heavy)
-          }; a ${j.kind} drives with up to ${SERVO_TORQUE}): make the ${j.piece} lighter or ` +
+          ? `it's too heavy for its ${j.kind} (its weight pulls with about ${Math.round(heavy)}; ${
+            an(j.kind)
+          } ${j.kind} drives with up to ${SERVO_TORQUE}): make the ${j.piece} lighter or ` +
             "turn the joint so it doesn't lift it"
           : "something is in the way: the ground, a wall, or another Object";
         return `${cap(whose(name, j.piece))} stuck at ${show(at)} on its way to ${

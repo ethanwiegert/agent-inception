@@ -1,4 +1,4 @@
-import { type Handler, num, reach, walk, work } from "./jobs.ts";
+import { an, type Handler, num, reach, walk, work } from "./jobs.ts";
 import type { WorldObject } from "./objects.ts";
 import { octile } from "./path.ts";
 import { foldPieces, Kind, lean, type Quat, quatConj, quatMul, yawQuat } from "./physics.ts";
@@ -113,7 +113,9 @@ function movable(sim: Sim, x: number, z: number): WorldObject {
   }
   const o = here[0], d = sim.objects.design(o);
   const joint = sim.physics.assembly(o.design)?.joints[0];
-  const works = joint ? ` Its ${joint.piece} moves on a ${joint.kind}: use x=${x} z=${z}.` : "";
+  const works = joint
+    ? ` Its ${joint.piece} moves on ${an(joint.kind)} ${joint.kind}: use x=${x} z=${z}.`
+    : "";
   throw new Error(
     (d?.blocks
       ? `The ${nameOf(sim, o)} is built into its blocks; it doesn't move.`

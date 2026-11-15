@@ -202,7 +202,7 @@ Deno.test("Objects need clear, dry ground and the whole cost up front", () => {
   err(run(sim, "a", "build", { design: "statue", x, z }), "short of 1 stone");
   fern.inventory.stone = 4;
   sim.props.set(x, z, { design: sim.catalog.byName("oak")!.id, planted: GROWN, grow: 0 });
-  err(run(sim, "a", "build", { design: "statue", x, z }), "a oak is in the way");
+  err(run(sim, "a", "build", { design: "statue", x, z }), "an oak is in the way");
   ok(run(sim, "a", "till", { x: x + 1, z }));
   ok(run(sim, "a", "plant", { x: x + 1, z }));
   err(run(sim, "a", "build", { design: "statue", x: x + 1, z }), "a crop is growing");
@@ -441,7 +441,7 @@ Deno.test("terraform flatten digs high ground, fills low ground, and carries on 
   const second = ok(
     run(sim, "a", "terraform", { action: "flatten", x, z, width: 8, depth: 8, height: h + 1 }),
   );
-  assert(second.includes("a oak is in the way"), second);
+  assert(second.includes("an oak is in the way"), second);
   for (let i = 0; i < 8; i++) {
     for (let j = 0; j < 8; j++) if (i + j < 14) assertEquals(w.heightAt(x + i, z + j), h + 1);
   }

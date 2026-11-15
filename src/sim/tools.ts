@@ -1,6 +1,7 @@
 import { SPECIES } from "./animals.ts";
 import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
 import {
+  an,
   angleDiff,
   areaArgs,
   type Args,
@@ -1037,7 +1038,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       if (gives) {
         rock = true;
         const name = sim.catalog.get(prop.design)!.name;
-        beyond.push(`a ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
+        beyond.push(`${an(name)} ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
       }
     }
     if (w.waterTop[z * w.sizeX + x] >= 0) {
@@ -1068,7 +1069,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     const product = sim.catalog.byName(def.name);
     const gives = product ? sim.drops(product)[0]?.[0] : undefined;
     beyond.push(
-      `a ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
+      `${an(def.name)} ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
         Math.floor(best.z)
       } (${away(Math.round(bestD))}, wandering)`,
     );

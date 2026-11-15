@@ -280,7 +280,7 @@ Deno.test("bread is baked beside an oven: craft walks over to one", () => {
   const { sim, fern, x, z } = site();
   sim.village.credit(40); // a hamlet: the oven's flame is unlocked
   fern.inventory.wheat = 3;
-  err(run(sim, "a", "craft", { item: "bread" }), 'made at a "oven"');
+  err(run(sim, "a", "craft", { item: "bread" }), 'made at an "oven"');
   put(sim, "oven", x + 6, z + 6);
   stand(sim, x, z);
   const r = ok(run(sim, "a", "craft", { item: "bread", times: 2 }));

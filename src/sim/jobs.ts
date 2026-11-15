@@ -224,8 +224,11 @@ export function solidProp(sim: Sim, x: number, z: number): string | undefined {
   const info = p && sim.props.info(p);
   if (!p || !info?.solid) return undefined;
   const young = sim.props.growth(p, sim.tick) < 1 ? "young " : "";
-  return `a ${young}${info.entry.name} is in the way`;
+  return `${an(young + info.entry.name)} ${young}${info.entry.name} is in the way`;
 }
+
+/** "a" or "an" before a name (leading quotes skipped): names aren't constrained to consonants. */
+export const an = (s: string) => (/^\W*[aeiou]/i.test(s) ? "an" : "a");
 
 export const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 export const turn = (from: number, to: number, rate: number) => from + angleDiff(from, to) * rate;

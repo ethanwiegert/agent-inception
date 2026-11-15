@@ -1,6 +1,16 @@
 import { type Animal, SPECIES } from "./animals.ts";
 import type { DesignContent, Entry, MaterialContent } from "./catalog.ts";
-import { areaArgs, give, type Handler, inventoryText, MAX_AREA, num, reach, work } from "./jobs.ts";
+import {
+  an,
+  areaArgs,
+  give,
+  type Handler,
+  inventoryText,
+  MAX_AREA,
+  num,
+  reach,
+  work,
+} from "./jobs.ts";
 import { PART_TICKS, partCost, type WorldObject } from "./objects.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -93,7 +103,9 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     if (benches.length && !bench) {
       const names = benches.map((d) => `"${(sim.catalog.current(d) ?? d).name}"`).join(" or ");
       throw new Error(
-        `${product.name} is made at a ${names}, and none stands within ${BENCH_SEARCH} tiles. ` +
+        `${product.name} is made at ${
+          an(names)
+        } ${names}, and none stands within ${BENCH_SEARCH} tiles. ` +
           `Build one (catalog_get ${
             names.split(" or ")[0]
           } says what it takes) and craft beside it.`,
@@ -175,7 +187,9 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         else if (p) here.add(`${sim.props.info(p)?.entry.name ?? "a plant"}`);
       }
       for (const a of sim.animals) {
-        if (near(a, ANIMAL_MARGIN)) here.add(`a ${SPECIES[a.species].name}`);
+        if (near(a, ANIMAL_MARGIN)) {
+          here.add(`${an(SPECIES[a.species].name)} ${SPECIES[a.species].name}`);
+        }
       }
       const what = target ? `no ${target}` : "nothing to gather";
       let hint = here.size
@@ -280,7 +294,7 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         if (sim.tick < a.readyAt) continue;
         a.readyAt = sim.tick + def.productEvery;
         take(items);
-        did.push(`${VERBS[def.name] ?? "collected from"} a ${def.name}`);
+        did.push(`${VERBS[def.name] ?? "collected from"} ${an(def.name)} ${def.name}`);
         const fx = Math.floor(a.x), fz = Math.floor(a.z);
         sim.fire("gathered", agent, fx, w.heightAt(fx, fz), fz, def.name);
       }
