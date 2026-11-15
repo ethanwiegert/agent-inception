@@ -8,11 +8,12 @@ import {
   LEVELS,
   LIMITS,
   type MaterialContent,
+  NATURE,
   type Proposal,
   type RelationContent,
   ZONES,
 } from "./catalog.ts";
-import { type Args, clock, type Handler } from "./jobs.ts";
+import { type Args, clock, gameMinutes, type Handler } from "./jobs.ts";
 import { costText, partCost } from "./objects.ts";
 import { RULE_EVENTS, RULE_LIMITS, type RuleContent } from "./rules.ts";
 import { type Agent, type Sim, TICK_HZ } from "./sim.ts";
@@ -546,9 +547,16 @@ function overview(sim: Sim): string {
   ].join("\n");
 }
 
+/** How long ago an entry was written: elapsed ticks, so the spectator clock can't move it. */
+function added(sim: Sim, e: Entry): string {
+  if (e.author === NATURE) return "Added by nature with the world.";
+  const age = gameMinutes((sim.tick - e.created) / sim.ticksPerDay * 24 * 60);
+  return `Added ${age === "just now" ? age : `${age} ago`} by ${e.author}.`;
+}
+
 function get(sim: Sim, e: Entry): string {
   const c = sim.catalog;
-  const lines = [line(sim, e), `Added ${when(sim, e.created)} by ${e.author}.`];
+  const lines = [line(sim, e), added(sim, e)];
   if (e.forkedFrom !== null) {
     const f = c.get(e.forkedFrom)!;
     lines.push(`Forked from #${f.id} "${f.name}" by ${f.author}.`);

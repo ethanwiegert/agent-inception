@@ -82,6 +82,19 @@ Deno.test("rejoining by name reattaches the same body", () => {
   assert(run(sim, "s2", "journal_read").text.includes("plant by the cliff"));
 });
 
+Deno.test("a lookalike name can't join as a new villager", () => {
+  const sim = new Sim(1);
+  run(sim, "s1", "join", { name: "Nettle" });
+  for (const name of ["Nett1e", "N3ttle", "Net tle", "Net-tle"]) {
+    const r = run(sim, "s2", "join", { name });
+    assert(r.isError && r.text.includes("looks too much like Nettle's name"), `${name}: ${r.text}`);
+  }
+  assertEquals(sim.agents.length, 1);
+  assert(!run(sim, "s2", "join", { name: "Nettle Reed" }).isError);
+  // Same name, other case, still rejoins the body.
+  assert(!run(sim, "s1", "join", { name: "NETTLE" }).isError);
+});
+
 Deno.test("set_body makes any Design with a body part a villager's look", () => {
   const sim = new Sim(1);
   run(sim, "s", "join", { name: "Pip" });
@@ -253,10 +266,31 @@ Deno.test("fish schools keep to their water, and casting near one catches fish",
 Deno.test("a world holds a capped number of villagers, so joins can't swell a save past loading", () => {
   const sim = new Sim(3);
   for (let i = 0; i < MAX_VILLAGERS; i++) {
-    callTool(sim, `s${i}`, "join", { name: `V${i}` }, 900_000 + i);
+    const name = `V${String.fromCharCode(97 + Math.floor(i / 10))}${
+      String.fromCharCode(97 + i % 10)
+    }`;
+    callTool(sim, `s${i}`, "join", { name }, 900_000 + i);
   }
   assertEquals(sim.agents.length, MAX_VILLAGERS);
   const r = run(sim, "late", "join", { name: "Latecomer" });
   assert(r.isError && r.text.includes("villagers"), r.text);
   assertEquals(sim.agents.length, MAX_VILLAGERS);
+});
+
+Deno.test("a call that moved the villager says where they are now", () => {
+  const sim = new Sim(1337);
+  run(sim, "a", "join", { name: "Fern" });
+  const fern = sim.agents[0];
+  const home = [Math.floor(fern.x), Math.floor(fern.z)];
+  const till = run(sim, "a", "till", { x: home[0] + 2, z: home[1] - 1, width: 3, depth: 2 });
+  const at = `You're now at x=${Math.floor(fern.x)} z=${Math.floor(fern.z)}.`;
+  assert(!till.isError && till.text.includes(at), till.text);
+  assert(
+    Math.floor(fern.x) !== home[0] || Math.floor(fern.z) !== home[1],
+    "tilling walked the villager off the home tile",
+  );
+  const waited = run(sim, "a", "wait", { seconds: 1 });
+  assert(!waited.isError && !waited.text.includes("You're now at"), waited.text);
+  const walked = run(sim, "a", "walk_to", { x: home[0], z: home[1] });
+  assertEquals(walked.text, `You arrive. You're now at x=${home[0]} z=${home[1]}.`);
 });

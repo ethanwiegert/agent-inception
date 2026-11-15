@@ -202,7 +202,7 @@ Deno.test("Objects need clear, dry ground and the whole cost up front", () => {
   err(run(sim, "a", "build", { design: "statue", x, z }), "short of 1 stone");
   fern.inventory.stone = 4;
   sim.props.set(x, z, { design: sim.catalog.byName("oak")!.id, planted: GROWN, grow: 0 });
-  err(run(sim, "a", "build", { design: "statue", x, z }), "a oak is in the way");
+  err(run(sim, "a", "build", { design: "statue", x, z }), "an oak is in the way");
   ok(run(sim, "a", "till", { x: x + 1, z }));
   ok(run(sim, "a", "plant", { x: x + 1, z }));
   err(run(sim, "a", "build", { design: "statue", x: x + 1, z }), "a crop is growing");
@@ -258,6 +258,27 @@ Deno.test("interact takes an Object apart for its Materials, whoever built it", 
   assertEquals(sim.world.objLift[z * sim.world.sizeX + x], 0);
 });
 
+Deno.test("interact reaches a plant under an Object on its tile", () => {
+  const { sim, fern, x, z } = site();
+  fern.inventory.planks = 4;
+  const id = (name: string) => sim.catalog.byName(name)!.id;
+  add(sim, "design", "deck", {
+    parts: [{ part: "box", material: "planks", at: [1, 0.2, 1], size: [2, 0.4, 2] }],
+  });
+  ok(run(sim, "a", "build", { design: "deck", x, z }));
+  sim.props.set(x + 1, z + 1, { design: id("oak"), planted: GROWN, grow: 0 });
+  // Named: the Object doesn't fit, the oak under it does.
+  const chopped = ok(run(sim, "a", "interact", { x: x + 1, z: z + 1, target: "oak" }));
+  assert(chopped.includes("chopped down the oak"), chopped);
+  assert(sim.objects.list.length === 1, "the deck stays");
+  // Untargeted: the Object comes apart and the plant beneath is gathered too.
+  sim.props.set(x, z + 1, { design: id("poppies"), planted: GROWN, grow: 0 });
+  const text = ok(run(sim, "a", "interact", { x, z, width: 2, depth: 2 }));
+  assert(text.includes("took apart the deck"), text);
+  assert(text.includes("picked the poppies"), text);
+  assertEquals(sim.props.at(x, z + 1), undefined);
+});
+
 Deno.test("interact shears sheep when their wool is ready, approaching slowly", () => {
   const { sim, fern, x, z } = site();
   const sheep = sim.animals.find((a) => a.species === 0)!;
@@ -275,6 +296,25 @@ Deno.test("interact shears sheep when their wool is ready, approaching slowly", 
     target: "sheep",
   }));
   assert(again.includes("has no wool yet"), again);
+});
+
+Deno.test("look says which sheep has wool ready, not just how many", () => {
+  const { sim, fern } = site();
+  const sheep = sim.animals.filter((a) => a.species === 0);
+  assert(sheep.length >= 2, `${sheep.length} sheep`);
+  for (const a of sheep) a.readyAt = sim.tick + 1_000_000;
+  const [near, far] = sheep;
+  near.x = fern.x + 1.5, near.z = fern.z + 1.5, near.tx = near.x, near.tz = near.z;
+  far.x = fern.x + 4.5, far.z = fern.z + 4.5, far.tx = far.x, far.tz = far.z;
+  near.y = sim.world.surfaceY(near.x, near.z), far.y = sim.world.surfaceY(far.x, far.z);
+  far.readyAt = 0;
+  const text = ok(run(sim, "a", "look"));
+  assert(
+    text.includes(
+      `1 with wool ready (the nearest of them at x=${Math.floor(far.x)} z=${Math.floor(far.z)})`,
+    ),
+    text,
+  );
 });
 
 Deno.test("playtest 0004: targets match what things give, and refusals say what is there", () => {
@@ -422,7 +462,7 @@ Deno.test("terraform flatten digs high ground, fills low ground, and carries on 
   const second = ok(
     run(sim, "a", "terraform", { action: "flatten", x, z, width: 8, depth: 8, height: h + 1 }),
   );
-  assert(second.includes("a oak is in the way"), second);
+  assert(second.includes("an oak is in the way"), second);
   for (let i = 0; i < 8; i++) {
     for (let j = 0; j < 8; j++) if (i + j < 14) assertEquals(w.heightAt(x + i, z + j), h + 1);
   }

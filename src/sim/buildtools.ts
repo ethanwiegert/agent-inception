@@ -66,7 +66,8 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
       "sand, planks…). Covers width × depth columns (at most 16) starting at (x, z), stacking " +
       "`layers` blocks on top of each column, so one call can lay a floor or raise a wall. With " +
       "`y`, blocks go at that height instead (from y upward), for bridges and roofs; each needs " +
-      `a solid neighbour. At most ${MAX_CELLS} blocks per call. You walk to each column yourself.`,
+      `a solid neighbour. At most ${MAX_CELLS} blocks per call, and the call stops after about ` +
+      "50 seconds of work and says what to call to carry on. You walk to each column yourself.",
     inputSchema: {
       type: "object",
       properties: {
@@ -84,7 +85,8 @@ export const BUILD_TOOL_DEFS: ToolDef[] = [
       "(grass and farmland give dirt), or itself; harder blocks take longer. Covers width × depth " +
       "columns (at most 16) starting at (x, z), digging `layers` blocks down from the top of each. " +
       "With `y`, digs from that height upward instead (a doorway in a wall: y = the floor " +
-      `block above the ground, layers 2). At most ${MAX_CELLS} blocks per call.`,
+      `block above the ground, layers 2). At most ${MAX_CELLS} blocks per call, and the call ` +
+      "stops after about 50 seconds of work and says what to call to carry on.",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,9 +159,15 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const y0 = args.y === undefined ? undefined : num(args.y, "y");
     checkCells(cols.length * stack);
     return (function* () {
-      let placed = 0, ranOut = false;
+      const started = sim.tick;
+      let placed = 0, ranOut = false, leftInColumn = stack;
       const skipped: string[] = [];
-      for (const [x, z] of cols) {
+      let i = 0;
+      for (; i < cols.length; i++) {
+        // Columns finish whole, so a stopped call's carry-on lays clean areas.
+        if (ranOut || sim.tick - started > BUILD_BUDGET) break;
+        const [x, z] = cols[i];
+        leftInColumn = stack;
         for (let k = 0; k < stack && !ranOut; k++) {
           if (!agent.inventory[block.name]) {
             ranOut = true;
@@ -188,9 +196,28 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
           sim.setBlock(x, y, z, block.id);
           sim.fire("placed", agent, x, y, z, block.name);
           placed++;
+          leftInColumn--;
         }
       }
-      return `Placed ${placed} ${block.name}${where(cols)}.` + skippedText(skipped) +
+      // A column run out of mid-stack is re-asked for: with a picked y it resumes whole (its
+      // filled cells refuse and the missing layers land); stacking on the ground, the call
+      // needs only the layers still missing.
+      const carry = carryOn(
+        ranOut && leftInColumn && y0 === undefined
+          ? [[cols[i - 1][0], cols[i - 1][1], leftInColumn]]
+          : [],
+        cols.slice(ranOut && y0 === undefined ? i : ranOut ? i - 1 : i),
+      );
+      const again = [
+        block.name,
+        y0 === undefined ? "" : `y ${y0}`,
+        stack === 1 ? "" : `layers ${stack}`,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return `Placed ${placed} ${block.name}${where(cols)}.` +
+        (carry ? ` To carry on, call place_block again with ${again} for ${carry}.` : "") +
+        skippedText(skipped) +
         (ranOut ? ` Ran out of ${block.name}.` : "") + ` ${inventoryText(agent)}`;
     })();
   },
@@ -201,14 +228,23 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
     const y0 = args.y === undefined ? undefined : num(args.y, "y");
     checkCells(cols.length * stack);
     // Don't stand in what's been dug: a villager climbs one block, so a pit could trap them.
+    // A call resumed by a carry-on inherits the earlier calls' pit: floor already two or more
+    // below this call's columns counts as dug, too.
     const dugAt = new Set<number>();
-    const inPit = (x: number, z: number) => dugAt.has(z * sim.world.sizeX + x);
+    const top0 = Math.min(...cols.map(([x, z]) => sim.world.heightAt(x, z)));
+    const inPit = (x: number, z: number) =>
+      dugAt.has(z * sim.world.sizeX + x) || sim.world.heightAt(x, z) < top0 - 1;
     return (function* () {
+      const started = sim.tick;
       let dug = 0;
       const got = new Map<string, number>();
       const skipped: string[] = [];
       const dugWhat = new Map<string, number>();
-      for (const [x, z] of cols) {
+      let i = 0;
+      for (; i < cols.length; i++) {
+        // Columns finish whole, so a stopped call's carry-on digs clean areas.
+        if (sim.tick - started > BUILD_BUDGET) break;
+        const [x, z] = cols[i];
         for (let k = 0; k < stack; k++) {
           const y = y0 === undefined ? sim.world.heightAt(x, z) : y0 + k;
           const why = digRefusal(sim, x, y, z);
@@ -246,7 +282,15 @@ export const BUILD_HANDLERS: Record<string, Handler> = {
       }
       const list = (m: Map<string, number>) => [...m].map(([k, n]) => `${n} ${k}`).join(", ");
       const what = dug ? `Dug ${list(dugWhat)}${where(cols)}` : `Dug nothing${where(cols)}`;
-      return `${what}, got ${got.size ? list(got) : "nothing"}.` + skippedText(skipped) +
+      const carry = carryOn([], cols.slice(i));
+      const again = [y0 === undefined ? "" : `y ${y0}`, stack === 1 ? "" : `layers ${stack}`]
+        .filter(Boolean)
+        .join(", ");
+      return `${what}, got ${got.size ? list(got) : "nothing"}.` +
+        (carry
+          ? ` To carry on, call break_block again${again ? ` with ${again}` : ""} for ${carry}.`
+          : "") +
+        skippedText(skipped) +
         ` ${inventoryText(agent)}`;
     })();
   },
@@ -797,6 +841,41 @@ function where(cols: [number, number][]): string {
   if (cols.length === 1) return ` at x=${x} z=${z}`;
   const xs = cols.map((c) => c[0]), zs = cols.map((c) => c[1]);
   return ` over x=${Math.min(...xs)}..${Math.max(...xs)} z=${Math.min(...zs)}..${Math.max(...zs)}`;
+}
+
+/**
+ * The columns a stopped call didn't reach, written as arguments for the calls that finish them:
+ * runs of columns in a row merge into rectangles ("x=.. z=.. width=.. depth=.."), and a column
+ * part-done comes first with the layers it's short.
+ */
+function carryOn(part: [number, number, number][], rest: [number, number][]): string {
+  const segs = part.map(([x, z, layers]) => `x=${x} z=${z} (layers ${layers})`);
+  const rows = new Map<number, number[]>();
+  for (const [x, z] of rest) {
+    const xs = rows.get(z);
+    if (xs) xs.push(x);
+    else rows.set(z, [x]);
+  }
+  const runs: [number, number, number, number][] = []; // x0, x1, z0, z1
+  for (const [z, xs] of [...rows].sort((a, b) => a[0] - b[0])) {
+    xs.sort((a, b) => a - b);
+    let s = 0;
+    for (let k = 1; k <= xs.length; k++) {
+      if (k < xs.length && xs[k] === xs[k - 1] + 1) continue;
+      const last = runs[runs.length - 1];
+      if (last && last[0] === xs[s] && last[1] === xs[k - 1] && last[3] === z - 1) last[3] = z;
+      else runs.push([xs[s], xs[k - 1], z, z]);
+      s = k;
+    }
+  }
+  for (const [x0, x1, z0, z1] of runs) {
+    segs.push(
+      `x=${x0} z=${z0}` +
+        (x1 > x0 ? ` width=${x1 - x0 + 1}` : "") +
+        (z1 > z0 ? ` depth=${z1 - z0 + 1}` : ""),
+    );
+  }
+  return segs.join("; then ");
 }
 
 /** Why a block couldn't be worked on: too far to find a way to, or close but out of reach. */

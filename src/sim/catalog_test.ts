@@ -81,6 +81,28 @@ Deno.test("catalog_get shows content, relations and rule stats", () => {
   err(run(sim, "a", "catalog_get", { entry: 99999 }), "no entry #99999");
 });
 
+Deno.test("catalog_get says how long ago an entry was added, and the clock can't move it", () => {
+  const { sim } = world();
+  const material = {
+    color: "#6b8e4e",
+    pattern: "stone",
+    density: 2.4,
+    hardness: 5,
+    burns: false,
+    glows: 0,
+  };
+  ok(run(sim, "a", "catalog_add", { kind: "material", name: "moon moss", content: material }));
+  const line = (text: string) => text.split("\n").find((l) => l.startsWith("Added "))!;
+  for (let i = 0; i < TICKS_PER_DAY / 8; i++) sim.step();
+  const first = line(ok(run(sim, "a", "catalog_get", { entry: "moon moss" })));
+  assert(first.includes("Added 3 game hours ago by"), first);
+  sim.setTimeOfDay(0.9);
+  const again = line(ok(run(sim, "a", "catalog_get", { entry: "moon moss" })));
+  assertEquals(again, first);
+  const oak = ok(run(sim, "a", "catalog_get", { entry: "oak" }));
+  assert(oak.includes("Added by nature with the world."), oak);
+});
+
 Deno.test("catalog_add validates every kind", () => {
   const { sim } = world();
   const material = {

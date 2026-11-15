@@ -189,6 +189,37 @@ Deno.test("join: the rejoin key takes a held villager straight back after a conn
   assert(!JSON.stringify(sim.save(0)).includes(muse.key!));
 });
 
+Deno.test("join: a session that still has its context gets the short welcome", () => {
+  const sim = new Sim(7);
+  callTool(sim, "a", "join", { name: "Fern" }, 1);
+  const first = results(sim)[0].text;
+  assert(first.includes("Start with look.") && first.length > 2000, `${first.length}`);
+  callTool(sim, "a", "join", { name: "Fern" }, 2);
+  const back = results(sim)[0].text;
+  assert(back.startsWith("Welcome back, Fern."), back);
+  assert(back.length < 900, `${back.length}: ${back}`);
+  assert(back.includes("Rejoin key:"), back);
+  assert(back.includes("Needs:") || back.includes("Sandbox"), back);
+  callTool(sim, "a", "journal_write", { text: "plant by the cliff" }, 3);
+  results(sim);
+  callTool(sim, "a", "join", { name: "Fern" }, 4);
+  assert(results(sim)[0].text.includes("journal_read"));
+  callTool(sim, "a", "join", { name: "Birch" }, 5);
+  const birch = results(sim)[0].text;
+  assert(birch.length > 2000 && birch.startsWith("Welcome, Birch."), birch.slice(0, 120));
+  // A new session that shows the villager's rejoin key still has its context: short text.
+  callTool(sim, "b", "join", { name: "Fern", key: sim.agents[0].key }, 6);
+  const withKey = results(sim)[0].text;
+  assert(withKey.startsWith("Welcome back, Fern.") && withKey.length < 900, withKey);
+  // A new session without the key has never read the introduction: the long text.
+  sim.forgetSessions();
+  callTool(sim, "c", "join", { name: "Fern" }, 7);
+  const fresh = results(sim)[0].text;
+  assert(fresh.startsWith("Welcome back, Fern."), fresh.slice(0, 60));
+  assert(fresh.length > 2000, `${fresh.length}`);
+  assert(fresh.includes("journal_read"), fresh);
+});
+
 Deno.test("join: rejoin keys are deterministic and differ by session", () => {
   const keyOf = (session: string) => {
     const sim = new Sim(7);

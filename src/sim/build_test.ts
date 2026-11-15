@@ -123,11 +123,50 @@ Deno.test("break_block digs areas and layers, and cuts doorways with y", () => {
   err(run(sim, "a", "break_block", { x, z, width: 16, layers: 4 }), "at most");
 });
 
+/**
+ * Follow a call's "To carry on" segments until the job is done, as an agent would.
+ * With `first`, the initial call's already-made result text is followed instead of re-run.
+ */
+function carryOnAll(
+  sim: Sim,
+  tool: string,
+  args: Record<string, unknown>,
+  first?: string,
+): string {
+  const queue: Record<string, unknown>[] = [];
+  const follow = (text: string) => {
+    if (!text.includes("To carry on")) return;
+    const carry = / for ([^.]*)/.exec(text)?.[1] ?? "";
+    for (
+      const m of (carry ?? "").matchAll(
+        /x=(\d+) z=(\d+)(?: width=(\d+))?(?: depth=(\d+))?(?: \(layers (\d+)\))?/g,
+      )
+    ) {
+      queue.push({
+        ...args,
+        x: +m[1],
+        z: +m[2],
+        width: +(m[3] ?? 1),
+        depth: +(m[4] ?? 1),
+        ...(m[5] === undefined ? {} : { layers: +m[5] }),
+      });
+    }
+  };
+  let text = first ?? ok(run(sim, "a", tool, args));
+  follow(text);
+  for (let n = 0; n < 30 && queue.length; n++) {
+    text = ok(run(sim, "a", tool, queue.shift()!));
+    follow(text);
+  }
+  assert(!queue.length, text);
+  return text;
+}
+
 Deno.test("digging a deep pit leaves the digger on the rim, not trapped at the bottom", () => {
   const { sim, fern, x, z, h } = site(6, 6);
   // Two deep: a drop a villager will step down, but a climb they can't make back up.
-  const text = ok(run(sim, "a", "break_block", { x, z, width: 4, depth: 4, layers: 2 }));
-  assert(text.startsWith("Dug 16 grass, 16 dirt"), text);
+  carryOnAll(sim, "break_block", { x, z, width: 4, depth: 4, layers: 2 });
+  assert(fern.inventory.dirt === 32, String(fern.inventory.dirt));
   for (let i = 0; i < 4; i++) {
     for (let j = 0; j < 4; j++) assert(sim.world.heightAt(x + i, z + j) === h - 2);
   }
@@ -205,6 +244,67 @@ Deno.test("build never shuts the builder inside their own hut or strands them on
   const built = buildAll(sim, { design: "sod hut", x, z });
   assert(built.includes("39 of 39 done"), built);
   ok(run(sim, "a", "walk_to", { x: x - 3, z: z - 3 }));
+});
+
+Deno.test("place_block running out names the columns and layers left to call for", () => {
+  const { sim, fern, x, z, h } = site(8, 4);
+  // 20 planks over 4×4 columns three high: six columns whole, the seventh one short.
+  fern.inventory.planks = 20;
+  const text = ok(
+    run(sim, "a", "place_block", { x, z, width: 4, depth: 4, layers: 3, block: "planks" }),
+  );
+  assert(text.startsWith("Placed 20 planks"), text);
+  assert(text.includes("Ran out of planks"), text);
+  assert(text.includes("call place_block again"), text);
+  assert(text.includes("(layers 1)"), text);
+  // The rest of the area comes as rectangles to re-ask for.
+  assert(/x=\d+ z=\d+ width=4 depth=2/.test(text), text);
+  // With more planks the carry-on calls finish the wall.
+  fern.inventory.planks = 28;
+  carryOnAll(sim, "place_block", { block: "planks", layers: 3 }, text);
+  for (let dx = 0; dx < 4; dx++) {
+    for (let dz = 0; dz < 4; dz++) assert(sim.world.get(x + dx, h + 3, z + dz) === Block.Planks);
+  }
+  // With a picked y the short column re-asks whole, and the carry-on tops it off.
+  fern.inventory.planks = 20;
+  const again = ok(
+    run(sim, "a", "place_block", {
+      x: x + 4,
+      z,
+      width: 4,
+      depth: 4,
+      layers: 3,
+      y: h + 1,
+      block: "planks",
+    }),
+  );
+  assert(again.includes("call place_block again"), again);
+  fern.inventory.planks = 28;
+  carryOnAll(sim, "place_block", { block: "planks", layers: 3, y: h + 1 }, again);
+  for (let dx = 4; dx < 8; dx++) {
+    for (let dz = 0; dz < 4; dz++) assert(sim.world.get(x + dx, h + 3, z + dz) === Block.Planks);
+  }
+});
+
+Deno.test("a long break_block call stops at the budget and its carry-on finishes the job", () => {
+  const { sim, fern, x, z, h } = site();
+  // 32 hard blocks two high (still reachable from the ground): more than one call's ~50 s.
+  for (let dx = 0; dx < 4; dx++) {
+    for (let dz = 0; dz < 4; dz++) {
+      sim.setBlock(x + dx, h + 1, z + dz, Block.Stone);
+      sim.setBlock(x + dx, h + 2, z + dz, Block.Stone);
+    }
+  }
+  const first = ok(run(sim, "a", "break_block", { x, z, width: 4, depth: 4, layers: 2 }));
+  assert(first.includes("To carry on"), first);
+  carryOnAll(sim, "break_block", { x, z, width: 4, depth: 4, layers: 2 }, first);
+  for (let dx = 0; dx < 4; dx++) {
+    for (let dz = 0; dz < 4; dz++) {
+      assert(sim.world.get(x + dx, h + 1, z + dz) === Block.Air);
+      assert(sim.world.get(x + dx, h, z + dz) === Block.Grass);
+    }
+  }
+  assert(fern.inventory.stone === 32);
 });
 
 Deno.test("look names built blocks with marks nothing else uses", () => {

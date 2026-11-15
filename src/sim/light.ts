@@ -1,6 +1,6 @@
 import type { Catalog, DesignContent, MaterialContent } from "./catalog.ts";
 import { deviceKind } from "./catalog.ts";
-import { poseBoxes, type Quat } from "./physics.ts";
+import { poseBoxes, type Quat, wornPos, yawQuat } from "./physics.ts";
 import type { BlockRegistry } from "./blocks.ts";
 import type { WorldObject } from "./objects.ts";
 import { solid, type World } from "./world.ts";
@@ -325,12 +325,21 @@ function linear(hex: string): [number, number, number] {
   return [srgbToLinear(c >> 16), srgbToLinear((c >> 8) & 255), srgbToLinear(c & 255)];
 }
 
-/** What casts light: Objects (by pose), glowing blocks and wild fires. */
+/** What casts light: Objects (by pose), villagers' bodies, glowing blocks and wild fires. */
 export interface LightInputs {
   catalog: Catalog;
   objects: readonly WorldObject[];
   /** Where an Object's piece is now: its origin and turn. */
   pose?: (o: WorldObject, piece: number) => { pos: [number, number, number]; rot: Quat } | null;
+  /** Villagers: the body Design they wear can hold lamp, flame or glowing parts. */
+  agents?: readonly {
+    id: number;
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    body: number | null;
+  }[];
   world: World;
   blocks: BlockRegistry;
   /** Block indices of glowing blocks. */
@@ -348,30 +357,30 @@ export function deviceLit(o: WorldObject, part: number): boolean {
 export function lightSources(inp: LightInputs): LightSource[] {
   const out: LightSource[] = [];
   const mat = (name: string) => inp.catalog.byName(name)?.content as MaterialContent | undefined;
-  for (const o of inp.objects) {
-    const e = inp.catalog.get(o.design);
-    if (e?.kind !== "design") continue;
-    const d = e.content as DesignContent;
-    let boxes: number[][] | null = null;
+  const emits = (d: DesignContent) =>
+    d.parts.some((p) =>
+      deviceKind(p.part) === "lamp" || deviceKind(p.part) === "flame" ||
+      mat(p.material)?.glows
+    );
+  const emit = (key: string, d: DesignContent, boxes: number[][], lit: (i: number) => boolean) => {
     d.parts.forEach((p, i) => {
       const kind = deviceKind(p.part), m = mat(p.material);
       const glows = m?.glows ?? 0;
       if (kind !== "lamp" && kind !== "flame" && !glows) return;
-      if ((kind === "lamp" || kind === "flame") && !deviceLit(o, i)) return;
-      boxes ??= objectBoxes(inp, o, d);
+      if ((kind === "lamp" || kind === "flame") && !lit(i)) return;
       const b = boxes[i];
       const x = (b[0] + b[1]) / 2, y = (b[2] + b[3]) / 2, z = (b[4] + b[5]) / 2;
-      const key = `o${o.id}:${i}`;
+      const id = `${key}:${i}`;
       if (kind === "flame") {
         const [r, g, bl] = FIRE_COLOR;
-        out.push({ key, x, y: b[3] - 0.1, z, r, g, b: bl, reach: FLAME_REACH, flicker: 1 });
+        out.push({ key: id, x, y: b[3] - 0.1, z, r, g, b: bl, reach: FLAME_REACH, flicker: 1 });
       } else if (kind === "lamp") {
         const [r, g, bl] = linear(m?.color ?? "#ffffff");
-        out.push({ key, x, y, z, r, g, b: bl, reach: LAMP_REACH, flicker: 0 });
+        out.push({ key: id, x, y, z, r, g, b: bl, reach: LAMP_REACH, flicker: 0 });
       } else {
         const [r, g, bl] = linear(m!.color);
         out.push({
-          key,
+          key: id,
           x,
           y,
           z,
@@ -383,6 +392,30 @@ export function lightSources(inp: LightInputs): LightSource[] {
         });
       }
     });
+  };
+  for (const o of inp.objects) {
+    const e = inp.catalog.get(o.design);
+    if (e?.kind !== "design") continue;
+    const d = e.content as DesignContent;
+    if (!emits(d)) continue;
+    emit(`o${o.id}`, d, objectBoxes(inp, o, d), (i) => deviceLit(o, i));
+  }
+  // A body Design's lit parts shine too (they can't be switched: a villager's lamp always burns).
+  for (const a of inp.agents ?? []) {
+    // The body shown: the Design they chose while it lives and is a body, else the farmer.
+    const chosen = a.body === null ? undefined : inp.catalog.get(a.body);
+    let design = chosen && inp.catalog.current(chosen);
+    if (
+      design?.kind !== "design" ||
+      !(design.content as DesignContent).parts.some((p) => p.role === "body")
+    ) {
+      const farmer = inp.catalog.byName("farmer");
+      design = farmer && inp.catalog.current(farmer);
+    }
+    if (design?.kind !== "design") continue;
+    const d = design.content as DesignContent;
+    if (!emits(d)) continue;
+    emit(`a${a.id}`, d, poseBoxes(d, wornPos(a.x, a.y, a.z, a.yaw), yawQuat(a.yaw)), () => true);
   }
   // Glowing blocks light in groups of 2 × 2 × 2 cells (a glowing wall isn't a hundred lamps):
   // from the middle of a group's blocks that aren't buried, at the brightest of them.

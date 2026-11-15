@@ -210,10 +210,14 @@ export class GrassRenderer {
   private cullBindGroup: GPUBindGroup;
   private drawBindGroup: GPUBindGroup;
   private args: GPUBuffer;
+  private blades: GPUBuffer;
   private static readonly ZERO = new Uint32Array([0]);
 
   constructor(private device: GPUDevice, surface: SurfaceTexture, layouts: Layouts) {
-    const blades = device.createBuffer({ size: MAX_BLADES * 32, usage: GPUBufferUsage.STORAGE });
+    const blades = this.blades = device.createBuffer({
+      size: MAX_BLADES * 32,
+      usage: GPUBufferUsage.STORAGE,
+    });
     this.args = device.createBuffer({
       size: 16,
       usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -293,5 +297,10 @@ export class GrassRenderer {
     pass.setPipeline(this.drawPipeline);
     pass.setBindGroup(1, this.drawBindGroup);
     pass.drawIndirect(this.args, 0);
+  }
+
+  destroy() {
+    this.blades.destroy();
+    this.args.destroy();
   }
 }

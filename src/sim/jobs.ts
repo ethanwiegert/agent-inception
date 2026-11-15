@@ -224,8 +224,11 @@ export function solidProp(sim: Sim, x: number, z: number): string | undefined {
   const info = p && sim.props.info(p);
   if (!p || !info?.solid) return undefined;
   const young = sim.props.growth(p, sim.tick) < 1 ? "young " : "";
-  return `a ${young}${info.entry.name} is in the way`;
+  return `${an(young + info.entry.name)} ${young}${info.entry.name} is in the way`;
 }
+
+/** "a" or "an" before a name (leading quotes skipped): names aren't constrained to consonants. */
+export const an = (s: string) => (/^\W*[aeiou]/i.test(s) ? "an" : "a");
 
 export const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 export const turn = (from: number, to: number, rate: number) => from + angleDiff(from, to) * rate;
@@ -244,3 +247,15 @@ export function clock(t: number): string {
   const m = Math.floor(t * 24 * 60);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+
+/** Game time in words: "just now", "1 game minute", then minutes, hours (from 90) and days. */
+export const gameMinutes = (n: number) =>
+  n < 1
+    ? "just now"
+    : n < 2
+    ? "1 game minute"
+    : n < 90
+    ? `${Math.floor(n)} game minutes`
+    : n < 2160
+    ? `${Math.round(n / 60)} game hours`
+    : `${Math.round(n / 1440)} game days`;

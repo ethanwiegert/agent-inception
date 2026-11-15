@@ -342,7 +342,11 @@ export class SimClient {
       this.fires = msg.fires;
       this.firesVersion++;
     }
-    if (msg.objects || msg.bodies || msg.fires || msg.catalog || msg.edits.length) {
+    // Villagers' worn-body lights ride on positions and profiles, which stream every tick.
+    if (
+      msg.objects || msg.bodies || msg.fires || msg.catalog || msg.agents || msg.profiles ||
+      msg.edits.length
+    ) {
       this.lightStale = true;
     }
     if (msg.bodies) {
@@ -389,9 +393,19 @@ export class SimClient {
         z: (f[i + 4] + f[i + 5]) / 2,
       });
     }
+    const a = this.curr;
+    const agents = this.profiles.map((p, j) => ({
+      id: a[j * AGENT_STRIDE],
+      x: a[j * AGENT_STRIDE + 1],
+      y: a[j * AGENT_STRIDE + 2],
+      z: a[j * AGENT_STRIDE + 3],
+      yaw: a[j * AGENT_STRIDE + 4],
+      body: p.body,
+    }));
     return this.light.update(lightSources({
       catalog: this.catalog,
       objects: this.objects.list,
+      agents,
       pose: (o, piece) => {
         const at = poses.get(o.id * 16 + piece);
         if (at === undefined) return null;

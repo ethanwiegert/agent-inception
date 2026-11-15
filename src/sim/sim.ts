@@ -61,6 +61,17 @@ export const STEADY_MASS = 0.6;
 /** A queued tool call: a generator that advances one step per tick and returns its result text. */
 export type Job = Generator<void, string, void>;
 
+/**
+ * A queued call; `startX/Z` remember the tile it first ran on, so a job that walked can say
+ * where it ended.
+ */
+interface QueuedJob {
+  callId: number;
+  job: Job;
+  startX?: number;
+  startZ?: number;
+}
+
 export interface Agent {
   id: number;
   name: string;
@@ -104,7 +115,7 @@ export interface Agent {
   pace?: number;
   /** Asleep: the bed Object they lie on, or 0 on the ground. Not saved. */
   sleeping?: number;
-  queue: { callId: number; job: Job }[];
+  queue: QueuedJob[];
 }
 
 /** A plant on farmland: drawn as a field of stalks, harvested when ripe. */
@@ -495,14 +506,23 @@ export class Sim {
       if (this.down(agent)) continue;
       const current = agent.queue[0];
       if (!current) continue;
+      if (current.startX === undefined) {
+        current.startX = Math.floor(agent.x);
+        current.startZ = Math.floor(agent.z);
+      }
+      let text: string, isError: boolean;
       try {
         const r = current.job.next();
         if (!r.done) continue;
-        this.finish(agent, current.callId, r.value, false);
+        text = r.value, isError = false;
       } catch (e) {
-        const text = e instanceof Error ? e.message : String(e);
-        this.finish(agent, current.callId, text, true);
+        text = e instanceof Error ? e.message : String(e), isError = true;
       }
+      const x = Math.floor(agent.x), z = Math.floor(agent.z);
+      if (x !== current.startX || z !== current.startZ) {
+        text += ` You're now at x=${x} z=${z}.`;
+      }
+      this.finish(agent, current.callId, text, isError);
       agent.queue.shift();
       agent.anim = Anim.Idle;
     }
@@ -557,6 +577,7 @@ export class Sim {
     this.light.update(lightSources({
       catalog: this.catalog,
       objects: this.objects.list,
+      agents: this.agents,
       world: this.world,
       blocks: this.blocks,
       glowing: this.glowing,
@@ -710,7 +731,9 @@ export class Sim {
     agent.anim = Anim.Fall;
     const held = this.carried(agent);
     if (held) this.release(agent, held);
-    const by = o.mover ? `${o.mover}'s ${name}` : `a ${name}`;
+    const by = o.mover
+      ? `${o.mover}'s ${name}`
+      : `${/^\W*[aeiou]/i.test(name) ? "an" : "a"} ${name}`;
     agent.notes.push(
       `Knocked over by ${by}! You were back on your feet after a moment${
         held ? ", but dropped what you carried" : ""

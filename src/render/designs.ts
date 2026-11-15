@@ -39,6 +39,8 @@ export interface MeshOptions {
   sway?: boolean;
   /** Colors to use instead of a Material's own, by Material name. */
   colors?: Map<string, Rgb>;
+  /** A coarser mesh of the same shape, for shadows and distant views. */
+  low?: boolean;
 }
 
 const m = mat4();
@@ -78,7 +80,16 @@ export function meshDesign(
     if (deviceKind(p.part) === "flame") return;
     const mat = catalog.byName(p.material)?.content as MaterialContent | undefined;
     if (!mat) return;
-    meshPart(b, p, i, mat, o.colors?.get(p.material), origin, o.sway === false ? 0 : top);
+    meshPart(
+      b,
+      p,
+      i,
+      mat,
+      o.colors?.get(p.material),
+      origin,
+      o.sway === false ? 0 : top,
+      o.low === true,
+    );
     drawn++;
   });
   return drawn;
@@ -107,6 +118,7 @@ function meshPart(
   origin: Vec3,
   /** Design height for the wind gradient, or 0 to hold still. */
   top: number,
+  low: boolean,
 ) {
   const [sx, sy, sz] = p.size;
   const lumpy = mat.pattern === "leaves" || mat.pattern === "fleece";
@@ -147,11 +159,13 @@ function meshPart(
   const detail = big < 0.08 ? 0 : big < 0.2 ? 1 : big < 0.7 ? 2 : 3;
   switch (shape) {
     case "box":
-      b.box(m, p.size, style, Math.min(0.16, 0.4 * Math.min(sx, sy, sz)));
+      b.box(m, p.size, style, low ? 0 : Math.min(0.16, 0.4 * Math.min(sx, sy, sz)));
       break;
     case "sphere":
+      // A lower-detail icosphere's directions are a prefix of the full one's, so a low sphere's
+      // vertices are a subset of the full sphere's and the silhouettes stay lined up.
       b.sphere(m, [sx / 2, sy / 2, sz / 2], style, {
-        detail,
+        detail: low ? Math.max(0, detail - 2) : detail,
         noise: mat.pattern === "leaves" ? 0.3 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.3 : 0,
         seed: index * 13 + 5,
         flat: rocky,
@@ -162,7 +176,8 @@ function meshPart(
       // Unit primitives grown from y = 0, stretched to the part's size around its center.
       translate(m, 0, -sy / 2, 0);
       scale(m, sx, sy, sz);
-      const segments = thin < 0.05 ? 4 : thin < 0.15 ? 8 : thin < 0.4 ? 12 : thin < 0.8 ? 16 : 20;
+      let segments = thin < 0.05 ? 4 : thin < 0.15 ? 8 : thin < 0.4 ? 12 : thin < 0.8 ? 16 : 20;
+      if (low) segments = Math.max(4, Math.ceil(segments / 2));
       const opts = { segments, caps: thin >= 0.06 };
       if (shape === "cone") b.cone(m, 0.5, 1, style, opts);
       else b.cylinder(m, 0.5, 0.5, 1, style, opts);

@@ -36,6 +36,9 @@ export interface Layouts {
 }
 
 const SHADOW_SIZE = 2048;
+/** Blocks from the eye past which props draw with their low mesh (a crown is then too small on
+ *  screen for its baked grain to show). The shadow map passes 0: every shadow draws low. */
+const LOD_DISTANCE = 110;
 
 /** What's in the world this frame besides terrain. */
 export interface SceneState {
@@ -98,6 +101,7 @@ export class Renderer {
   private frameBuffer: GPUBuffer;
   private frameBindGroup: GPUBindGroup;
   private plainFrameBindGroup: GPUBindGroup;
+  private shadowTexture: GPUTexture;
   private shadowView: GPUTextureView;
   private terrain: TerrainRenderer;
   private grass: GrassRenderer;
@@ -163,11 +167,12 @@ export class Renderer {
       size: this.frameData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    this.shadowView = device.createTexture({
+    this.shadowTexture = device.createTexture({
       size: [SHADOW_SIZE, SHADOW_SIZE],
       format: "depth32float",
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    }).createView();
+    });
+    this.shadowView = this.shadowTexture.createView();
     const shadowSampler = device.createSampler({
       compare: "less",
       magFilter: "linear",
@@ -205,6 +210,28 @@ export class Renderer {
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
 
+  /** Free every GPU resource; the render loop must not draw this renderer again. */
+  destroy() {
+    this.frameBuffer.destroy();
+    this.shadowTexture.destroy();
+    this.viewTargets?.destroy();
+    this.shotTargets?.destroy();
+    this.shot?.texture.destroy();
+    this.shot?.buffer.destroy();
+    this.surface.destroy();
+    this.terrain.destroy();
+    this.grass.destroy();
+    this.water.destroy();
+    this.lightField.destroy();
+    this.models.destroy();
+    this.bodies.destroy();
+    this.flora.destroy();
+    this.groundCover.destroy();
+    this.crops.destroy();
+    this.particles.destroy();
+    this.timer?.destroy();
+  }
+
   /** Draw one frame into `out`; `capture` renders use their own scene targets. */
   render(
     camera: Camera,
@@ -240,7 +267,14 @@ export class Renderer {
     }
     this.models.upload(this.bodies);
     this.updateFlora(scene, time);
-    this.particles.update(scene.objects, scene.bodies, scene.fires, time);
+    this.particles.update(
+      scene.objects,
+      scene.bodies,
+      scene.agents,
+      scene.catalog,
+      scene.fires,
+      time,
+    );
 
     const fd = this.frameData;
     camera.update(targets.width / targets.height);
@@ -278,9 +312,9 @@ export class Renderer {
     const encoder = device.createCommandEncoder();
     if (!this.debug.has("props")) {
       const cull = encoder.beginComputePass({ label: "models-cull" });
-      this.models.cull(cull, this.flora, 0, this.planes, camera.eye);
-      this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye);
-      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye);
+      this.models.cull(cull, this.flora, 0, this.planes, camera.eye, LOD_DISTANCE);
+      this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye, 0);
+      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye, LOD_DISTANCE);
       cull.end();
     }
 
@@ -539,6 +573,12 @@ class GpuTimer {
         this.smoothed = this.smoothed ? this.smoothed * 0.9 + ms * 0.1 : ms;
         onMs(this.smoothed);
       }
-    });
+    }).catch(() => {}); // destroyed mid-map on a world switch: nothing to read
+  }
+
+  destroy() {
+    this.querySet.destroy();
+    this.resolveBuffer.destroy();
+    this.readBuffer.destroy();
   }
 }

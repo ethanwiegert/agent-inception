@@ -1,6 +1,6 @@
 import { deepStrictEqual as assertEquals, ok } from "node:assert/strict";
 import { identity, mat4, rotateY, translate } from "../math.ts";
-import { Catalog, type DesignContent } from "../sim/catalog.ts";
+import { Catalog, type DesignContent, natureCatalog } from "../sim/catalog.ts";
 import type { AgentView } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { meshDesign } from "./designs.ts";
@@ -69,6 +69,7 @@ Deno.test("the library packs templates into shared buffers", () => {
     indexCount: 36,
     baseVertex: 0,
     radius: Math.sqrt(0.75),
+    low: { firstIndex: 0, indexCount: 36, baseVertex: 0 },
   });
   assertEquals(ranges[1].firstIndex, 36);
   assertEquals(ranges[1].baseVertex, 24);
@@ -77,6 +78,77 @@ Deno.test("the library packs templates into shared buffers", () => {
   const v = lib.version;
   lib.define("a", (b) => b.box(null, [2, 2, 2], { color: RED }));
   assertEquals([lib.size, lib.version > v], [2, true]);
+});
+
+Deno.test("low meshes pack after the full ones without moving their slices", () => {
+  const sphere = (detail: number) => (b: MeshBuilder) =>
+    b.sphere(null, [1, 1, 1], { color: RED }, { detail });
+  const lib = new MeshLibrary();
+  lib.define("a", sphere(3), sphere(1));
+  lib.define("b", sphere(3));
+  const plain = new MeshLibrary();
+  plain.define("a", sphere(3));
+  plain.define("b", sphere(3));
+  const { vertices, ranges } = lib.pack();
+  const pr = plain.pack().ranges;
+  const full = (r: (typeof ranges)[number]) => ({
+    firstIndex: r.firstIndex,
+    indexCount: r.indexCount,
+    baseVertex: r.baseVertex,
+  });
+  ok(ranges[0].low.indexCount < ranges[0].indexCount, "a's low mesh is coarser");
+  assertEquals(ranges[1].low, full(ranges[1]), "b has no low mesh: its low is its own slice");
+  assertEquals([full(ranges[0]), full(ranges[1])], [full(pr[0]), full(pr[1])]);
+  const lb = new MeshBuilder();
+  sphere(1)(lb);
+  const lowBytes = lb.vertexCount * VERTEX_BYTES;
+  assertEquals(vertices.byteLength, plain.pack().vertices.byteLength + lowBytes);
+});
+
+Deno.test("a low mesh no smaller than the full one is dropped", () => {
+  const sphere = (detail: number) => (b: MeshBuilder) =>
+    b.sphere(null, [1, 1, 1], { color: RED }, { detail });
+  const lib = new MeshLibrary();
+  lib.define("a", sphere(1), sphere(1));
+  lib.define("b", sphere(1), sphere(3));
+  for (const r of lib.pack().ranges) {
+    assertEquals(r.low, {
+      firstIndex: r.firstIndex,
+      indexCount: r.indexCount,
+      baseVertex: r.baseVertex,
+    });
+  }
+});
+
+Deno.test("a lower-detail sphere's vertices are positions of the full sphere's", () => {
+  const o = { noise: 0.3, seed: 7 };
+  const hi = new MeshBuilder().sphere(null, [1, 1, 1], { color: RED }, { ...o, detail: 3 });
+  const lo = new MeshBuilder().sphere(null, [1, 1, 1], { color: RED }, { ...o, detail: 1 });
+  const near = (i: number) => {
+    for (let j = 0; j < hi.vertexCount; j++) {
+      if (
+        Math.abs(lo.positions[i * 3] - hi.positions[j * 3]) < 1e-9 &&
+        Math.abs(lo.positions[i * 3 + 1] - hi.positions[j * 3 + 1]) < 1e-9 &&
+        Math.abs(lo.positions[i * 3 + 2] - hi.positions[j * 3 + 2]) < 1e-9
+      ) return true;
+    }
+    return false;
+  };
+  for (let i = 0; i < lo.vertexCount; i++) ok(near(i), `low vertex ${i} is a full vertex`);
+});
+
+Deno.test("a Design's low mesh is a fraction of its triangles", () => {
+  const catalog = natureCatalog();
+  const oak = catalog.current(catalog.byName("oak")!)!;
+  const d = oak.content as DesignContent;
+  const tris = (low: boolean) => {
+    const b = new MeshBuilder();
+    meshDesign(b, catalog, d, { role: null, low });
+    return b.indices.length / 3;
+  };
+  const full = tris(false), low = tris(true);
+  ok(low > 0, "the low oak is not empty");
+  ok(low <= full / 8, `low oak is ${low} of ${full} triangles`);
 });
 
 Deno.test("instance batches group by template without losing data", () => {

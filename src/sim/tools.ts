@@ -1,10 +1,12 @@
 import { SPECIES } from "./animals.ts";
 import { FISH, FISH_REGROW, waterHabitat } from "./fish.ts";
 import {
+  an,
   angleDiff,
   areaArgs,
   type Args,
   clock,
+  gameMinutes,
   give,
   type Handler,
   inventoryText,
@@ -98,7 +100,8 @@ export const TOOL_DEFS: ToolDef[] = [
       "Using a name that already exists puts you back in that body, with its inventory and " +
       "journal, unless another agent is playing it (a villager is held while its agent is " +
       "active). Each join gives you a rejoin key: if your connection resets and your name is " +
-      "held, join again with it to step straight back in.",
+      "held, join again with it to step straight back in. A name that only looks like a " +
+      "villager's (Nett1e for Nettle) is refused.",
     inputSchema: {
       type: "object",
       properties: {
@@ -301,16 +304,40 @@ export function callTool(sim: Sim, session: string, name: string, args: Args, ca
 /** Villagers one world holds: plenty for a crowd, and far under what a save may carry. */
 export const MAX_VILLAGERS = 100;
 
+/** A name with its look-alikes folded in: "Nett1e" and "Net tle" both read "nettle". */
+function lookalike(name: string): string {
+  const digit: Record<string, string> = {
+    "0": "o",
+    "1": "l",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "6": "g",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+  };
+  return name.toLowerCase().replace(/[ _-]/g, "").replace(/\d/g, (d) => digit[d] ?? d);
+}
+
 function join(sim: Sim, session: string, args: Args): string {
   const name = String(args.name ?? "").trim();
   if (!/^[\w -]{1,20}$/.test(name)) {
     throw new Error("Name must be 1-20 letters, digits, spaces, - or _.");
   }
   let agent = sim.agents.find((a) => a.name.toLowerCase() === name.toLowerCase());
+  if (!agent) {
+    const twin = sim.agents.find((a) => lookalike(a.name) === lookalike(name));
+    if (twin) {
+      throw new Error(`"${name}" looks too much like ${twin.name}'s name. Pick another.`);
+    }
+  }
   const returning = !!agent;
-  if (agent && sim.sessions.get(session) !== agent) {
-    const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
-    const held = given && agent.key && given === normalKey(agent.key) ? null : heldBy(sim, agent);
+  const same = !!agent && sim.sessions.get(session) === agent;
+  const given = args.key === undefined || args.key === null ? "" : normalKey(String(args.key));
+  const keyed = !!agent && !!given && !!agent.key && given === normalKey(agent.key);
+  if (agent && !same) {
+    const held = keyed ? null : heldBy(sim, agent);
     if (held) {
       throw new Error(
         given ? `That rejoin key isn't ${agent.name}'s latest one. ${held}` : held,
@@ -330,8 +357,23 @@ function join(sim: Sim, session: string, args: Args): string {
   agent.key = rejoinKey(session, agent.id, sim.tick);
   const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
   sim.fire("joined", agent, fx, sim.world.heightAt(fx, fz), fz, agent.name);
-  return (returning ? `Welcome back, ${agent.name}.` : `Welcome, ${agent.name}.`) +
-    ` You're standing at x=${Math.floor(agent.x)} z=${Math.floor(agent.z)} in a meadow.\n` +
+  const hello = `${returning ? "Welcome back" : "Welcome"}, ${agent.name}.` +
+    ` You're standing at x=${fx} z=${fz} in a meadow.\n`;
+  const rejoin = `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
+    `${agent.name} is held, join with your name and this key to step straight back in.`;
+  if (returning && (same || keyed)) {
+    return hello +
+      "Your inventory and journal are as you left them. This is a slow, peaceful village " +
+      "that people watch: farm, build, craft and add to the Catalog with your tools (each " +
+      "tool's description says how), and narrate now and then with say. " +
+      `${catalogSummary(sim)}\n` +
+      `${villageText(sim, agent)}\n` +
+      (agent.journal.length
+        ? "Start with look, and journal_read for your notes from before."
+        : "Start with look.") +
+      rejoin;
+  }
+  return hello +
     "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
     "to ripen, harvest, and build what you like: place_block lays a floor or raises a wall in " +
     "one call, break_block digs, and build puts up a whole Design (its blocks, and its parts as " +
@@ -357,8 +399,7 @@ function join(sim: Sim, session: string, args: Args): string {
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
       : "") +
-    `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
-    `${agent.name} is held, join with your name and this key to step straight back in.`;
+    rejoin;
 }
 
 const KEY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -404,13 +445,13 @@ function heldBy(sim: Sim, agent: Agent): string | null {
       ? "busy right now"
       : ago < 1
       ? "they called just now"
-      : `their last call was ${minutes(ago)} ago`
+      : `their last call was ${gameMinutes(ago)} ago`
   }). If that was you before your connection reset, join again with the rejoin key your last ` +
     `join gave you, or ask the human watching to free the villagers (the panel's agents section). Otherwise join with a name of your own. A villager is ` +
     `free to rejoin once its agent has made no call for a game day${
       agent.queue.length
         ? ""
-        : `: ${agent.name} is free in ${minutes(freeIn)} (${
+        : `: ${agent.name} is free in ${gameMinutes(freeIn)} (${
           realMinutes(HOLD_TICKS - idle)
         } at normal speed)`
     }.`;
@@ -421,8 +462,6 @@ const realMinutes = (ticks: number) => {
   const n = Math.max(1, Math.ceil(ticks / TICK_HZ / 60));
   return n === 1 ? "about 1 real minute" : `about ${n} real minutes`;
 };
-const minutes = (n: number) =>
-  n >= 90 ? `${Math.round(n / 60)} game hours` : n === 1 ? "1 game minute" : `${n} game minutes`;
 
 /** What join says about Village Life, or that the world is a Sandbox. */
 function villageIntro(sim: Sim): string {
@@ -488,7 +527,7 @@ const HANDLERS: Record<string, Handler> = {
     }
     return (function* () {
       yield* walk(sim, agent, (cx, cz) => cx === x && cz === z, octile(x, z), `(${x}, ${z})`);
-      return `You arrive at x=${x} z=${z}.`;
+      return `You arrive.`;
     })();
   },
 
@@ -867,6 +906,28 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     }
   }
   const built = new Map<number, string>();
+  // Every covered tile in view per Object: each marks the tile nearest its center, once, so a
+  // multi-tile Object doesn't read as several.
+  const covered = new Map<number, [number, number][]>();
+  for (let z = az - r; z <= az + r; z++) {
+    for (let x = ax - r; x <= ax + r; x++) {
+      const o = sim.objects.at(x, z);
+      if (!o) continue;
+      const tiles = covered.get(o.id) ?? covered.set(o.id, []).get(o.id)!;
+      tiles.push([x, z]);
+    }
+  }
+  const spots = new Map<number, number>();
+  for (const [id, tiles] of covered) {
+    const o = sim.objects.get(id)!;
+    const c = sim.physics.center(o);
+    let best = tiles[0], bd = Infinity;
+    for (const t of tiles) {
+      const d = (t[0] + 0.5 - c[0]) ** 2 + (t[1] + 0.5 - c[2]) ** 2;
+      if (d < bd) bd = d, best = t;
+    }
+    spots.set(id, best[1] * w.sizeX + best[0]);
+  }
   /** Marks for Objects in view by Design, and how bodies get past each. */
   const objMarks = new Map<number, { mark: string; name: string; how: string }>();
   const objectMark = (x: number, z: number): string | null => {
@@ -927,8 +988,9 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         const names = marks.get(c) ?? new Set();
         marks.set(c, names.add(young ? `young ${info.entry.name}` : info.entry.name));
       }
-      const om = objectMark(x, z);
-      if (om) c = om;
+      const o = sim.objects.at(x, z);
+      const om = o ? objectMark(x, z) : null;
+      if (om && o && spots.get(o.id) === z * w.sizeX + x) c = om;
       const crop = sim.crops.get(z * w.sizeX + x);
       if (crop) {
         const g = sim.cropGrowth(crop);
@@ -951,13 +1013,16 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     heights.push(hrow);
   }
 
-  const light = sim.lightAt(ax, Math.floor(agent.y + 0.05), az);
-  const day = daylight(w, t, sim.clouds(), ax, Math.floor(agent.y + 0.05), az);
+  // On a slope the feet dip into the top block's own cell; the light is the open cell's above it.
+  const feet = Math.floor(agent.y + 0.05);
+  const cell = feet === ah ? ah + 1 : feet;
+  const light = sim.lightAt(ax, cell, az);
+  const day = daylight(w, t, sim.clouds(), ax, cell, az);
   const how = light < 0.08
     ? "dark"
     : light > day + 1e-6
     ? "lamplight"
-    : day < 0.6 && w.heightAt(ax, az) >= Math.floor(agent.y + 0.05)
+    : day < 0.6 && w.heightAt(ax, az) >= cell
     ? "under a roof"
     : "daylight";
   const lines = [
@@ -1019,7 +1084,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       if (gives) {
         rock = true;
         const name = sim.catalog.get(prop.design)!.name;
-        beyond.push(`a ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
+        beyond.push(`${an(name)} ${name} to break for stone at x=${x} z=${z} (${away(d)})`);
       }
     }
     if (w.waterTop[z * w.sizeX + x] >= 0) {
@@ -1050,7 +1115,7 @@ function describe(sim: Sim, agent: Agent, r: number): string {
     const product = sim.catalog.byName(def.name);
     const gives = product ? sim.drops(product)[0]?.[0] : undefined;
     beyond.push(
-      `a ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
+      `${an(def.name)} ${def.name}${gives ? ` (${gives})` : ""} at x=${Math.floor(best.x)} z=${
         Math.floor(best.z)
       } (${away(Math.round(bestD))}, wandering)`,
     );
@@ -1071,8 +1136,14 @@ function describe(sim: Sim, agent: Agent, r: number): string {
       const n = mine[0].a;
       const body = sim.catalog.byName(def.name);
       const product = def.productEvery && body ? sim.drops(body)[0]?.[0] : undefined;
+      const mature = mine.filter(({ a }) => sim.tick >= a.readyAt);
       const ready = product
-        ? `, ${mine.filter(({ a }) => sim.tick >= a.readyAt).length} with ${product} ready`
+        ? `, ${mature.length} with ${product} ready` +
+          (mature.length
+            ? ` (the nearest of them at x=${Math.floor(mature[0].a.x)} z=${
+              Math.floor(mature[0].a.z)
+            })`
+            : "")
         : "";
       lines.push(
         `  ${mine.length} ${def.name}${
@@ -1109,10 +1180,13 @@ function describe(sim: Sim, agent: Agent, r: number): string {
         ? "push"
         : "too heavy to move";
       const motion = !o.asleep && !o.held && Math.hypot(...o.vel) > 0.3 ? ", moving" : "";
+      const on = o.held ? undefined : sim.objects.restsOn(o);
       lines.push(
         `  ${sim.catalog.get(o.design)?.name ?? "Object"} at x=${Math.floor(c[0])} z=${
           Math.floor(c[2])
-        } (${Math.round(d)} tiles, ${kg(mass)}: ${how}${motion})`,
+        } (${Math.round(d)} tiles, ${kg(mass)}: ${how}${motion})${
+          on ? `, on the ${sim.catalog.get(on.design)?.name ?? "Object"}` : ""
+        }`,
       );
     }
     if (things.length > 8) lines.push(`  …and ${things.length - 8} more`);

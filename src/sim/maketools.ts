@@ -1,6 +1,16 @@
 import { type Animal, SPECIES } from "./animals.ts";
 import type { DesignContent, Entry, MaterialContent } from "./catalog.ts";
-import { areaArgs, give, type Handler, inventoryText, MAX_AREA, num, reach, work } from "./jobs.ts";
+import {
+  an,
+  areaArgs,
+  give,
+  type Handler,
+  inventoryText,
+  MAX_AREA,
+  num,
+  reach,
+  work,
+} from "./jobs.ts";
 import { PART_TICKS, partCost, type WorldObject } from "./objects.ts";
 import { type Agent, Anim, type Sim, TICK_HZ } from "./sim.ts";
 import type { ToolDef } from "./tools.ts";
@@ -93,7 +103,9 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     if (benches.length && !bench) {
       const names = benches.map((d) => `"${(sim.catalog.current(d) ?? d).name}"`).join(" or ");
       throw new Error(
-        `${product.name} is made at a ${names}, and none stands within ${BENCH_SEARCH} tiles. ` +
+        `${product.name} is made at ${
+          an(names)
+        } ${names}, and none stands within ${BENCH_SEARCH} tiles. ` +
           `Build one (catalog_get ${
             names.split(" or ")[0]
           } says what it takes) and craft beside it.`,
@@ -157,14 +169,14 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
     const seen = new Set<number>();
     const things = tiles.filter(([x, z]) => {
       const o = sim.objects.at(x, z);
-      if (o) {
-        if (seen.has(o.id) || o.held || !fits(objectName(sim, o))) return false;
-        seen.add(o.id);
-        return true;
-      }
+      // An Object's tile keeps its plant in view on the map, so check it even under the Object.
       const p = sim.props.at(x, z);
       const e = p && designOf(p.design);
-      return !!e && fits(e.name, givesOf(e));
+      const plant = !!e && fits(e.name, givesOf(e));
+      if (!o) return plant;
+      if (seen.has(o.id) || o.held || !fits(objectName(sim, o))) return plant;
+      seen.add(o.id);
+      return true;
     });
     if (!things.length && !animals.length) {
       // Say what is there (or nearest), so a wrong guess at a name is one call to fix.
@@ -172,10 +184,12 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
       for (const [x, z] of tiles) {
         const o = sim.objects.at(x, z), p = sim.props.at(x, z);
         if (o) here.add(`the ${objectName(sim, o)}`);
-        else if (p) here.add(`${sim.props.info(p)?.entry.name ?? "a plant"}`);
+        if (p) here.add(`${sim.props.info(p)?.entry.name ?? "a plant"}${o ? " under it" : ""}`);
       }
       for (const a of sim.animals) {
-        if (near(a, ANIMAL_MARGIN)) here.add(`a ${SPECIES[a.species].name}`);
+        if (near(a, ANIMAL_MARGIN)) {
+          here.add(`${an(SPECIES[a.species].name)} ${SPECIES[a.species].name}`);
+        }
       }
       const what = target ? `no ${target}` : "nothing to gather";
       let hint = here.size
@@ -205,19 +219,29 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         }
       };
       for (const [x, z] of things) {
-        const o = sim.objects.at(x, z);
-        const p = o ? undefined : sim.props.at(x, z);
-        const label = o ? objectName(sim, o) : p ? sim.props.info(p)?.entry.name ?? "" : "";
+        let o = sim.objects.at(x, z);
+        let p = sim.props.at(x, z);
+        if (o && !fits(objectName(sim, o))) o = undefined;
+        let plant: ReturnType<typeof gatherPlant> | null = null;
+        if (p) {
+          const e = designOf(p.design);
+          if (!e || !fits(e.name, givesOf(e))) {
+            p = undefined;
+          } else if (!(plant = gatherPlant(sim, p)).items.length) {
+            p = undefined;
+            if (!o) {
+              skipped.push(
+                `(${x},${z}) the ${e.name} gives nothing (it has no drops Relation)`,
+              );
+              continue;
+            }
+          }
+        }
         if (!o && !p) {
           skipped.push(`(${x},${z}) nothing there now`);
           continue;
         }
-        // What a plant gives is known before walking over, so hopeless tiles cost nothing.
-        const plant = p ? gatherPlant(sim, p) : null;
-        if (plant && !plant.items.length) {
-          skipped.push(`(${x},${z}) the ${label} gives nothing (it has no drops Relation)`);
-          continue;
-        }
+        const label = o ? objectName(sim, o) : sim.props.info(p!)?.entry.name ?? "";
         try {
           yield* reach(sim, agent, x, z);
         } catch {
@@ -230,28 +254,30 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
           yield* work(agent, Anim.Build, Math.min(8 * TICK_HZ, PART_TICKS * parts));
           if (!sim.objects.get(o.id) || o.held) {
             skipped.push(`(${x},${z}) the ${label} is gone`);
+          } else {
+            // Whatever rested on it falls.
+            const c = sim.physics.center(o);
+            sim.objects.remove(o);
+            sim.physics.forget(o.id);
+            sim.physics.wakeNear(sim.objects.list, c[0], c[1], c[2], 1);
+            take(content ? [...partCost(content)] : []);
+            did.push(`took apart the ${label}`);
+            sim.fire("gathered", agent, x, w.heightAt(x, z), z, label);
+          }
+        }
+        if (p) {
+          yield* work(agent, plant!.anim, plant!.ticks);
+          const still = sim.props.at(x, z);
+          if (still !== p) {
+            skipped.push(`(${x},${z}) the ${sim.props.info(p)?.entry.name ?? "plant"} is gone`);
             continue;
           }
-          // Whatever rested on it falls.
-          const c = sim.physics.center(o);
-          sim.objects.remove(o);
-          sim.physics.forget(o.id);
-          sim.physics.wakeNear(sim.objects.list, c[0], c[1], c[2], 1);
-          take(content ? [...partCost(content)] : []);
-          did.push(`took apart the ${label}`);
-          sim.fire("gathered", agent, x, w.heightAt(x, z), z, label);
-          continue;
+          sim.props.set(x, z, null);
+          take(plant!.items);
+          const name = sim.props.info(p)?.entry.name ?? "plant";
+          did.push(`${plant!.verb} the ${name}`);
+          sim.fire("gathered", agent, x, w.heightAt(x, z), z, name);
         }
-        yield* work(agent, plant!.anim, plant!.ticks);
-        const still = sim.props.at(x, z);
-        if (still !== p) {
-          skipped.push(`(${x},${z}) the ${label} is gone`);
-          continue;
-        }
-        sim.props.set(x, z, null);
-        take(plant!.items);
-        did.push(`${plant!.verb} the ${label}`);
-        sim.fire("gathered", agent, x, w.heightAt(x, z), z, label);
       }
       for (const a of animals) {
         const def = SPECIES[a.species];
@@ -280,7 +306,7 @@ export const MAKE_HANDLERS: Record<string, Handler> = {
         if (sim.tick < a.readyAt) continue;
         a.readyAt = sim.tick + def.productEvery;
         take(items);
-        did.push(`${VERBS[def.name] ?? "collected from"} a ${def.name}`);
+        did.push(`${VERBS[def.name] ?? "collected from"} ${an(def.name)} ${def.name}`);
         const fx = Math.floor(a.x), fz = Math.floor(a.z);
         sim.fire("gathered", agent, fx, w.heightAt(fx, fz), fz, def.name);
       }

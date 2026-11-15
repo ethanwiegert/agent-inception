@@ -54,4 +54,8 @@ export class LightTexture {
     }
     field.changed.clear();
   }
+
+  destroy() {
+    this.texture.destroy();
+  }
 }

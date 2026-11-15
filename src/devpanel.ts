@@ -30,6 +30,8 @@ export interface DevHandlers {
   /** Pin a Wish on the Notice Board, for anyone (null) or one villager by name. */
   wish: (text: string, forName: string | null) => void;
   unpin: (id: number) => void;
+  /** Hide one reply on a Wish (or show it again), without touching the Wish. */
+  hideReply: (wish: number, index: number, hidden: boolean) => void;
   sound: (muted: boolean) => void;
 }
 
@@ -398,15 +400,23 @@ export function createDevPanel(on: DevHandlers) {
             }: ${w.text}`;
             head.prepend(x);
             el.append(head);
-            for (
-              const r of [
-                ...w.replies,
-                ...(w.done?.note ? [{ by: w.done.by, text: w.done.note }] : []),
-              ]
-            ) {
+            w.replies.forEach((r, i) => {
+              const line = document.createElement("div");
+              line.style.cssText = "padding-left:10px;color:#a9c48b" +
+                (r.hidden ? ";opacity:.45" : "");
+              const hide = button("×", () => on.hideReply(w.id, i, !r.hidden));
+              hide.title = r.hidden ? "show" : "hide";
+              hide.setAttribute("aria-label", hide.title);
+              hide.classList.add("small");
+              hide.style.cssText = "float:right;margin-left:4px";
+              line.textContent = `${r.by}: ${r.text}`;
+              line.prepend(hide);
+              el.append(line);
+            });
+            if (w.done?.note) {
               const line = document.createElement("div");
               line.style.cssText = "padding-left:10px;color:#a9c48b";
-              line.textContent = `${r.by}: ${r.text}`;
+              line.textContent = `${w.done.by}: ${w.done.note}`;
               el.append(line);
             }
             return el;

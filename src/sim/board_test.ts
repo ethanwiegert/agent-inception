@@ -100,6 +100,21 @@ Deno.test("board: the spectator's limits", () => {
   sim.board.pin("room again");
 });
 
+Deno.test("board: a spectator hides one reply, the Wish stays", () => {
+  const sim = world();
+  sim.board.pin("Build a tower");
+  ok(run(sim, "a", "board", { action: "reply", id: 1, text: "On it" }));
+  ok(run(sim, "b", "board", { action: "reply", id: 1, text: "Me too" }));
+  assert(sim.board.hideReply(1, 1));
+  const list = ok(run(sim, "a", "board"));
+  assert(list.includes("On it"), list);
+  assert(!list.includes("Me too"), list);
+  assert(!sim.board.hideReply(1, 7));
+  assert(!sim.board.hideReply(99, 0));
+  assert(sim.board.hideReply(1, 1, false));
+  assert(ok(run(sim, "a", "board")).includes("Me too"));
+});
+
 Deno.test("board: an adversary's arguments are refused with a reason", () => {
   const sim = world();
   sim.board.pin("Build a tower");

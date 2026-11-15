@@ -109,6 +109,9 @@ async function handle(msg: ToWorker) {
     case "unpin":
       sim?.board.unpin(msg.id);
       break;
+    case "hideReply":
+      sim?.board.hideReply(msg.wish, msg.index, msg.hidden);
+      break;
     case "save":
       await persist();
       break;
