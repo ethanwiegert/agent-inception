@@ -86,6 +86,11 @@ export interface RenderStats {
   chunksRebuilt: number;
 }
 
+/** Feature tier: `low` (software adapters) keeps the single forward pass; `medium` adds scene
+ * depth, AO and shafts; `high` adds SSR and the cloud slab. See the tier table in
+ * docs/plans/visual-overhaul.md. */
+export type Quality = "low" | "medium" | "high";
+
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
@@ -96,6 +101,8 @@ export class Renderer {
    * Grass is most of a software adapter's frame, so CPU-only machines draw fewer.
    */
   grassDensity = 1;
+  /** Which passes and shader variants this renderer builds; recreated `SceneTargets` on change. */
+  quality: Quality = "high";
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
   private frameBuffer: GPUBuffer;
@@ -311,8 +318,19 @@ export class Renderer {
     this.stats.grassBlades = blades;
 
     const encoder = device.createCommandEncoder();
+    // The GPU timer's start stamp goes on the frame's first pass, whatever it turns out to be
+    // (cull compute today; the cloud slab once it exists); the end stays on the post pass.
+    let started = false;
+    const firstStamp = () => {
+      if (started) return undefined;
+      started = true;
+      return this.timer?.writes(0);
+    };
     if (!this.debug.has("props")) {
-      const cull = encoder.beginComputePass({ label: "models-cull" });
+      const cull = encoder.beginComputePass({
+        label: "models-cull",
+        timestampWrites: firstStamp() as GPUComputePassTimestampWrites | undefined,
+      });
       this.models.cull(cull, this.flora, 0, this.planes, camera.eye, LOD_DISTANCE);
       this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye, 0);
       this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye, LOD_DISTANCE);
@@ -327,7 +345,7 @@ export class Renderer {
         depthLoadOp: "clear",
         depthStoreOp: "store",
       },
-      timestampWrites: this.timer?.writes(0),
+      timestampWrites: firstStamp(),
     });
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
     if (!this.debug.has("shadow")) {
@@ -438,9 +456,11 @@ export class Renderer {
   }
 
   private sceneTargets(have: SceneTargets | null, width: number, height: number): SceneTargets {
-    if (have && have.width === width && have.height === height) return have;
+    if (
+      have && have.width === width && have.height === height && have.quality === this.quality
+    ) return have;
     have?.destroy();
-    return new SceneTargets(this.device, this.layouts, this.post, width, height);
+    return new SceneTargets(this.device, this.layouts, this.post, width, height, this.quality);
   }
 
   /**
@@ -507,6 +527,7 @@ class SceneTargets {
     post: PostRenderer,
     readonly width: number,
     readonly height: number,
+    readonly quality: Quality,
   ) {
     const { samples, colorFormat, depthFormat } = layouts;
     const make = (format: GPUTextureFormat, sampleCount: number, usage: number) =>
