@@ -582,7 +582,9 @@ export class Renderer {
         },
       });
       trans.setBindGroup(0, this.frameBindGroup);
-      if (!skip.has("water")) this.water.draw(trans, this.planes, targets.scene);
+      if (!skip.has("water")) {
+        this.water.draw(trans, this.planes, targets.scene, this.quality === "high");
+      }
       if (!skip.has("fire")) this.particles.draw(trans);
       trans.end();
       // In-scattered light lands on the resolve ahead of bloom, so strong shafts glow.

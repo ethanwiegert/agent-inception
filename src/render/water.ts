@@ -20,7 +20,7 @@ const sceneWgsl = /* wgsl */ `
 @group(2) @binding(3) var sceneLinearDepth: texture_2d<f32>;
 `;
 
-const shader = (sceneInputs: boolean) =>
+const shader = (sceneInputs: boolean, ssr: boolean) =>
   frameWgsl + lightingWgsl + (sceneInputs ? sceneWgsl : "") + /* wgsl */ `
 @group(1) @binding(0) var surface: texture_2d<u32>;
 @group(1) @binding(1) var<storage, read> wet: array<u32>;
@@ -82,12 +82,19 @@ fn floorAt(xz: vec2f) -> f32 {
  * The water's slope at xz. reach is how far xz moves across one pixel: a wave finer than the
  * pixels it lands on fades out, where it used to alias into moiré rings on the far sea.
  */
-fn waveSlope(xz: vec2f, t: f32, reach: f32) -> vec2f {
+fn waveSlope(xz: vec2f, t: f32, reach: f32, fetch: f32) -> vec2f {
   var g = vec2f(0.0);
-  let dirs = array<vec2f, 4>(vec2f(0.8, 0.6), vec2f(-0.4, 0.9), vec2f(0.95, -0.3), vec2f(-0.7, -0.7));
-  let freqs = array<f32, 4>(0.9, 1.7, 3.1, 5.3);
-  let amps = array<f32, 4>(0.05, 0.03, 0.016, 0.008);
-  for (var i = 0; i < 4; i++) {
+  // The two longest waves run with the wind, spread a few degrees apart; their height grows with
+  // open-water fetch (depth standing in for shore distance), so ponds stay calm.
+  let wdir = frame.wind.xy / max(length(frame.wind.xy), 0.2);
+  let wa = atan2(wdir.y, wdir.x);
+  let dirs = array<vec2f, 6>(
+    vec2f(cos(wa + 0.35), sin(wa + 0.35)), vec2f(cos(wa - 0.3), sin(wa - 0.3)),
+    vec2f(-0.4, 0.9), vec2f(0.95, -0.3), vec2f(-0.7, -0.7), vec2f(0.3, -0.95));
+  let freqs = array<f32, 6>(0.9, 1.3, 1.7, 3.1, 5.3, 7.7);
+  let amps = array<f32, 6>(
+    0.05 * mix(0.3, 1.0, fetch), 0.04 * mix(0.3, 1.0, fetch), 0.03, 0.016, 0.008, 0.005);
+  for (var i = 0; i < 6; i++) {
     let phase = dot(dirs[i], xz) * freqs[i] + t * (1.2 + f32(i) * 0.4);
     // freqs[i] * reach: the radians this wave turns from one pixel to the next, at most.
     g += dirs[i] * cos(phase) * amps[i] * freqs[i] * (1.0 - smoothstep(0.5, 1.6, freqs[i] * reach));
@@ -98,54 +105,161 @@ fn waveSlope(xz: vec2f, t: f32, reach: f32) -> vec2f {
   g += vec2f(valueNoise(r + vec2f(e, 0.0)) - valueNoise(r - vec2f(e, 0.0)),
              valueNoise(r + vec2f(0.0, e)) - valueNoise(r - vec2f(0.0, e))) * 0.12 *
     (1.0 - smoothstep(0.25, 0.8, 2.3 * reach));
+  // Cat's paws: gust streaks advected downwind across open water.
+  let paw = valueNoise(vec2f(dot(xz, wdir) * 0.08 - t * 0.9, dot(xz, vec2f(-wdir.y, wdir.x)) * 0.3));
+  g += wdir * smoothstep(0.6, 0.9, paw) * fetch * 0.06 * (1.0 - smoothstep(0.2, 0.7, 2.3 * reach));
   return g;
 }
 
-fn shadeWater(world: vec3f) -> vec4f {
+/** Ripples spreading from anything wading: rings around each pusher near the surface. */
+fn rippleSlope(xz: vec2f, t: f32) -> vec2f {
+  var g = vec2f(0.0);
+  for (var i = 0; i < 16; i++) {
+    let p = frame.pushers[i];
+    if (p.w <= 0.0) { continue; }
+    let d = xz - p.xz;
+    let dist = length(d);
+    if (dist > p.w * 3.0 + 3.0) { continue; }
+    let ring = sin(dist * 6.0 - t * 6.0) * exp(-(dist - p.w) * 0.8);
+    g += (d / max(dist, 0.01)) * ring * 0.35;
+  }
+  return g;
+}
+
+/** Sky + cloud reflection along the bent reflect ray, shared by both tiers. */
+fn skyMirror(r: vec3f, world: vec3f) -> vec3f {
+  let up = vec3f(r.x, abs(r.y), r.z);
+  var sky = skyColor(up);
+  // The clouds overhead show in the water, soft: the same layer that shades the ground.
+  let cloudAt = world.xz + up.xz * ((CLOUD_HEIGHT - world.y) / max(up.y, 0.08));
+  let cloud = frame.sunColor.rgb * frame.sunDir.w * 0.38 + frame.skyZenith.rgb * 0.9 +
+    frame.skyHorizon.rgb * 0.4;
+  sky = mix(sky, cloud, cloudDensity(cloudAt) * smoothstep(0.05, 0.3, up.y) * 0.8);
+  return sky;
+}
+
+/** Ray-length per view-depth unit at a screen uv (linear depth is stored along the forward). */
+fn rayScaleAt(uv: vec2f) -> f32 {
+  let w = frame.invViewProj * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
+  return length(w.xyz / w.w - frame.cameraPos.xyz) / frame.depthParams.x;
+}
+
+fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
   let t = frame.cameraPos.w;
-  let g = waveSlope(world.xz, t, max(length(dpdx(world.xz)), length(dpdy(world.xz))));
+  let depth = max(world.y - floorAt(world.xz), 0.0);
+  let fetch = smoothstep(0.3, 3.0, depth);
+  var g = waveSlope(world.xz, t, max(length(dpdx(world.xz)), length(dpdy(world.xz))), fetch);
+  g += rippleSlope(world.xz, t);
   let n = normalize(vec3f(-g.x, 1.0, -g.y));
   let toEye = frame.cameraPos.xyz - world;
-  let view = normalize(toEye);
+  let dist = length(toEye);
+  let view = toEye / dist;
   let ndv = max(dot(n, view), 0.0);
   let fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
-  let depth = max(world.y - floorAt(world.xz), 0.0);
   let light = keyLightFast(world);
   let ambient = frame.skyZenith.rgb * frame.sunColor.w * 0.9 + frame.groundAmbient.rgb * 0.3;
   let lit = ambient + frame.sunColor.rgb * frame.sunDir.w * max(frame.sunDir.y, 0.0) * light * 0.6;
   let shallow = vec3f(0.035, 0.13, 0.11);
   let deep = vec3f(0.006, 0.03, 0.045);
-  let body = mix(shallow, deep, smoothstep(0.0, 3.0, depth)) * lit;
+  var body = mix(shallow, deep, smoothstep(0.0, 3.0, depth)) * lit;
+
+  var alpha: f32;
+  var base = body;
+  ${
+    sceneInputs
+      ? /* wgsl */ `
+    // Refraction: the opaque color offset by the wave normal, rejected where a nearer opaque
+    // surface (a hull, a rock) would be pulled under the water. The floor's view depth comes
+    // from the half-res linear depth, scaled by the ray's slant to match the eye distance.
+    let ndcUv = pos.xy * frame.depthParams.zw;
+    var uv = ndcUv + n.xz * (min(depth, 2.5) * 0.035) / max(dist * 0.002, 1.0);
+    var backL = textureSampleLevel(sceneLinearDepth, sceneSampler, uv, 0.0).r * rayScaleAt(uv);
+    if (backL < dist - 0.05) {
+      uv = ndcUv;
+      backL = textureSampleLevel(sceneLinearDepth, sceneSampler, uv, 0.0).r * rayScaleAt(uv);
+    }
+    let path = max(backL - dist, 0.0);
+    var refracted = textureSampleLevel(sceneColor, sceneSampler, uv, 0.0).rgb;
+    // Absorption along the true path through the water: wading things and reeds sink into the
+    // color instead of cutting a line; the shallow teal over sand stays.
+    refracted *= exp(-path * vec3f(0.5, 0.22, 0.18));
+    refracted += mix(shallow, deep, smoothstep(0.0, 4.0, path)) * lit * (1.0 - exp(-path * 0.9));
+    var refl = skyMirror(reflect(-view, n), world);
+    ${
+        ssr
+          ? /* wgsl */ `
+    // Screen-space reflections (high): march the reflected ray against the half-res linear
+    // depth and fetch the opaque color; fall back to the sky mirror off-screen and at edges.
+    if (n.y > 0.6 && dist < 220.0) {
+      let rr = reflect(-view, n);
+      var hit = false;
+      var hp = vec2f(0.0);
+      for (var i = 0; i < 12; i++) {
+        let st = 0.4 + 60.0 * (f32(i) / 12.0) * (f32(i) / 12.0);
+        let wp = world + rr * st;
+        let clip = frame.viewProj * vec4f(wp, 1.0);
+        if (clip.w <= 0.0) { continue; }
+        let sp = clip.xy / clip.w * vec2f(0.5, -0.5) + 0.5;
+        if (sp.x < 0.0 || sp.x > 1.0 || sp.y < 0.0 || sp.y > 1.0) { break; }
+        let sl = textureSampleLevel(sceneLinearDepth, sceneSampler, sp, 0.0).r * rayScaleAt(sp);
+        let wl = length(wp - frame.cameraPos.xyz);
+        if (sl < 3000.0 && wl > sl && wl - sl < 1.5) { hit = true; hp = sp; break; }
+      }
+      if (hit) {
+        let edge = smoothstep(0.0, 0.06, hp.x) * smoothstep(1.0, 0.94, hp.x) *
+          smoothstep(0.0, 0.06, hp.y) * smoothstep(1.0, 0.94, hp.y);
+        refl = mix(refl, textureSampleLevel(sceneColor, sceneSampler, hp, 0.0).rgb,
+          edge * smoothstep(0.15, 0.3, n.y));
+      }
+    }`
+          : ""
+      }
+    base = mix(refracted, refl, fresnel);
+    alpha = 1.0;
+  `
+      : /* wgsl */ `
+    base = mix(body, skyMirror(reflect(-view, n), world), fresnel);
+    // The floor below is already darkened by absorption, so the surface itself can stay fairly
+    // clear. Deep water hides its floor: the open sea has none, and the world's edge would show.
+    let clear = mix(0.25, 0.85, smoothstep(0.0, 3.5, depth)) + 0.15 * smoothstep(3.5, 6.5, depth);
+    alpha = clamp(max(clear, fresnel), 0.0, 1.0);
+  `
+  }
 
   let r = reflect(-view, n);
-  let up = vec3f(r.x, abs(r.y), r.z);
-  var sky = skyColor(up);
-  // The clouds overhead show in the water, soft: the same layer that shades the ground.
-  let cloudAt = world.xz + up.xz * ((CLOUD_HEIGHT - world.y) / max(up.y, 0.08));
-  let cloud = frame.sunColor.rgb * frame.sunDir.w * 0.38 + frame.skyZenith.rgb * 0.9 + frame.skyHorizon.rgb * 0.4;
-  sky = mix(sky, cloud, cloudDensity(cloudAt) * smoothstep(0.05, 0.3, up.y) * 0.8);
-  var color = mix(body, sky, fresnel);
-  let spec = pow(max(dot(r, frame.sunDir.xyz), 0.0), 600.0) * 30.0 + pow(max(dot(r, frame.sunDir.xyz), 0.0), 60.0) * 0.4;
+  var color = base;
+  // Sun glitter: a wide path at low sun, a tight sparkle overhead; the moon leaves a path too.
+  let sunD = max(dot(r, frame.sunDir.xyz), 0.0);
+  let glitter = mix(240.0, 60.0, smoothstep(0.3, 0.0, frame.sunDir.y));
+  let spec = pow(sunD, glitter) * 30.0 + pow(sunD, 60.0) * 0.4;
   color += frame.sunColor.rgb * frame.sunDir.w * spec * light;
+  color += vec3f(0.55, 0.65, 1.0) * frame.moonDir.w * pow(max(dot(r, frame.moonDir.xyz), 0.0), 500.0) * 8.0 * light;
 
-  // Foam where the water thins out against the shore.
+  // Foam where the water thins out against the shore. In the scene variant the soft intersection
+  // also softens where anything opaque meets the surface.
+  var foamDepth = depth;
+  ${
+    sceneInputs
+      ? /* wgsl */ `
+  let bl = textureSampleLevel(sceneLinearDepth, sceneSampler, ndcUv, 0.0).r * rayScaleAt(ndcUv);
+  foamDepth = min(depth, max(bl - dist, 0.0) * 1.4);
+  `
+      : ""
+  }
   let foamNoise = valueNoise(world.xz * 3.0 + vec2f(t * 0.3, t * 0.2)) * valueNoise(world.xz * 7.0 - t * 0.25);
-  // Thin lines of foam lap toward the shore over the shallows, broken up by the same noise.
-  let lap = smoothstep(0.82, 1.0, sin(depth * 11.0 + t * 1.3 + valueNoise(world.xz * 0.7) * 6.0)) *
-    smoothstep(0.75, 0.3, depth) * smoothstep(0.03, 0.12, depth) * smoothstep(0.0, 0.2, foamNoise);
-  let foam = max(smoothstep(0.35, 0.0, depth) * smoothstep(0.08, 0.25, foamNoise + 0.15), lap * 0.7);
+  // A slow swash wets and dries the sand band; lapping lines ride in on it.
+  let swash = depth - sin(t * 0.5 + valueNoise(world.xz * 0.25) * 8.0) * 0.22;
+  let lap = smoothstep(0.82, 1.0, sin(swash * 11.0 + t * 1.3 + valueNoise(world.xz * 0.7) * 6.0)) *
+    smoothstep(0.75, 0.3, swash) * smoothstep(0.03, 0.12, swash) * smoothstep(0.0, 0.2, foamNoise);
+  let foam = max(smoothstep(0.35, 0.0, foamDepth) * smoothstep(0.08, 0.25, foamNoise + 0.15), lap * 0.7);
   color = mix(color, (ambient + frame.sunColor.rgb * frame.sunDir.w * light * 0.5) * 0.9, foam);
-
-  // The floor below is already darkened by absorption, so the surface itself can stay fairly
-  // clear. Deep water hides its floor: the open sea has none, and the world's edge would show.
-  let clear = mix(0.25, 0.85, smoothstep(0.0, 3.5, depth)) + 0.15 * smoothstep(3.5, 6.5, depth);
-  let alpha = clamp(max(clear, fresnel) + foam, 0.0, 1.0);
+  alpha = clamp(max(alpha, foam), 0.0, 1.0);
   return vec4f(fog(color, world), alpha);
 }
 
 @fragment fn fsColumns(in: Out) -> @location(0) vec4f {
-  return shadeWater(in.world);
+  return shadeWater(in.world, in.pos);
 }
 
 @fragment fn fsOcean(in: Out) -> @location(0) vec4f {
@@ -154,14 +268,14 @@ fn shadeWater(world: vec3f) -> vec4f {
   let size = vec2f(textureDimensions(surface));
   let edge = fwidth(in.world.xz);
   if (all(in.world.xz >= edge) && all(in.world.xz <= size - edge)) { discard; }
-  return shadeWater(in.world);
+  return shadeWater(in.world, in.pos);
 }
 `;
 
 export class WaterRenderer {
   private layout: GPUBindGroupLayout;
   private bindGroup: GPUBindGroup | null = null;
-  /** [plain, scene] pipeline pairs; scene variants see the opaque pass's color and depth. */
+  /** [plain, scene, scene+ssr] pipeline pairs; scene variants see the opaque pass's output. */
   private columns: GPURenderPipeline[] = [];
   private ocean: GPURenderPipeline[] = [];
   private wet: GPUBuffer | null = null;
@@ -192,8 +306,13 @@ export class WaterRenderer {
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       ],
     });
-    const modules = [false, true].map((scene) =>
-      device.createShaderModule({ code: shader(scene), label: scene ? "water-scene" : "water" })
+    const variants: [boolean, boolean, string][] = [
+      [false, false, "water"],
+      [true, false, "water-scene"],
+      [true, true, "water-ssr"],
+    ];
+    const modules = variants.map(([scene, ssr, label]) =>
+      device.createShaderModule({ code: shader(scene, ssr), label })
     );
     const pipeline = (module: GPUShaderModule, scene: boolean, vs: string, fs: string) =>
       device.createRenderPipeline({
@@ -223,9 +342,10 @@ export class WaterRenderer {
         },
         multisample: { count: layouts.samples },
       });
-    for (const scene of [false, true]) {
-      this.columns.push(pipeline(modules[scene ? 1 : 0], scene, "vsColumns", "fsColumns"));
-      this.ocean.push(pipeline(modules[scene ? 1 : 0], scene, "vsOcean", "fsOcean"));
+    for (let v = 0; v < 3; v++) {
+      const scene = v > 0;
+      this.columns.push(pipeline(modules[v], scene, "vsColumns", "fsColumns"));
+      this.ocean.push(pipeline(modules[v], scene, "vsOcean", "fsOcean"));
     }
   }
 
@@ -267,11 +387,11 @@ export class WaterRenderer {
 
   /** Draw after all opaque geometry; `planes` cull chunks outside the view. `scene` is the
    * opaque pass's output when the frame keeps it (medium and high tiers). */
-  draw(pass: GPURenderPassEncoder, planes: Float32Array, scene: GPUBindGroup | null) {
+  draw(pass: GPURenderPassEncoder, planes: Float32Array, scene: GPUBindGroup | null, high = false) {
     this.update();
     if (!this.bindGroup) return;
     pass.setBindGroup(1, this.bindGroup);
-    const variant = scene ? 1 : 0;
+    const variant = scene ? (high ? 2 : 1) : 0;
     if (scene) pass.setBindGroup(2, scene);
     pass.setPipeline(this.ocean[variant]);
     pass.draw(4);
