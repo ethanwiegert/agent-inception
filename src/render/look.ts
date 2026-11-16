@@ -17,6 +17,8 @@ export interface Look {
   contrast: number;
   warmth: number;
   vignette: number;
+  /** Split-tone strength after the tonemap: cool shade, warm light (0 keeps colors true). */
+  splitTone?: number;
   fogDensity: number;
   wind: number;
   /** How much of the light above white spills around it (the sun, glints, lamps, fire). */
@@ -80,6 +82,7 @@ export const LOOKS: Record<string, Look> = {
     bloom: 0.06,
   },
   storybook: {
+    splitTone: 0.4,
     name: "Storybook",
     grassBase: [0.06, 0.15, 0.035],
     grassTip: [0.3, 0.48, 0.12],
@@ -232,5 +235,6 @@ export function applyLook(
   out[F.moonDir + 3] = illuminated * smoothstep(-0.05, 0.05, moon[1]) * (1 - overcast * 0.8);
   out[F.weather] = overcast;
   out[F.weather + 1] = 1;
+  out[F.lookParams] = look.splitTone ?? 0;
   out[F.weather + 3] = look.bloom;
 }

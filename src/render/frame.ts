@@ -27,7 +27,9 @@ export const F = {
   pushers: 116,
   /** The wide shadow cascade (±260 blocks around the target), drawn at most every other frame. */
   lightViewProj1: 180,
-  size: 116 + 16 * 4 + 16,
+  /** Per-look post options: split-tone strength (0 keeps colors true). */
+  lookParams: 196,
+  size: 116 + 16 * 4 + 16 + 4,
 } as const;
 
 export const frameWgsl = /* wgsl */ `
@@ -54,6 +56,7 @@ struct Frame {
   depthParams: vec4f,
   pushers: array<vec4f, 16>,
   lightViewProj1: mat4x4f,
+  lookParams: vec4f,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 `;
