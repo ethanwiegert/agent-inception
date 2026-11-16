@@ -21,6 +21,7 @@ import { applyLook, type Look, type Weather } from "./look.ts";
 import { LightTexture } from "./lighttex.ts";
 import { InstanceBatch, MeshLibrary } from "./meshes.ts";
 import { ModelBatch, ModelRenderer } from "./models.ts";
+import { LifeRenderer } from "./life.ts";
 import { ParticleRenderer } from "./particles.ts";
 import { type Bloom, PostRenderer } from "./post.ts";
 import { LightShafts, type ShaftTargets } from "./shafts.ts";
@@ -166,6 +167,7 @@ export class Renderer {
   private lightField: LightTexture;
   /** Fire, smoke, lamp halos and signal sparks. */
   readonly particles: ParticleRenderer;
+  readonly life: LifeRenderer;
 
   constructor(private device: GPUDevice, private world: World) {
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
@@ -280,6 +282,7 @@ export class Renderer {
     this.models = new ModelRenderer(device, this.layouts, this.library);
     this.crops = new CropRenderer(device, this.layouts);
     this.particles = new ParticleRenderer(device, this.layouts);
+    this.life = new LifeRenderer(device, this.surface, this.layouts);
     this.timer = device.features.has("timestamp-query") ? new GpuTimer(device) : null;
   }
 
@@ -500,6 +503,7 @@ export class Renderer {
       main.setBindGroup(0, this.frameBindGroup);
       if (!skip.has("water")) this.water.draw(main, this.planes, null);
       if (!skip.has("fire")) this.particles.draw(main);
+      if (!skip.has("life")) this.life.draw(main);
       main.end();
     } else {
       // Opaque stores its MSAA color and depth and resolves to `opaque`: the scene transparent
@@ -586,6 +590,7 @@ export class Renderer {
         this.water.draw(trans, this.planes, targets.scene, this.quality === "high");
       }
       if (!skip.has("fire")) this.particles.draw(trans);
+      if (!skip.has("life")) this.life.draw(trans);
       trans.end();
       // In-scattered light lands on the resolve ahead of bloom, so strong shafts glow.
       if (!skip.has("shafts") && targets.shafts) {
