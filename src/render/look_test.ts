@@ -34,6 +34,18 @@ Deno.test("each look carries its bloom to the post pass", () => {
   }
 });
 
+Deno.test("each look carries its split-tone to the post pass, quiet in Natural", () => {
+  for (const look of Object.values(LOOKS)) {
+    ok((look.splitTone ?? 0) >= 0 && (look.splitTone ?? 0) <= 0.5);
+    strictEqual(
+      frameAt(0.5, 0.35, look)[F.lookParams],
+      Math.fround(look.splitTone ?? 0),
+    );
+  }
+  strictEqual(LOOKS.natural.splitTone ?? 0, 0);
+  ok((LOOKS.storybook.splitTone ?? 0) > 0);
+});
+
 Deno.test("the dusk horizon stays warm without outshining the day's", () => {
   const horizon = (t: number) => {
     const out = frameAt(t, 0);

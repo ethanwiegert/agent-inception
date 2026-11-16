@@ -101,7 +101,7 @@ export type Quality = "low" | "medium" | "high";
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
-   * "props", "fire", "bloom", "depthdown", "ao", "shafts". */
+   * "props", "fire", "bloom", "depthdown", "ao", "shafts", "life". */
   debug = new Set<string>();
   /**
    * Share of each look's grass blades to draw (0-1]; blades widen to keep the meadow's cover.

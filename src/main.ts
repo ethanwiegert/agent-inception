@@ -480,6 +480,10 @@ const worldHandlers = {
 
 const panel = createDevPanel({
   look: (id) => (look = id),
+  quality: (q) => {
+    qualityFixed = q !== "auto";
+    if (q !== "auto") setQuality(q);
+  },
   time: (t) => client.send({ type: "setTime", timeOfDay: t }),
   speed: (speed) => client.send({ type: "speed", speed }),
   worlds: worldHandlers,
@@ -516,6 +520,9 @@ let quality: Quality = fixedQuality === "low" || fixedQuality === "medium" ||
   : softwareGpu
   ? "low"
   : "high";
+/** Locked out of the governor: a `?quality=` URL tier, or a tier picked in the panel. */
+let qualityFixed = fixedQuality === "low" || fixedQuality === "medium" ||
+  fixedQuality === "high";
 const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, WINDOW_MS = 2000;
 /** A software adapter starts at the floor; there's no GPU headroom to earn pixels back from. */
 let renderScale = fixedScale ?? (softwareGpu ? SCALE_MIN : 1);
@@ -560,7 +567,7 @@ function adaptScale(now: number, interval: number) {
   } else if (fastWindows >= 3) {
     if (fixedScale === null && renderScale < 1) {
       renderScale = Math.min(1, renderScale + SCALE_STEP);
-    } else if (fixedQuality === null && quality !== "high") {
+    } else if (!qualityFixed && quality !== "high") {
       setQuality(QUALITIES[QUALITIES.indexOf(quality) + 1]);
     }
     fastWindows = 0;
@@ -710,6 +717,8 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
       board: client.board,
       boardVersion: client.boardVersion,
       muted: sound.muted,
+      quality,
+      qualityAuto: !qualityFixed,
       stats: [
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
