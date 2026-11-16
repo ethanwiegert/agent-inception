@@ -23,6 +23,7 @@ import { InstanceBatch, MeshLibrary } from "./meshes.ts";
 import { ModelBatch, ModelRenderer } from "./models.ts";
 import { ParticleRenderer } from "./particles.ts";
 import { type Bloom, PostRenderer } from "./post.ts";
+import { LightShafts, type ShaftTargets } from "./shafts.ts";
 import { SkyRenderer } from "./sky.ts";
 import { SurfaceTexture } from "./surface.ts";
 import { TerrainRenderer } from "./terrain.ts";
@@ -99,7 +100,7 @@ export type Quality = "low" | "medium" | "high";
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
-   * "props", "fire", "bloom", "depthdown", "ao". */
+   * "props", "fire", "bloom", "depthdown", "ao", "shafts". */
   debug = new Set<string>();
   /**
    * Share of each look's grass blades to draw (0-1]; blades widen to keep the meadow's cover.
@@ -110,7 +111,11 @@ export class Renderer {
   quality: Quality = "high";
   private layouts: Layouts;
   private frameData = new Float32Array(F.size);
+  private farFrameData = new Float32Array(F.size);
   private frameBuffer: GPUBuffer;
+  /** Same uniforms with the wide cascade's matrix in `lightViewProj`, for the far shadow pass. */
+  private farFrameBuffer: GPUBuffer;
+  private farFrameBindGroup: GPUBindGroup;
   private frameBindGroup: GPUBindGroup;
   private plainFrameBindGroup: GPUBindGroup;
   private shadowTexture: GPUTexture;
@@ -154,6 +159,7 @@ export class Renderer {
   private shot: { texture: GPUTexture; buffer: GPUBuffer; bytesPerRow: number } | null = null;
   private depthDown: DepthDown;
   private ao: AmbientOcclusion;
+  private shafts: LightShafts;
   private timer: GpuTimer | null;
   private lightView = mat4();
   private lightProj = mat4();
@@ -249,6 +255,14 @@ export class Renderer {
       layout: this.layouts.shadowFrame,
       entries: [{ binding: 0, resource: { buffer: this.frameBuffer } }],
     });
+    this.farFrameBuffer = device.createBuffer({
+      size: this.frameData.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.farFrameBindGroup = device.createBindGroup({
+      layout: this.layouts.shadowFrame,
+      entries: [{ binding: 0, resource: { buffer: this.farFrameBuffer } }],
+    });
 
     this.surface = new SurfaceTexture(device, world);
     this.terrain = new TerrainRenderer(device, world, this.surface, this.layouts);
@@ -256,6 +270,7 @@ export class Renderer {
     this.water = new WaterRenderer(device, this.surface, this.layouts, world.sizeY);
     this.depthDown = new DepthDown(device, this.layouts);
     this.ao = new AmbientOcclusion(device, this.layouts);
+    this.shafts = new LightShafts(device, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts);
     this.bodyModels = new BodyModels(this.library);
@@ -271,6 +286,7 @@ export class Renderer {
   /** Free every GPU resource; the render loop must not draw this renderer again. */
   destroy() {
     this.frameBuffer.destroy();
+    this.farFrameBuffer.destroy();
     this.shadowTexture.destroy();
     this.viewTargets?.destroy();
     this.shotTargets?.destroy();
@@ -372,6 +388,10 @@ export class Renderer {
     fd[F.depthParams + 3] = 1 / targets.height;
     this.fillPushers(fd, scene, camera.target);
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
+    // The far shadow pass reads lightViewProj too: give it a copy carrying the wide matrix.
+    this.farFrameData.set(fd);
+    this.farFrameData.copyWithin(F.lightViewProj, F.lightViewProj1, F.lightViewProj1 + 16);
+    device.queue.writeBuffer(this.farFrameBuffer, 0, this.farFrameData);
     const blades = GrassRenderer.instanceCount(radius, bladesPerBlock, fovReach);
     this.stats.grassBlades = blades;
 
@@ -421,9 +441,11 @@ export class Renderer {
       if (Math.abs(fm[i] - this.farDrawn[i]) > 1e-5) moved = true;
     }
     this.farFrames++;
+    // Posed captures always get a fresh cascade — the amortized layer could belong to the
+    // previous frame's pose. With ?debug=shadow the pass still runs so the layer is cleared.
     if (
-      !this.debug.has("shadow") &&
-      (moved && (this.farFrames % 2 === 0 || !this.farEverDrawn))
+      capture || !this.farEverDrawn || moved && this.farFrames % 2 === 0 ||
+      this.debug.has("shadow")
     ) {
       this.farDrawn.set(fm);
       this.farEverDrawn = true;
@@ -436,10 +458,12 @@ export class Renderer {
           depthStoreOp: "store",
         },
       });
-      farPass.setBindGroup(0, this.plainFrameBindGroup);
-      this.terrain.drawShadow(farPass, this.farLightPlanes);
-      // Flora draws uncullled at its low mesh (view 2 doesn't exist, so drawWith draws all).
-      if (!this.debug.has("props")) this.models.drawShadow(farPass, this.flora, 2);
+      farPass.setBindGroup(0, this.farFrameBindGroup);
+      if (!this.debug.has("shadow")) {
+        this.terrain.drawShadow(farPass, this.farLightPlanes);
+        // Flora draws uncullled at its low mesh (view 2 doesn't exist, so drawWith draws all).
+        if (!this.debug.has("props")) this.models.drawShadow(farPass, this.flora, 2);
+      }
       farPass.end();
     }
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
@@ -522,6 +546,26 @@ export class Renderer {
           this.plainFrameBindGroup,
           this.quality === "high",
         );
+      } else if (targets.ao) {
+        // Skipped AO means no occlusion: clear the map to white so post multiplies by 1.
+        const clear = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: targets.ao.out,
+            loadOp: "clear",
+            storeOp: "store",
+            clearValue: { r: 1, g: 1, b: 1, a: 1 },
+          }],
+        });
+        clear.end();
+      }
+      if (!skip.has("shafts") && targets.shafts) {
+        this.shafts.draw(
+          encoder,
+          targets.shafts,
+          targets.halfView!,
+          this.frameBindGroup,
+          this.quality === "high",
+        );
       }
 
       // Transparent: loads the MSAA color, reads depth without writing, resolves to `resolve`.
@@ -541,6 +585,16 @@ export class Renderer {
       if (!skip.has("water")) this.water.draw(trans, this.planes, targets.scene);
       if (!skip.has("fire")) this.particles.draw(trans);
       trans.end();
+      // In-scattered light lands on the resolve ahead of bloom, so strong shafts glow.
+      if (!skip.has("shafts") && targets.shafts) {
+        this.shafts.composite(
+          encoder,
+          targets.resolveView,
+          targets.shafts,
+          targets.halfView!,
+          this.plainFrameBindGroup,
+        );
+      }
     }
     if (!skip.has("bloom")) this.post.drawBloom(encoder, this.plainFrameBindGroup, targets.bloom);
 
@@ -602,7 +656,7 @@ export class Renderer {
       // Keep slots sorted by distance so the nearest pushers win the 16 slots.
       while (i > 0 && d2[i - 1] > dd) {
         d2[i] = d2[i - 1];
-        fd.copyWithin(F.pushers + (i + 1) * 4, F.pushers + i * 4, F.pushers + i * 4 + 4);
+        fd.copyWithin(F.pushers + i * 4, F.pushers + (i - 1) * 4, F.pushers + i * 4);
         i--;
       }
       const o = F.pushers + i * 4;
@@ -665,6 +719,7 @@ export class Renderer {
       this.layouts,
       this.post,
       this.ao,
+      this.shafts,
       width,
       height,
       this.quality,
@@ -738,12 +793,15 @@ class SceneTargets {
   readonly scene: GPUBindGroup | null;
   /** GTAO surfaces from the half-res depth; medium and up. */
   readonly ao: AoTargets | null;
+  /** Quarter-res light shafts; medium and up. */
+  readonly shafts: ShaftTargets | null;
 
   constructor(
     device: GPUDevice,
     layouts: Layouts,
     post: PostRenderer,
     ao: AmbientOcclusion,
+    shafts: LightShafts,
     readonly width: number,
     readonly height: number,
     readonly quality: Quality,
@@ -774,6 +832,7 @@ class SceneTargets {
         this.scene =
           null;
       this.ao = null;
+      this.shafts = null;
       this.post = post.bindInput(this.resolveView, this.bloom, null);
     } else {
       this.opaque = make(
@@ -802,6 +861,7 @@ class SceneTargets {
         ],
       });
       this.ao = ao.allocate(this.halfView, width, height);
+      this.shafts = shafts.allocate(width, height);
       this.post = post.bindInput(this.resolveView, this.bloom, this.ao.out);
     }
   }
@@ -813,6 +873,7 @@ class SceneTargets {
     this.opaque?.destroy();
     this.halfDepth?.destroy();
     for (const t of this.ao?.textures ?? []) t.destroy();
+    this.shafts?.texture.destroy();
     for (const t of this.bloom.textures) t.destroy();
   }
 }

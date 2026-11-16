@@ -319,11 +319,18 @@ fn shade(albedo: vec3f, n: vec3f, world: vec3f, ao: f32, wrap: f32) -> vec3f {
 fn fog(color: vec3f, world: vec3f) -> vec3f {
   let v = world - frame.cameraPos.xyz;
   let len = length(v);
-  var keep = exp(-max(len - 90.0, 0.0) * frame.skyHorizon.w);
+  // Haze thins with height by day too: valleys keep more of it than the hilltops.
+  let thin = mix(1.0, 0.45, clamp((world.y - frame.extra.z) / 90.0, 0.0, 1.0));
+  var keep = exp(-max(len - 90.0, 0.0) * frame.skyHorizon.w * thin);
   if (frame.grassBase.w > 0.0) {
     let low = exp(-max(world.y - frame.extra.z - 1.5, 0.0) * 0.22);
     keep *= 1.0 - frame.grassBase.w * low * (1.0 - exp(-len * 0.009));
   }
-  return mix(skyColor(normalize(vec3f(v.x, max(v.y, 0.0), v.z))) * 0.9, color, keep);
+  let dir = normalize(v);
+  var scatter = skyColor(normalize(vec3f(dir.x, max(dir.y, 0.0), dir.z))) * 0.9;
+  // The in-scatter leans toward the key light near its bearing, like real air.
+  scatter += frame.sunColor.rgb * frame.sunDir.w * pow(max(dot(dir, frame.sunDir.xyz), 0.0), 5.0)
+    * 0.12;
+  return mix(scatter, color, keep);
 }
 `;

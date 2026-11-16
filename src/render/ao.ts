@@ -29,9 +29,10 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 /** World position of the surface under half-res pixel px at view depth L. */
 fn worldFromLinear(px: vec2f, L: f32) -> vec3f {
-  // The near-plane point on this ray, marched out along it by the view depth.
+  // The near-plane point on this ray, marched out along it by the view depth. worldAt expects
+  // scene-resolution pixels (depthParams.zw is 1/full res), so double the half-res coords.
   let near = frame.depthParams.x;
-  let pNear = worldAt(px, 0.0);
+  let pNear = worldAt(px * 2.0, 0.0);
   let cam = frame.cameraPos.xyz;
   return cam + (pNear - cam) * (L / near);
 }
@@ -70,7 +71,8 @@ fn ign(px: vec2f) -> f32 {
       if (dist > RADIUS || dist < 1e-3) { continue; }
       horizon = max(horizon, dot(v, n) / dist);
     }
-    occ += sqrt(max(0.0, 1.0 - horizon * horizon));
+    // No valid sample means an open horizon: full visibility, not full shade.
+    occ += select(1.0, sqrt(max(0.0, 1.0 - horizon * horizon)), horizon > -1.0);
   }
   var ao = occ / ${slices.toFixed(1)};
   ao = mix(ao, 1.0, smoothstep(90.0, 120.0, L));
