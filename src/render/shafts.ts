@@ -112,7 +112,10 @@ const upShader = frameWgsl + /* wgsl */ `
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let hs = vec2f(textureDimensions(halfDepthTex));
-  let L = textureSampleLevel(halfDepthTex, smp, pos.xy * 0.5 / hs, 0.0).r;
+  // The march alpha stores the ray length, capped like the march itself; compare like with like.
+  let L = min(textureSampleLevel(halfDepthTex, smp, pos.xy * 0.5 / hs, 0.0).r, ${
+  MAX_DIST.toFixed(1)
+});
   let size = vec2f(textureDimensions(shafts));
   let q = pos.xy * size / (hs * 2.0) - 0.5;
   let base = floor(q);
