@@ -70,6 +70,9 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
   switch pattern {
     case ${P.grass}u: {
       var green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
+      // Lusher close to the waterline; the field map's shore distance fades it inland.
+      let shoreLush = smoothstep(0.64, 0.52, fieldAt(world.xz).y);
+      green = mix(green, green * vec3f(0.82, 1.07, 0.9), shoreLush * 0.7);
       if (face == 2u) {
         // Past the blades' reach the ground stands in for them: fade from shaded roots to the
         // canopy's color so the edge of the grass doesn't show as a darker band on far hills.
@@ -172,20 +175,11 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
   return block;
 }
 
-/** How wet the ground at world is (0-1): near water that stands about level with it. */
+/** How wet the ground at world is (0-1): the field map's shore distance, with a noise
+ * wobble so the band wiggles at any angle. g is 0.5 at the waterline and rises inland. */
 fn wetness(world: vec3f) -> f32 {
-  let last = vec2i(textureDimensions(surface)) - 1;
-  let p = world.xz - 0.5;
-  let i = vec2i(floor(p));
-  let f = fract(p);
-  var w = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
-  for (var k = 0; k < 4; k++) {
-    let s = textureLoad(surface, clamp(i + vec2i(k & 1, k >> 1), vec2i(0), last), 0);
-    // Water whose surface is within a splash of this ground, above or below.
-    w[k] = select(0.0, 1.0, s.a > 0u && abs(f32(s.a) - 0.12 - world.y) < 0.9);
-  }
-  let near = mix(mix(w[0], w[1], f.x), mix(w[2], w[3], f.x), f.y);
-  return smoothstep(0.06, 0.42, near + (valueNoise(world.xz * 2.1) - 0.5) * 0.25);
+  let g = fieldAt(world.xz).y + (valueNoise(world.xz * 2.1) - 0.5) * 0.05;
+  return smoothstep(0.64, 0.53, g);
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
@@ -203,7 +197,11 @@ fn wetness(world: vec3f) -> f32 {
     let above = 1.0 - smoothstep(0.0, 0.3, select(depth, 0.0, s.a == 0u));
     albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wetness(in.world) * above);
   }
-  let ao = mix(1.0, in.ao, frame.groundAmbient.w);
+  // The field map: ambient falls off under crowns and at the foot of cliffs and walls, and
+  // villagers/animals sit in a soft contact blob.
+  let field = fieldAt(in.world.xz);
+  let ao = mix(1.0, in.ao, frame.groundAmbient.w) * mix(1.0, field.x, 0.8) *
+    (1.0 - pusherShade(in.world.xz) * 0.4);
   var color = shade(albedo, n, in.world, ao, 0.0) + selfLit(albedo * fract(info.w) * EMISSIVE);
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.

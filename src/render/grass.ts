@@ -116,17 +116,37 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   let flower = rand(&seed) < frame.grassTip.w;
   let flowerKind = rand(&seed);
 
-  let h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * fade * select(1.0, 1.25, flower);
+  var h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * fade * select(1.0, 1.25, flower);
   let w = frame.grass.y / sqrt(keep);
   let facing = vec2f(cos(angle * 6.2831853), sin(angle * 6.2831853));
   let time = frame.cameraPos.w;
   let gust = valueNoise(base.xz * 0.06 - frame.wind.xy * time * 0.8);
   let sway = sin(time * 2.1 + dot(base.xz, frame.wind.xy) * 0.6 + lean * 6.0) * 0.25;
-  let bend = facing * (0.1 + 0.35 * lean) * h + frame.wind.xy * frame.wind.z * (gust * 0.9 + sway * 0.4) * h;
+  var bend = facing * (0.1 + 0.35 * lean) * h + frame.wind.xy * frame.wind.z * (gust * 0.9 + sway * 0.4) * h;
 
-  let root = meadowColor(frame.grassBase.rgb, base.xz);
-  let tip = meadowColor(frame.grassTip.rgb, base.xz) * (0.8 + 0.4 * tone);
-  let light = keyLightFast(base + vec3f(0.0, h * 0.5, 0.0));
+  // The field map: crowns pool shade, villagers press a parting through the blades.
+  let field = fieldAt(base.xz);
+  var press = 0.0;
+  for (var i = 0; i < 16; i++) {
+    let pu = frame.pushers[i];
+    if (pu.w <= 0.0) { continue; }
+    let d = base.xz - pu.xz;
+    let dist = length(d);
+    if (dist >= pu.w) { continue; }
+    let k = 1.0 - dist / pu.w;
+    bend += (d / max(dist, 0.01)) * k * h * 0.9;
+    press = max(press, k);
+  }
+  h *= 1.0 - press * 0.55;
+
+  let occ = mix(1.0, field.x, 0.85);
+  let shoreLush = smoothstep(0.64, 0.52, field.y);
+  let lushTint = vec3f(0.82, 1.07, 0.9);
+  var root = meadowColor(frame.grassBase.rgb, base.xz);
+  var tip = meadowColor(frame.grassTip.rgb, base.xz) * (0.8 + 0.4 * tone);
+  root = mix(root, root * lushTint, shoreLush * 0.7) * occ * (1.0 - press * 0.25);
+  tip = mix(tip, tip * lushTint, shoreLush * 0.7) * occ;
+  let light = keyLightFast(base + vec3f(0.0, h * 0.5, 0.0)) * occ;
 
   let idx = atomicAdd(&args.instanceCount, 1u);
   if (idx >= MAX_BLADES) { return; }

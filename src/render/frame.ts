@@ -22,7 +22,10 @@ export const F = {
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
   weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, bloom
-  size: 112,
+  depthParams: 112, // camera near, camera far, 1/width, 1/height of the scene depth
+  /** Villagers and animals nearest the camera target: xyz, radius (0 = slot unused). */
+  pushers: 116,
+  size: 116 + 16 * 4,
 } as const;
 
 export const frameWgsl = /* wgsl */ `
@@ -46,6 +49,8 @@ struct Frame {
   sunPos: vec4f,
   moonDir: vec4f,
   weather: vec4f,
+  depthParams: vec4f,
+  pushers: array<vec4f, 16>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 `;
@@ -53,6 +58,21 @@ struct Frame {
 /** Noise, sky and cloud helpers that only need the frame uniforms. */
 export const commonWgsl = /* wgsl */ `
 const CLOUD_HEIGHT = 260.0;
+
+/** View distance of a raw depth-buffer value (camera.ts's perspective, near/far in depthParams). */
+fn linearDepth(d: f32) -> f32 {
+  let n = frame.depthParams.x;
+  let f = frame.depthParams.y;
+  return n * f / (f - d * (f - n));
+}
+
+/** The world position of the pixel on screen (from its depth), via the inverse view projection. */
+fn worldAt(pixel: vec2f, d: f32) -> vec3f {
+  let ndc = vec4f(pixel.x * frame.depthParams.z * 2.0 - 1.0,
+    1.0 - pixel.y * frame.depthParams.w * 2.0, d, 1.0);
+  let w = frame.invViewProj * ndc;
+  return w.xyz / w.w;
+}
 
 fn hash21(p: vec2f) -> f32 {
   var q = fract(p * vec2f(123.34, 456.21));
@@ -145,6 +165,26 @@ export const lightingWgsl = commonWgsl + /* wgsl */ `
 @group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(0) @binding(3) var lightField: texture_3d<f32>;
 @group(0) @binding(4) var lightSampler: sampler;
+// Binding 5: the field map (render/fieldmap.ts) — r sky occlusion, g shore distance.
+@group(0) @binding(5) var fieldmap: texture_2d<f32>;
+@group(0) @binding(6) var fieldmapSampler: sampler;
+
+/** Column-wise (x, z) -> fieldmap uv: r open sky, g shore distance (0.5 = waterline). */
+fn fieldAt(xz: vec2f) -> vec2f {
+  return textureSampleLevel(fieldmap, fieldmapSampler, xz / frame.grassCenter.zw, 0.0).rg;
+}
+
+/** Soft contact shade under a pusher (villager or animal), 0 off, 1 centred on it. */
+fn pusherShade(xz: vec2f) -> f32 {
+  var dark = 0.0;
+  for (var i = 0; i < 16; i++) {
+    let p = frame.pushers[i];
+    if (p.w <= 0.0) { continue; }
+    let d = distance(xz, p.xz) / p.w;
+    dark += max(0.0, 1.0 - d * d);
+  }
+  return min(dark, 1.0);
+}
 
 /** How bright the field's full light is, in the scene's HDR units. */
 const LAMP_INTENSITY = 2.2;

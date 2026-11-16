@@ -72,6 +72,8 @@ const shader = frameWgsl + /* wgsl */ `
 @group(1) @binding(0) var scene: texture_2d<f32>;
 @group(1) @binding(1) var bloom: texture_2d<f32>;
 @group(1) @binding(2) var bloomSampler: sampler;
+// GTAO at half res (r8); a 1x1 white texture stands in when the tier has no AO pass.
+@group(1) @binding(3) var aoMap: texture_2d<f32>;
 
 /** Midtone gain ahead of the tonemap (brightness parity with a filmic curve). */
 const GAIN = 1.6;
@@ -105,7 +107,13 @@ fn toSrgb(c: vec3f) -> vec3f {
 /** One scene pixel plus its glow, exposed, tonemapped, graded and in sRGB (before the vignette). */
 fn display(p: vec2i, glow: vec3f) -> vec3f {
   let size = vec2i(textureDimensions(scene));
-  let raw = (textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb + glow) * frame.skyZenith.w;
+  var raw = textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb;
+  // Ambient occlusion: it eats the ambient term, not sunlight, so its strength fades on the
+  // brightest pixels (sunlit surfaces, glints, lamps).
+  let ao = textureSampleLevel(aoMap, bloomSampler, (vec2f(p) + 0.5) / vec2f(size), 0.0).r;
+  let aoK = 0.75 * (1.0 - smoothstep(0.5, 1.4, max(raw.r, max(raw.g, raw.b))));
+  raw *= mix(1.0, ao, aoK);
+  raw = (raw + glow) * frame.skyZenith.w;
   var c = toSrgb(neutral(raw * GAIN));
   let g = frame.grade;
   // Moonlit grading (washed-out colors, a blue cast) is for things lit only by the moon; what a
@@ -178,6 +186,7 @@ export class PostRenderer {
         { binding: 0, visibility: FRAGMENT, texture: { sampleType: "unfilterable-float" } },
         { binding: 1, visibility: FRAGMENT, texture: {} },
         { binding: 2, visibility: FRAGMENT, sampler: {} },
+        { binding: 3, visibility: FRAGMENT, texture: { sampleType: "float" } },
       ],
     });
     this.module = device.createShaderModule({ code: shader, label: "post" });
@@ -260,14 +269,27 @@ export class PostRenderer {
     pass.end();
   }
 
-  /** A bind group that reads `view` as the HDR scene and `bloom` as the glow to add to it. */
-  bindInput(view: GPUTextureView, bloom: Bloom): GPUBindGroup {
+  private white: GPUTextureView | null = null;
+
+  /** A bind group that reads `view` as the HDR scene, `bloom` as the glow, `ao` as the
+   * ambient-occlusion map (or white where the tier has none). */
+  bindInput(view: GPUTextureView, bloom: Bloom, ao: GPUTextureView | null): GPUBindGroup {
+    if (!this.white) {
+      const t = this.device.createTexture({
+        size: [1, 1],
+        format: "r8unorm",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.device.queue.writeTexture({ texture: t }, new Uint8Array([255]), {}, [1, 1]);
+      this.white = t.createView();
+    }
     return this.device.createBindGroup({
       layout: this.layout,
       entries: [
         { binding: 0, resource: view },
         { binding: 1, resource: bloom.views[0] },
         { binding: 2, resource: this.sampler },
+        { binding: 3, resource: ao ?? this.white },
       ],
     });
   }

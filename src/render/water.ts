@@ -11,7 +11,17 @@ import type { SurfaceTexture } from "./surface.ts";
  * Wet columns are listed once per surface change, grouped by chunk, so a frame
  * draws only the wet columns of visible chunks.
  */
-const shader = frameWgsl + lightingWgsl + /* wgsl */ `
+/** Bound when the frame stores its opaque pass (medium and high): resolved opaque color, the
+ * MSAA scene depth, and the half-res linear depth, for refraction and soft shorelines. */
+const sceneWgsl = /* wgsl */ `
+@group(2) @binding(0) var sceneColor: texture_2d<f32>;
+@group(2) @binding(1) var sceneSampler: sampler;
+@group(2) @binding(2) var sceneDepth: texture_depth_multisampled_2d;
+@group(2) @binding(3) var sceneLinearDepth: texture_2d<f32>;
+`;
+
+const shader = (sceneInputs: boolean) =>
+  frameWgsl + lightingWgsl + (sceneInputs ? sceneWgsl : "") + /* wgsl */ `
 @group(1) @binding(0) var surface: texture_2d<u32>;
 @group(1) @binding(1) var<storage, read> wet: array<u32>;
 
@@ -151,8 +161,9 @@ fn shadeWater(world: vec3f) -> vec4f {
 export class WaterRenderer {
   private layout: GPUBindGroupLayout;
   private bindGroup: GPUBindGroup | null = null;
-  private columns: GPURenderPipeline;
-  private ocean: GPURenderPipeline;
+  /** [plain, scene] pipeline pairs; scene variants see the opaque pass's color and depth. */
+  private columns: GPURenderPipeline[] = [];
+  private ocean: GPURenderPipeline[] = [];
   private wet: GPUBuffer | null = null;
   private keys: Uint32Array;
   /** Per chunk: first entry and count in `wet`. */
@@ -181,11 +192,17 @@ export class WaterRenderer {
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       ],
     });
-    const module = device.createShaderModule({ code: shader, label: "water" });
-    const pipeline = (vs: string, fs: string) =>
+    const modules = [false, true].map((scene) =>
+      device.createShaderModule({ code: shader(scene), label: scene ? "water-scene" : "water" })
+    );
+    const pipeline = (module: GPUShaderModule, scene: boolean, vs: string, fs: string) =>
       device.createRenderPipeline({
-        label: `water-${vs}`,
-        layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, this.layout] }),
+        label: `water-${vs}${scene ? "-scene" : ""}`,
+        layout: device.createPipelineLayout({
+          bindGroupLayouts: scene
+            ? [layouts.frame, this.layout, layouts.scene]
+            : [layouts.frame, this.layout],
+        }),
         vertex: { module, entryPoint: vs },
         fragment: {
           module,
@@ -206,8 +223,10 @@ export class WaterRenderer {
         },
         multisample: { count: layouts.samples },
       });
-    this.columns = pipeline("vsColumns", "fsColumns");
-    this.ocean = pipeline("vsOcean", "fsOcean");
+    for (const scene of [false, true]) {
+      this.columns.push(pipeline(modules[scene ? 1 : 0], scene, "vsColumns", "fsColumns"));
+      this.ocean.push(pipeline(modules[scene ? 1 : 0], scene, "vsOcean", "fsOcean"));
+    }
   }
 
   /** Relist the wet columns, chunk by chunk, after the surface changed. */
@@ -246,14 +265,17 @@ export class WaterRenderer {
     if (n) this.device.queue.writeBuffer(this.wet, 0, this.keys, 0, n);
   }
 
-  /** Draw after all opaque geometry; `planes` cull chunks outside the view. */
-  draw(pass: GPURenderPassEncoder, planes: Float32Array) {
+  /** Draw after all opaque geometry; `planes` cull chunks outside the view. `scene` is the
+   * opaque pass's output when the frame keeps it (medium and high tiers). */
+  draw(pass: GPURenderPassEncoder, planes: Float32Array, scene: GPUBindGroup | null) {
     this.update();
     if (!this.bindGroup) return;
     pass.setBindGroup(1, this.bindGroup);
-    pass.setPipeline(this.ocean);
+    const variant = scene ? 1 : 0;
+    if (scene) pass.setBindGroup(2, scene);
+    pass.setPipeline(this.ocean[variant]);
     pass.draw(4);
-    pass.setPipeline(this.columns);
+    pass.setPipeline(this.columns[variant]);
     for (let c = 0; c < this.counts.length; c++) {
       const n = this.counts[c];
       if (!n) continue;

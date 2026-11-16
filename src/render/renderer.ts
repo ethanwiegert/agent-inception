@@ -10,6 +10,9 @@ import type { Camera } from "../camera.ts";
 import type { AgentView, AnimalView, BodyPose } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
+import { AmbientOcclusion, type AoTargets } from "./ao.ts";
+import { DepthDown } from "./depthdown.ts";
+import { FieldMap } from "./fieldmap.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels, type FishModel } from "./fauna.ts";
 import { anyGrowing, buildObjects, buildProps, CropLooks, FloraModels } from "./flora.ts";
 import { F } from "./frame.ts";
@@ -30,6 +33,8 @@ export interface Layouts {
   frame: GPUBindGroupLayout;
   /** Group 0 for passes that only need frame uniforms (shadow, sky, post). */
   shadowFrame: GPUBindGroupLayout;
+  /** Group for transparent passes: resolved opaque color, MSAA scene depth, half linear depth. */
+  scene: GPUBindGroupLayout;
   colorFormat: GPUTextureFormat;
   depthFormat: GPUTextureFormat;
   samples: number;
@@ -94,7 +99,7 @@ export type Quality = "low" | "medium" | "high";
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
-   * "props", "fire", "bloom". */
+   * "props", "fire", "bloom", "depthdown", "ao". */
   debug = new Set<string>();
   /**
    * Share of each look's grass blades to draw (0-1]; blades widen to keep the meadow's cover.
@@ -113,6 +118,7 @@ export class Renderer {
   private terrain: TerrainRenderer;
   private grass: GrassRenderer;
   private surface: SurfaceTexture;
+  private fieldmap: FieldMap;
   private water: WaterRenderer;
   private planes = new Float32Array(24);
   private lightPlanes = new Float32Array(24);
@@ -138,6 +144,8 @@ export class Renderer {
   private viewTargets: SceneTargets | null = null;
   private shotTargets: SceneTargets | null = null;
   private shot: { texture: GPUTexture; buffer: GPUBuffer; bytesPerRow: number } | null = null;
+  private depthDown: DepthDown;
+  private ao: AmbientOcclusion;
   private timer: GpuTimer | null;
   private lightView = mat4();
   private lightProj = mat4();
@@ -156,6 +164,9 @@ export class Renderer {
           { binding: 2, visibility: VF, sampler: { type: "comparison" } },
           { binding: 3, visibility: VF, texture: { sampleType: "float", viewDimension: "3d" } },
           { binding: 4, visibility: VF, sampler: { type: "filtering" } },
+          // The field map: sky occlusion and shore distance per world column (fieldmap.ts).
+          { binding: 5, visibility: VF, texture: { sampleType: "float" } },
+          { binding: 6, visibility: VF, sampler: { type: "filtering" } },
         ],
       }),
       shadowFrame: device.createBindGroupLayout({
@@ -164,6 +175,18 @@ export class Renderer {
           visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: {},
         }],
+      }),
+      scene: device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+          {
+            binding: 2,
+            visibility: GPUShaderStage.FRAGMENT,
+            texture: { sampleType: "depth", multisampled: true, viewDimension: "2d" },
+          },
+          { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+        ],
       }),
       colorFormat: "rgba16float",
       depthFormat: "depth24plus",
@@ -186,6 +209,7 @@ export class Renderer {
       minFilter: "linear",
     });
     this.lightField = new LightTexture(device, world);
+    this.fieldmap = new FieldMap(device, world);
     this.frameBindGroup = device.createBindGroup({
       layout: this.layouts.frame,
       entries: [
@@ -194,6 +218,8 @@ export class Renderer {
         { binding: 2, resource: shadowSampler },
         { binding: 3, resource: this.lightField.view },
         { binding: 4, resource: this.lightField.sampler },
+        { binding: 5, resource: this.fieldmap.view },
+        { binding: 6, resource: this.fieldmap.sampler },
       ],
     });
     this.plainFrameBindGroup = device.createBindGroup({
@@ -205,6 +231,8 @@ export class Renderer {
     this.terrain = new TerrainRenderer(device, world, this.surface, this.layouts);
     this.grass = new GrassRenderer(device, this.surface, this.layouts);
     this.water = new WaterRenderer(device, this.surface, this.layouts, world.sizeY);
+    this.depthDown = new DepthDown(device, this.layouts);
+    this.ao = new AmbientOcclusion(device, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts);
     this.bodyModels = new BodyModels(this.library);
@@ -226,6 +254,7 @@ export class Renderer {
     this.shot?.texture.destroy();
     this.shot?.buffer.destroy();
     this.surface.destroy();
+    this.fieldmap.destroy();
     this.terrain.destroy();
     this.grass.destroy();
     this.water.destroy();
@@ -257,6 +286,7 @@ export class Renderer {
     this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
     this.surface.update();
+    this.fieldmap.update(this.surface, scene.props, scene.tick);
     this.cropLooks.update(scene.crops, scene.cropsVersion, scene.catalog);
     this.crops.update(this.cropLooks.blades, this.cropLooks.version);
     this.bodies.instances.clear();
@@ -313,6 +343,11 @@ export class Renderer {
     fd[F.grassCenter + 1] = Math.floor(camera.target[2]);
     fd[F.grassCenter + 2] = camera.worldSize[0];
     fd[F.grassCenter + 3] = camera.worldSize[1];
+    fd[F.depthParams] = 0.5; // camera near (camera.ts perspective)
+    fd[F.depthParams + 1] = 4000; // camera far
+    fd[F.depthParams + 2] = 1 / targets.width;
+    fd[F.depthParams + 3] = 1 / targets.height;
+    this.fillPushers(fd, scene, camera.target);
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
     const blades = GrassRenderer.instanceCount(radius, bladesPerBlock, fovReach);
     this.stats.grassBlades = blades;
@@ -356,38 +391,104 @@ export class Renderer {
     shadowPass.end();
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
 
-    const main = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: targets.colorView,
-        resolveTarget: targets.resolveView,
-        loadOp: "clear",
-        storeOp: "discard",
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-      }],
-      depthStencilAttachment: {
-        view: targets.depthView,
-        depthClearValue: 1,
-        depthLoadOp: "clear",
-        depthStoreOp: "discard",
-      },
-    });
-    main.setBindGroup(0, this.frameBindGroup);
     const skip = this.debug;
-    if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
-    if (!skip.has("bodies")) this.models.draw(main, this.bodies);
-    if (!skip.has("props")) {
-      this.models.draw(main, this.flora);
-      this.models.draw(main, this.groundCover);
+    if (this.quality === "low") {
+      // Low tier keeps one forward pass: no stored depth, no opaque/trans split.
+      const main = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: targets.colorView,
+          resolveTarget: targets.resolveView,
+          loadOp: "clear",
+          storeOp: "discard",
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        }],
+        depthStencilAttachment: {
+          view: targets.depthView,
+          depthClearValue: 1,
+          depthLoadOp: "clear",
+          depthStoreOp: "discard",
+        },
+      });
+      main.setBindGroup(0, this.frameBindGroup);
+      if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
+      if (!skip.has("bodies")) this.models.draw(main, this.bodies);
+      if (!skip.has("props")) {
+        this.models.draw(main, this.flora);
+        this.models.draw(main, this.groundCover);
+      }
+      this.crops.draw(main);
+      if (!skip.has("grass")) this.grass.draw(main);
+      if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);
+      // Transparent last: water blends over everything opaque, including the sky at the horizon.
+      main.setBindGroup(0, this.frameBindGroup);
+      if (!skip.has("water")) this.water.draw(main, this.planes, null);
+      if (!skip.has("fire")) this.particles.draw(main);
+      main.end();
+    } else {
+      // Opaque stores its MSAA color and depth and resolves to `opaque`: the scene transparent
+      // passes then read (refraction, soft shorelines, AO, shafts).
+      const opaque = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: targets.colorView,
+          resolveTarget: targets.opaqueView!,
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        }],
+        depthStencilAttachment: {
+          view: targets.depthView,
+          depthClearValue: 1,
+          depthLoadOp: "clear",
+          depthStoreOp: "store",
+        },
+      });
+      opaque.setBindGroup(0, this.frameBindGroup);
+      if (!skip.has("terrain")) this.terrain.draw(opaque, this.planes);
+      if (!skip.has("bodies")) this.models.draw(opaque, this.bodies);
+      if (!skip.has("props")) {
+        this.models.draw(opaque, this.flora);
+        this.models.draw(opaque, this.groundCover);
+      }
+      this.crops.draw(opaque);
+      if (!skip.has("grass")) this.grass.draw(opaque);
+      if (!skip.has("sky")) this.sky.draw(opaque, this.plainFrameBindGroup);
+      opaque.end();
+
+      if (!skip.has("depthdown")) {
+        this.depthDown.draw(
+          encoder,
+          targets.halfView!,
+          targets.depthView,
+          this.plainFrameBindGroup,
+        );
+      }
+      if (!skip.has("ao") && targets.ao) {
+        this.ao.draw(
+          encoder,
+          targets.ao,
+          this.plainFrameBindGroup,
+          this.quality === "high",
+        );
+      }
+
+      // Transparent: loads the MSAA color, reads depth without writing, resolves to `resolve`.
+      const trans = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: targets.colorView,
+          resolveTarget: targets.resolveView,
+          loadOp: "load",
+          storeOp: "discard",
+        }],
+        depthStencilAttachment: {
+          view: targets.depthView,
+          depthReadOnly: true,
+        },
+      });
+      trans.setBindGroup(0, this.frameBindGroup);
+      if (!skip.has("water")) this.water.draw(trans, this.planes, targets.scene);
+      if (!skip.has("fire")) this.particles.draw(trans);
+      trans.end();
     }
-    this.crops.draw(main);
-    if (!skip.has("grass")) this.grass.draw(main);
-    if (!skip.has("sky")) this.sky.draw(main, this.plainFrameBindGroup);
-    // Transparent last: water blends over everything opaque, including the sky at the horizon.
-    main.setBindGroup(0, this.frameBindGroup);
-    if (!skip.has("water")) this.water.draw(main, this.planes);
-    main.setBindGroup(0, this.frameBindGroup);
-    if (!skip.has("fire")) this.particles.draw(main);
-    main.end();
     if (!skip.has("bloom")) this.post.drawBloom(encoder, this.plainFrameBindGroup, targets.bloom);
 
     const post = encoder.beginRenderPass({
@@ -434,6 +535,35 @@ export class Renderer {
     this.models.upload(groundCover);
   }
 
+  /** Scratch distances for the pusher selection (squared, sorted ascending). */
+  private pusherD2 = new Float32Array(16);
+
+  /** Fill `Frame.pushers` with the 16 villagers/animals nearest the camera target. */
+  private fillPushers(fd: Float32Array, scene: SceneState, target: Vec3) {
+    let count = 0;
+    const d2 = this.pusherD2;
+    const put = (x: number, y: number, z: number, radius: number) => {
+      const dd = (x - target[0]) ** 2 + (z - target[2]) ** 2;
+      if (count === 16 && dd >= d2[15]) return;
+      let i = count < 16 ? count++ : 15;
+      // Keep slots sorted by distance so the nearest pushers win the 16 slots.
+      while (i > 0 && d2[i - 1] > dd) {
+        d2[i] = d2[i - 1];
+        fd.copyWithin(F.pushers + (i + 1) * 4, F.pushers + i * 4, F.pushers + i * 4 + 4);
+        i--;
+      }
+      const o = F.pushers + i * 4;
+      fd[o] = x;
+      fd[o + 1] = y;
+      fd[o + 2] = z;
+      fd[o + 3] = radius;
+      d2[i] = dd;
+    };
+    for (const a of scene.agents) put(a.x, a.y, a.z, 0.9);
+    for (const a of scene.animals) put(a.x, a.y, a.z, 0.75);
+    for (let i = count; i < 16; i++) fd[F.pushers + i * 4 + 3] = 0;
+  }
+
   /** Orthographic sun/moon shadow volume around the view target, snapped to texels to stop shimmer. */
   private updateLight(target: Vec3, distance: number) {
     const fd = this.frameData;
@@ -460,7 +590,15 @@ export class Renderer {
       have && have.width === width && have.height === height && have.quality === this.quality
     ) return have;
     have?.destroy();
-    return new SceneTargets(this.device, this.layouts, this.post, width, height, this.quality);
+    return new SceneTargets(
+      this.device,
+      this.layouts,
+      this.post,
+      this.ao,
+      width,
+      height,
+      this.quality,
+    );
   }
 
   /**
@@ -520,11 +658,22 @@ class SceneTargets {
   readonly depthView: GPUTextureView;
   readonly bloom: Bloom;
   readonly post: GPUBindGroup;
+  /** Resolved opaque color (before water), readable by transparent passes; medium and up. */
+  readonly opaque: GPUTexture | null;
+  readonly opaqueView: GPUTextureView | null;
+  /** Half-res linear view depth from `DepthDown`; medium and up. */
+  readonly halfDepth: GPUTexture | null;
+  readonly halfView: GPUTextureView | null;
+  /** Opaque color + MSAA depth + half depth, bound to transparent passes; medium and up. */
+  readonly scene: GPUBindGroup | null;
+  /** GTAO surfaces from the half-res depth; medium and up. */
+  readonly ao: AoTargets | null;
 
   constructor(
     device: GPUDevice,
     layouts: Layouts,
     post: PostRenderer,
+    ao: AmbientOcclusion,
     readonly width: number,
     readonly height: number,
     readonly quality: Quality,
@@ -538,18 +687,62 @@ class SceneTargets {
       1,
       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     );
-    this.depth = make(depthFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT);
+    this.depth = make(
+      depthFormat,
+      samples,
+      GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    );
     this.colorView = this.color.createView();
     this.resolveView = this.resolve.createView();
     this.depthView = this.depth.createView();
     this.bloom = post.bloomFor(this.resolveView, width, height);
-    this.post = post.bindInput(this.resolveView, this.bloom);
+    if (quality === "low") {
+      this.opaque =
+        this.opaqueView =
+        this.halfDepth =
+        this.halfView =
+        this.scene =
+          null;
+      this.ao = null;
+      this.post = post.bindInput(this.resolveView, this.bloom, null);
+    } else {
+      this.opaque = make(
+        colorFormat,
+        1,
+        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      );
+      this.opaqueView = this.opaque.createView();
+      const half = [Math.max(1, Math.ceil(width / 2)), Math.max(1, Math.ceil(height / 2))];
+      this.halfDepth = device.createTexture({
+        size: half,
+        format: "r16float",
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.halfView = this.halfDepth.createView();
+      this.scene = device.createBindGroup({
+        layout: layouts.scene,
+        entries: [
+          { binding: 0, resource: this.opaqueView },
+          {
+            binding: 1,
+            resource: device.createSampler({ magFilter: "linear", minFilter: "linear" }),
+          },
+          { binding: 2, resource: this.depthView },
+          { binding: 3, resource: this.halfView },
+        ],
+      });
+      this.ao = ao.allocate(this.halfView, width, height);
+      this.post = post.bindInput(this.resolveView, this.bloom, this.ao.out);
+    }
   }
 
   destroy() {
     this.color.destroy();
     this.resolve.destroy();
     this.depth.destroy();
+    this.opaque?.destroy();
+    this.halfDepth?.destroy();
+    for (const t of this.ao?.textures ?? []) t.destroy();
     for (const t of this.bloom.textures) t.destroy();
   }
 }

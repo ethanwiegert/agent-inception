@@ -225,28 +225,37 @@ try {
       // Setups run sim jobs (walking, placing); give them a moment at speed 1.
       await browser.evaluate(`new Promise(r => setTimeout(r, 1500))`);
     }
+    // c.target is a Vec3 [x, y, z]: poses anchor at its x/z.
     const data = await browser.evaluate<string>(`(async () => {
       __game.setLook(${JSON.stringify(shot.look ?? "natural")});
       __game.client.send({ type: "weather", clouds: ${shot.clouds} });
       __game.client.send({ type: "setTime", timeOfDay: ${shot.time} });
       await new Promise(r => setTimeout(r, 600));
       const c = __game.camera();
+      // Pose anchor: the launch target (world center). Captures move the camera, so a live
+      // read would make every later shot depend on what ran before it.
+      if (!globalThis.__shotAnchor) globalThis.__shotAnchor = [c.target[0], c.target[2]];
       const base = ${
-      shot.poseBase === "village" ? "(globalThis.__villageAt ?? c.target)" : "c.target"
+      shot.poseBase === "village"
+        ? "(globalThis.__villageAt ?? globalThis.__shotAnchor)"
+        : "globalThis.__shotAnchor"
     };
       const p = ${JSON.stringify(shot.pose)};
-      return await __game.capture(${W}, ${H},
+      const png = await __game.capture(${W}, ${H},
         { x: base[0] + (p.dx ?? 0), z: base[1] + (p.dz ?? 0),
           distance: p.distance, pitch: p.pitch, yaw: p.yaw }, ${shot.at});
+      return png + "|" + Math.round(base[0]) + "," + Math.round(base[1]);
     })()`);
     const perf = await browser.evaluate(`__perf.summary()`);
     const errors = await browser.evaluate(`__perf.gpuErrors.slice(0, 5)`);
-    const png = data.slice(data.indexOf(",") + 1);
+    const at = data.indexOf("|");
+    const base = data.slice(at + 1);
+    const png = data.slice(data.indexOf(",") + 1, at);
     await Deno.writeFile(
       `${outDir}/${shot.name}.png`,
       Uint8Array.from(atob(png), (c) => c.charCodeAt(0)),
     );
-    results[shot.name] = { perf, errors };
+    results[shot.name] = { perf, errors, base };
   }
   await Deno.writeTextFile(
     `${outDir}/report.json`,
