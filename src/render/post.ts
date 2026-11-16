@@ -125,7 +125,9 @@ fn display(p: vec2i, glow: vec3f) -> vec3f {
   c = mix(vec3f(luma), c, saturation);
   c = (c - 0.5) * g.y + 0.5;
   c += vec3f(g.z, g.z * 0.3, -g.z) * 0.06;
-  return c * mix(vec3f(0.6, 0.78, 1.3), vec3f(1.0), lit); // moonlight
+  // A narrower blue cast than the old blanket grade: foliage, sand and water keep their hues
+  // separated in moonlight, and lamplit pixels stay fully warm through the lit mask.
+  return c * mix(vec3f(0.72, 0.86, 1.2), vec3f(1.0), lit); // moonlight
 }
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
