@@ -44,21 +44,41 @@ fn disc(dir: vec3f, d: vec3f, r: f32) -> vec4f {
   var color = skyColor(dir);
   let above = smoothstep(-0.02, 0.03, dir.y);
 
-  // Only once the sky is dark: a field of faint stars, a few bright ones in warm and cool
-  // whites, and the Milky Way as a faint mottled band.
+  // Only once the sky is dark: fields of faint stars in a few magnitudes (more of them, dimmer
+  // near the moon and the horizon), and the Milky Way as a faint mottled band, strongest on
+  // moonless nights.
   if (frame.extra.x > 0.0 && dir.y > -0.02) {
     var night = stars(dir, 160.0, 0.993, 0.16) * (0.5 + 1.5 * hash3(floor(dir * 160.0) + 5.0));
+    night += stars(dir, 96.0, 0.985, 0.12) * 1.2;
     night += stars(dir, 64.0, 0.988, 0.11) * 3.0;
     let off = dot(dir, vec3f(0.42, 0.48, -0.77)) * 3.6;
     let band = exp(-off * off);
     night += vec3f(0.5, 0.6, 0.95) * band * (0.2 + 0.8 * fbm(dir.xz * 7.0 + dir.y * 4.0)) * 0.045;
-    color += night * frame.extra.x * above;
+    night *= mix(1.5, 0.6, frame.moonDir.w);
+    night *= 1.0 - 0.45 * max(dot(dir, frame.moonDir.xyz), 0.0);
+    // A rare shooting star: one hashed streak every few seconds, gone in a blink.
+    let epoch = floor(frame.cameraPos.w * 0.9);
+    if (hash21(vec2f(epoch, 3.7)) > 0.985) {
+      let when = fract(frame.cameraPos.w * 0.9);
+      let ca = hash3(vec3f(epoch, 1.0, 0.0)) * 6.2832;
+      let tail = vec3f(cos(ca), 0.35 + hash3(vec3f(epoch, 2.0, 0.0)) * 0.3, sin(ca)) * 0.06;
+      let head = normalize(vec3f(hash3(vec3f(epoch, 3.0, 0.0)) - 0.5, 0.55, hash3(vec3f(epoch, 4.0, 0.0)) - 0.5));
+      let rel = dir - head;
+      let along = clamp(dot(rel, tail) / dot(tail, tail), 0.0, 1.0);
+      let offS = length(rel - tail * along);
+      night += vec3f(1.0, 0.95, 0.85) * smoothstep(0.004, 0.0, offS) * (1.0 - along) *
+        sin(min(when / 0.07, 1.0) * 3.1416) * 8.0;
+    }
+    color += night * frame.extra.x * above * smoothstep(0.0, 0.28, dir.y);
   }
 
-  // The sun: a bright disc that the horizon haze reddens.
-  let sun = disc(dir, frame.sunPos.xyz, 0.02);
-  let sunTint = mix(vec3f(1.0, 0.45, 0.2), vec3f(1.0, 0.95, 0.85), clamp(frame.sunPos.y * 4.0, 0.0, 1.0));
-  color += sunTint * sun.x * 18.0 * frame.sunPos.w * above;
+  // The sun: a bright disc that the horizon haze reddens and squashes, darker at its limbs.
+  let squash = mix(1.0, 0.72, exp(-max(dir.y, 0.0) * 7.0));
+  let sunDir = normalize(vec3f(dir.x, dir.y / squash, dir.z));
+  let sun = disc(sunDir, frame.sunPos.xyz, 0.02);
+  let sunTint = mix(vec3f(1.0, 0.38, 0.15), vec3f(1.0, 0.95, 0.85), clamp(frame.sunPos.y * 3.5, 0.0, 1.0));
+  let limb = 0.55 + 0.45 * smoothstep(0.0, 0.4, sun.x);
+  color += sunTint * sun.x * limb * 18.0 * frame.sunPos.w * above;
   // A soft corona, so the disc sits in its own light rather than being cut out of the sky.
   let corona = pow(max(dot(dir, frame.sunPos.xyz), 0.0), 1500.0);
   color += sunTint * corona * 1.6 * frame.sunPos.w * above / frame.skyZenith.w;
@@ -71,6 +91,10 @@ fn disc(dir: vec3f, d: vec3f, r: f32) -> vec4f {
     let face = vec3f(0.85, 0.87, 0.92) * maria * (0.06 + 2.2 * lit);
     color = mix(color, face * (0.4 + 0.6 * frame.moonDir.w), moon.x * above);
   }
+  // A soft halo through thin cloud, widening with cover.
+  let haloDot = max(dot(dir, frame.moonDir.xyz), 0.0);
+  color += vec3f(0.55, 0.65, 1.0) * frame.moonDir.w * pow(haloDot, 40.0) *
+    (0.1 + 0.5 * frame.weather.x) * above;
 
   // A drifting cloud layer, the same one that casts shadows on the ground.
   if (dir.y > 0.01) {

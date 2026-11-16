@@ -138,17 +138,24 @@ fn cloudLight(world: vec3f) -> f32 {
 fn skyColor(dir: vec3f) -> vec3f {
   let up = clamp(dir.y, -1.0, 1.0);
   let h = pow(1.0 - max(up, 0.0), 5.0);
-  var c = mix(frame.skyZenith.rgb, frame.skyHorizon.rgb, h);
+  // Deeper zenith, a paler band at the horizon.
+  var c = mix(frame.skyZenith.rgb * 0.8, frame.skyHorizon.rgb * 1.12, h);
   c = mix(c, frame.skyHorizon.rgb * 0.8, smoothstep(0.0, -0.3, up));
-  // Around sunrise and sunset a warm band hugs the horizon, deepest on the sun's side.
+  // Around sunrise and sunset a warm band hugs the horizon, deepest on the sun's side, while the
+  // antisolar side gets its rose belt over the blue-grey earth shadow.
   let twilight = clamp(1.0 - abs(frame.sunPos.y) / 0.25, 0.0, 1.0);
   let flat = vec2f(dir.x, dir.z);
   let sunFlat = vec2f(frame.sunPos.x, frame.sunPos.z);
-  let toward = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4) * 0.5 + 0.5;
+  let azim = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4);
+  let toward = azim * 0.5 + 0.5;
   let band = exp(-max(up, 0.0) * 9.0) * twilight * (0.25 + 0.75 * toward * toward);
   // (Over the exposure: the band and the sun's glow show as bright at dusk as by day, or the
   // eyes adjusting would wash the sunset out.)
   c += vec3f(1.0, 0.42, 0.14) * band * 0.55 / frame.skyZenith.w;
+  let away = clamp(-azim, 0.0, 1.0) * twilight;
+  let belt = exp(-max(up, 0.0) * 8.0) * away;
+  c += vec3f(0.4, 0.13, 0.16) * belt * 0.45 / frame.skyZenith.w;
+  c = mix(c, vec3f(0.15, 0.19, 0.28), belt * smoothstep(0.14, 0.0, up) * 0.55);
   let s = max(dot(dir, frame.sunPos.xyz), 0.0);
   let glow = mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0, 0.9, 0.75), clamp(frame.sunPos.y * 3.0, 0.0, 1.0));
   c += glow * frame.sunPos.w * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.5) / frame.skyZenith.w;
