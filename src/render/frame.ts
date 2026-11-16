@@ -25,7 +25,9 @@ export const F = {
   depthParams: 112, // camera near, camera far, 1/width, 1/height of the scene depth
   /** Villagers and animals nearest the camera target: xyz, radius (0 = slot unused). */
   pushers: 116,
-  size: 116 + 16 * 4,
+  /** The wide shadow cascade (±260 blocks around the target), drawn at most every other frame. */
+  lightViewProj1: 180,
+  size: 116 + 16 * 4 + 16,
 } as const;
 
 export const frameWgsl = /* wgsl */ `
@@ -51,6 +53,7 @@ struct Frame {
   weather: vec4f,
   depthParams: vec4f,
   pushers: array<vec4f, 16>,
+  lightViewProj1: mat4x4f,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 `;
@@ -161,7 +164,7 @@ fn skyColor(dir: vec3f) -> vec3f {
  * every cell, rgb stored as square roots, alpha the share of fire (it flickers).
  */
 export const lightingWgsl = commonWgsl + /* wgsl */ `
-@group(0) @binding(1) var shadowMap: texture_depth_2d;
+@group(0) @binding(1) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(0) @binding(3) var lightField: texture_3d<f32>;
 @group(0) @binding(4) var lightSampler: sampler;
@@ -215,20 +218,46 @@ const POISSON = array<vec2f, 12>(
   vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893),
   vec2f(0.507, 0.064), vec2f(0.896, 0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598));
 
+/**
+ * The wide cascade (layer 1): four taps and a bigger normal bias suit its coarser texels. Shadows
+ * fade out at its rim — the cloud-shadow term takes over beyond it.
+ */
+fn shadowWide(world: vec3f, n: vec3f) -> f32 {
+  let p = frame.lightViewProj1 * vec4f(world + n * 0.2, 1.0);
+  let ndc = p.xyz / p.w;
+  let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
+  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
+  if (!inside) { return 1.0; }
+  let t = 1.5 / vec2f(textureDimensions(shadowMap).xy);
+  let sum = textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, -t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y), 1, ndc.z);
+  let rim = smoothstep(0.86, 0.98, max(abs(ndc.x), abs(ndc.y)));
+  return mix(sum * 0.25, 1.0, rim);
+}
+
 fn shadowAt(world: vec3f, n: vec3f) -> f32 {
   let p = frame.lightViewProj * vec4f(world + n * 0.05, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
-  let texel = 1.8 / vec2f(textureDimensions(shadowMap));
-  // Rotate the disc per pixel so the 12 taps blur into soft penumbrae instead of banding.
-  let a = hash21(floor(world.xz * 37.0) + world.y) * 6.2831853;
-  let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
-  var sum = 0.0;
-  for (var i = 0; i < 12; i++) {
-    sum += textureSampleCompareLevel(shadowMap, shadowSampler, uv + rot * POISSON[i] * texel, ndc.z);
+  let m = smoothstep(0.9, 1.0, max(abs(ndc.x), abs(ndc.y)));
+  var s = 1.0;
+  if (m < 1.0 && ndc.z < 1.0) {
+    let texel = 1.8 / vec2f(textureDimensions(shadowMap).xy);
+    // Rotate the disc per pixel so the 12 taps blur into soft penumbrae instead of banding.
+    let a = hash21(floor(world.xz * 37.0) + world.y) * 6.2831853;
+    let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
+    var sum = 0.0;
+    for (var i = 0; i < 12; i++) {
+      sum += textureSampleCompareLevel(
+        shadowMap, shadowSampler, uv + rot * POISSON[i] * texel, 0, ndc.z);
+    }
+    s = sum / 12.0;
   }
-  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
-  return select(1.0, sum / 12.0, inside);
+  // Blend into the wide cascade over the near box's last tenth: no seam, no pop when orbiting.
+  if (m > 0.0) { s = mix(s, shadowWide(world, n), m); }
+  return s;
 }
 
 /** Four hardware-filtered taps: cheap enough for every grass vertex or water pixel. */
@@ -236,13 +265,19 @@ fn shadowFast(world: vec3f) -> f32 {
   let p = frame.lightViewProj * vec4f(world, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
-  let t = 1.2 / vec2f(textureDimensions(shadowMap));
-  let sum = textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y * 0.5), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x * 0.5, -t.y), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y * 0.5), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x * 0.5, t.y), ndc.z);
-  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
-  return select(1.0, sum * 0.25, inside);
+  let m = smoothstep(0.9, 1.0, max(abs(ndc.x), abs(ndc.y)));
+  var s = 1.0;
+  if (m < 1.0 && ndc.z < 1.0) {
+    let t = 1.2 / vec2f(textureDimensions(shadowMap).xy);
+    let sum =
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y * 0.5), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x * 0.5, -t.y), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y * 0.5), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x * 0.5, t.y), 0, ndc.z);
+    s = sum * 0.25;
+  }
+  if (m > 0.0) { s = mix(s, shadowWide(world, vec3f(0.0, 1.0, 0.0)), m); }
+  return s;
 }
 
 /** Direct key light reaching a point: shadows and clouds. */

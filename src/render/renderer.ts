@@ -115,6 +115,14 @@ export class Renderer {
   private plainFrameBindGroup: GPUBindGroup;
   private shadowTexture: GPUTexture;
   private shadowView: GPUTextureView;
+  private shadowFarView: GPUTextureView;
+  private shadowAll: GPUTextureView;
+  private farLightPlanes = new Float32Array(24);
+  /** Cascade 1's last-drawn matrix and the frame parity it drew on (it redraws at most every
+   * other frame, only when its snapped matrix moved). */
+  private farDrawn = new Float32Array(16);
+  private farEverDrawn = false;
+  private farFrames = 0;
   private terrain: TerrainRenderer;
   private grass: GrassRenderer;
   private surface: SurfaceTexture;
@@ -160,7 +168,11 @@ export class Renderer {
       frame: device.createBindGroupLayout({
         entries: [
           { binding: 0, visibility: VF, buffer: {} },
-          { binding: 1, visibility: VF, texture: { sampleType: "depth" } },
+          {
+            binding: 1,
+            visibility: VF,
+            texture: { sampleType: "depth", viewDimension: "2d-array" },
+          },
           { binding: 2, visibility: VF, sampler: { type: "comparison" } },
           { binding: 3, visibility: VF, texture: { sampleType: "float", viewDimension: "3d" } },
           { binding: 4, visibility: VF, sampler: { type: "filtering" } },
@@ -198,11 +210,22 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.shadowTexture = device.createTexture({
-      size: [SHADOW_SIZE, SHADOW_SIZE],
+      // Two layers: 0 the near box around the target, 1 the ±260-block horizon cascade.
+      size: [SHADOW_SIZE, SHADOW_SIZE, 2],
       format: "depth32float",
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
-    this.shadowView = this.shadowTexture.createView();
+    this.shadowView = this.shadowTexture.createView({
+      dimension: "2d",
+      baseArrayLayer: 0,
+      arrayLayerCount: 1,
+    });
+    this.shadowFarView = this.shadowTexture.createView({
+      dimension: "2d",
+      baseArrayLayer: 1,
+      arrayLayerCount: 1,
+    });
+    this.shadowAll = this.shadowTexture.createView({ dimension: "2d-array" });
     const shadowSampler = device.createSampler({
       compare: "less",
       magFilter: "linear",
@@ -214,7 +237,7 @@ export class Renderer {
       layout: this.layouts.frame,
       entries: [
         { binding: 0, resource: { buffer: this.frameBuffer } },
-        { binding: 1, resource: this.shadowView },
+        { binding: 1, resource: this.shadowAll },
         { binding: 2, resource: shadowSampler },
         { binding: 3, resource: this.lightField.view },
         { binding: 4, resource: this.lightField.sampler },
@@ -389,6 +412,36 @@ export class Renderer {
       if (!this.debug.has("props")) this.models.drawShadow(shadowPass, this.flora, 1);
     }
     shadowPass.end();
+
+    // Cascade 1 is amortized: it redraws at most every other frame, and only when its snapped
+    // matrix actually moved (the sun turning or the target leaving a texel).
+    const fm = fd.subarray(F.lightViewProj1, F.lightViewProj1 + 16);
+    let moved = false;
+    for (let i = 0; i < 16; i++) {
+      if (Math.abs(fm[i] - this.farDrawn[i]) > 1e-5) moved = true;
+    }
+    this.farFrames++;
+    if (
+      !this.debug.has("shadow") &&
+      (moved && (this.farFrames % 2 === 0 || !this.farEverDrawn))
+    ) {
+      this.farDrawn.set(fm);
+      this.farEverDrawn = true;
+      const farPass = encoder.beginRenderPass({
+        colorAttachments: [],
+        depthStencilAttachment: {
+          view: this.shadowFarView,
+          depthClearValue: 1,
+          depthLoadOp: "clear",
+          depthStoreOp: "store",
+        },
+      });
+      farPass.setBindGroup(0, this.plainFrameBindGroup);
+      this.terrain.drawShadow(farPass, this.farLightPlanes);
+      // Flora draws uncullled at its low mesh (view 2 doesn't exist, so drawWith draws all).
+      if (!this.debug.has("props")) this.models.drawShadow(farPass, this.flora, 2);
+      farPass.end();
+    }
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
 
     const skip = this.debug;
@@ -583,6 +636,23 @@ export class Renderer {
     const ox = m[12] * texels, oy = m[13] * texels;
     m[12] += (Math.round(ox) - ox) / texels;
     m[13] += (Math.round(oy) - oy) / texels;
+
+    // Cascade 1: a fixed ±260-block volume around the target so shadows reach the horizon. Its
+    // snapped texels are ~half a block, so it only visibly moves when the sun turns.
+    const farHalf = 260;
+    const farEye: Vec3 = [
+      target[0] + dir[0] * 520,
+      target[1] + dir[1] * 520,
+      target[2] + dir[2] * 520,
+    ];
+    lookAt(this.lightView, farEye, target, up);
+    ortho(this.lightProj, farHalf, farHalf, 1, 1100);
+    const fm = fd.subarray(F.lightViewProj1, F.lightViewProj1 + 16);
+    multiply(fm, this.lightProj, this.lightView);
+    const fx = fm[12] * texels, fy = fm[13] * texels;
+    fm[12] += (Math.round(fx) - fx) / texels;
+    fm[13] += (Math.round(fy) - fy) / texels;
+    frustumPlanes(this.farLightPlanes, fm);
   }
 
   private sceneTargets(have: SceneTargets | null, width: number, height: number): SceneTargets {
