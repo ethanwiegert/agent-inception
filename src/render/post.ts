@@ -232,28 +232,32 @@ export class PostRenderer {
 
   /** Fill `bloom` from the resolved scene: down the levels, then back up into the first. */
   drawBloom(encoder: GPUCommandEncoder, frameBindGroup: GPUBindGroup, bloom: Bloom) {
-    const draw = (
-      pipeline: GPURenderPipeline,
-      from: GPUBindGroup,
-      to: GPUTextureView,
-      loadOp: GPULoadOp,
-    ) => {
-      const pass = encoder.beginRenderPass({
-        colorAttachments: [{ view: to, loadOp, storeOp: "store" }],
-      });
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, frameBindGroup);
-      pass.setBindGroup(1, from);
-      pass.draw(3);
-      pass.end();
-    };
-    draw(this.bloomFirst, bloom.scene, bloom.views[0], "clear");
+    const frame = frameBindGroup;
+    this.bloomPass(encoder, frame, this.bloomFirst, bloom.scene, bloom.views[0], "clear");
     for (let i = 1; i < BLOOM_LEVELS; i++) {
-      draw(this.bloomDown, bloom.levels[i - 1], bloom.views[i], "clear");
+      this.bloomPass(encoder, frame, this.bloomDown, bloom.levels[i - 1], bloom.views[i], "clear");
     }
     for (let i = BLOOM_LEVELS - 1; i > 0; i--) {
-      draw(this.bloomUp, bloom.levels[i], bloom.views[i - 1], "load");
+      this.bloomPass(encoder, frame, this.bloomUp, bloom.levels[i], bloom.views[i - 1], "load");
     }
+  }
+
+  private bloomPass(
+    encoder: GPUCommandEncoder,
+    frameBindGroup: GPUBindGroup,
+    pipeline: GPURenderPipeline,
+    from: GPUBindGroup,
+    to: GPUTextureView,
+    loadOp: GPULoadOp,
+  ) {
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{ view: to, loadOp, storeOp: "store" }],
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, frameBindGroup);
+    pass.setBindGroup(1, from);
+    pass.draw(3);
+    pass.end();
   }
 
   /** A bind group that reads `view` as the HDR scene and `bloom` as the glow to add to it. */

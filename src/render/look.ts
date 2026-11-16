@@ -176,9 +176,14 @@ export function applyLook(
   // Eyes adjust as the light goes; the dusk horizon is laid in dimmer by as much, or the
   // exposure would wash its orange out to a pale pink.
   const exposure = mix(3.2, 1.0, day01);
-  const dusk = SKY.duskHorizon.map((c) => c / exposure) as Rgb;
+  const keep = (1 - twilight * 0.3) * (1 - twilight * 0.75);
+  const dusk = twilight * 0.75 / exposure;
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
-  horizon = mixRgb(mixRgb(horizon, [0, 0, 0], twilight * 0.3), dusk, twilight * 0.75);
+  horizon = [
+    horizon[0] * keep + SKY.duskHorizon[0] * dusk,
+    horizon[1] * keep + SKY.duskHorizon[1] * dusk,
+    horizon[2] * keep + SKY.duskHorizon[2] * dusk,
+  ];
   // Overcast skies go grey.
   const grey = (c: Rgb): Rgb => {
     const l = (c[0] + c[1] + c[2]) / 3;
