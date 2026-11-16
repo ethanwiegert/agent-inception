@@ -19,7 +19,7 @@ import { LightTexture } from "./lighttex.ts";
 import { InstanceBatch, MeshLibrary } from "./meshes.ts";
 import { ModelBatch, ModelRenderer } from "./models.ts";
 import { ParticleRenderer } from "./particles.ts";
-import { PostRenderer } from "./post.ts";
+import { type Bloom, PostRenderer } from "./post.ts";
 import { SkyRenderer } from "./sky.ts";
 import { SurfaceTexture } from "./surface.ts";
 import { TerrainRenderer } from "./terrain.ts";
@@ -89,7 +89,7 @@ export interface RenderStats {
 export class Renderer {
   readonly stats: RenderStats = { gpuMs: 0, grassBlades: 0, chunksRebuilt: 0 };
   /** Passes to skip, for profiling: "shadow", "terrain", "grass", "water", "sky", "bodies",
-   * "props", "fire". */
+   * "props", "fire", "bloom". */
   debug = new Set<string>();
   /**
    * Share of each look's grass blades to draw (0-1]; blades widen to keep the meadow's cover.
@@ -287,6 +287,7 @@ export class Renderer {
     this.lightField.update(scene.light);
     fd[F.extra + 3] = scene.light?.lit ? 1 : 0;
     fd[F.weather + 2] = scene.tick - scene.cropsTick;
+    if (this.debug.has("bloom")) fd[F.weather + 3] = 0;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
     frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
@@ -369,6 +370,7 @@ export class Renderer {
     main.setBindGroup(0, this.frameBindGroup);
     if (!skip.has("fire")) this.particles.draw(main);
     main.end();
+    if (!skip.has("bloom")) this.post.drawBloom(encoder, this.plainFrameBindGroup, targets.bloom);
 
     const post = encoder.beginRenderPass({
       colorAttachments: [{
@@ -496,6 +498,7 @@ class SceneTargets {
   readonly colorView: GPUTextureView;
   readonly resolveView: GPUTextureView;
   readonly depthView: GPUTextureView;
+  readonly bloom: Bloom;
   readonly post: GPUBindGroup;
 
   constructor(
@@ -518,13 +521,15 @@ class SceneTargets {
     this.colorView = this.color.createView();
     this.resolveView = this.resolve.createView();
     this.depthView = this.depth.createView();
-    this.post = post.bindInput(this.resolveView);
+    this.bloom = post.bloomFor(this.resolveView, width, height);
+    this.post = post.bindInput(this.resolveView, this.bloom);
   }
 
   destroy() {
     this.color.destroy();
     this.resolve.destroy();
     this.depth.destroy();
+    for (const t of this.bloom.textures) t.destroy();
   }
 }
 

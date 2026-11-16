@@ -25,7 +25,7 @@ struct Blade {
   heightWidth: u32,   // pack2x16float(height, width)
   facingLight: u32,   // pack2x16unorm(facing / 2π, key light)
   bend: u32,          // pack2x16float(bend x, bend z) at the tip
-  base: u32,          // pack4x8unorm(root color * 4)
+  base: u32,          // pack4x8unorm(root color * 4); alpha = how hard a gust presses the blade
   tip: u32,           // pack4x8unorm(tip color * 4); alpha = flower kind (0 = none)
 };
 `;
@@ -135,7 +135,7 @@ fn rand(seed: ptr<function, u32>) -> f32 {
     pack2x16float(vec2f(h, w)),
     pack2x16unorm(vec2f(angle, light)),
     pack2x16float(bend),
-    pack4x8unorm(vec4f(root * 4.0, 0.0)),
+    pack4x8unorm(vec4f(root * 4.0, smoothstep(0.5, 0.9, gust) * min(frame.wind.z, 1.0) * fade)),
     pack4x8unorm(vec4f(tip * 4.0, select(0.0, 0.25 + flowerKind * 0.75, flower))));
 }
 `;
@@ -175,9 +175,12 @@ struct Out {
   var p = b.pos + right * sideSign * hw.y * (1.0 - t) + vec3f(0.0, hw.x * t, 0.0) + bend * curve;
   p.y -= length(bend) * curve * 0.3;
 
-  let root = unpack4x8unorm(b.base).rgb * 0.25;
+  let rootc = unpack4x8unorm(b.base);
+  let root = rootc.rgb * 0.25;
   let tipc = unpack4x8unorm(b.tip);
   var color = mix(root, tipc.rgb * 0.25, smoothstep(0.0, 1.0, t));
+  // Blades a gust lays over show their pale sides: waves of light roll across the meadow.
+  color = mix(color, color * 1.35 + vec3f(0.035, 0.04, 0.012), rootc.a * t);
   if (tipc.a > 0.0 && level >= 2u) {
     let petals = array<vec3f, 3>(vec3f(0.9, 0.85, 0.7), vec3f(0.95, 0.65, 0.08), vec3f(0.45, 0.25, 0.75));
     color = petals[min(u32((tipc.a - 0.25) / 0.75 * 3.0), 2u)];
