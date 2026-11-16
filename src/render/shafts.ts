@@ -75,7 +75,10 @@ fn phase(cos: f32, g: f32) -> f32 {
   let sea = frame.extra.z;
   let mist = frame.grassBase.w * 0.05;
 
-  let maxT = min(L, ${MAX_DIST.toFixed(1)});
+  // L is view depth (distance along the camera's forward); off-axis the ray is longer by the
+  // near-plane ratio, or the march would stop short of the surface.
+  let rayScale = length(w.xyz / w.w - eye) / frame.depthParams.x;
+  let maxT = min(L * rayScale, ${MAX_DIST.toFixed(1)});
   let dt = maxT / ${steps}.0;
   var t = dt * ign(pos.xy);
   var trans = 1.0;
