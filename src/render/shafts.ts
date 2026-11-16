@@ -54,8 +54,9 @@ fn phase(cos: f32, g: f32) -> f32 {
   // pos is a quarter-res pixel; linearDepth is half res, so uv = pos * 2 / size.
   let size = vec2f(textureDimensions(halfDepthTex));
   let uv = pos.xy * 2.0 / size;
-  let L = textureSampleLevel(halfDepthTex, smp, uv, 0.0).r;
-  if (L > 3000.0) { return vec4f(0.0); }
+  // Sky and open water have no opaque depth: march to the cap anyway, so haze and lamp glow
+  // reach the horizon instead of cutting off at silhouettes.
+  let L = min(textureSampleLevel(halfDepthTex, smp, uv, 0.0).r, ${MAX_DIST.toFixed(1)});
 
   let ndc = vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
   let w = frame.invViewProj * ndc;
