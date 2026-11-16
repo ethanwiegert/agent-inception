@@ -63,6 +63,23 @@ const GRAIN: Record<string, { grain: number; scale: readonly [number, number, nu
   plain: { grain: 0.07, scale: [10, 10, 10] },
 };
 
+/** Specular roughness per pattern: wood and cloth stay matte, tiles and plain hard things shine. */
+const ROUGH: Record<string, number> = {
+  leaves: 0.95,
+  fleece: 0.95,
+  log: 0.9,
+  stone: 0.82,
+  cobble: 0.88,
+  dirt: 0.95,
+  farmland: 0.95,
+  planks: 0.8,
+  bricks: 0.85,
+  thatch: 0.95,
+  tiles: 0.45,
+  sand: 0.9,
+  grass: 0.9,
+};
+
 /** Add `design`'s parts to `b`. Returns how many parts it drew. */
 export function meshDesign(
   b: MeshBuilder,
@@ -144,6 +161,9 @@ function meshPart(
       : 0,
     grain: gr.grain,
     grainScale: gr.scale,
+    // Per-Material roughness guess (no Catalog field): patterned stuff keeps its matte or slight
+    // sheen; plain hard Materials (metal, glass) glint.
+    rough: ROUGH[mat.pattern] ?? Math.max(0.15, 0.85 - mat.hardness * 0.09),
     // A lamp shines while its Object's lights are on; a glowing Material always does.
     glow: deviceKind(p.part) === "lamp" ? -Math.max(0.8, mat.glows ?? 0) : mat.glows ?? 0,
   };

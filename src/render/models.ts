@@ -30,6 +30,7 @@ struct VIn {
   @location(0) pos: vec3f,
   @location(1) normal: vec4f,
   @location(2) color: vec4f,
+  @location(3) surf: vec4f,
 };
 
 struct Out {
@@ -40,6 +41,8 @@ struct Out {
   @location(3) glow: f32,
   /** How loose in the wind (0-1): leaves and needles, which light shines through. */
   @location(4) leaf: f32,
+  /** Surface roughness, from the Material's pattern (metal and glass glint, wood doesn't). */
+  @location(5) rough: f32,
 };
 
 /** Wind sway: a slow lean with the gusts plus a quick flutter, scaled by how loose a vertex is. */
@@ -75,7 +78,7 @@ fn place(v: VIn, ii: u32) -> vec3f {
   // Glow: positive always; negative only while the instance's lights are on (tint.a >= 0).
   let g = v.normal.w;
   let glow = select(max(-g, 0.0) * step(0.0, inst.tint.a), g, g > 0.0);
-  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0));
+  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0), v.surf.x);
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -86,6 +89,15 @@ fn place(v: VIn, ii: u32) -> vec3f {
   let n = normalize(in.normal);
   let view = normalize(frame.cameraPos.xyz - in.world);
   var c = shade(in.color, n, in.world, 1.0, 0.25) + selfLit(in.color * in.glow * EMISSIVE);
+  // The same specular term the terrain's pattern surfaces get: smooth Materials catch the sun,
+  // wood and cloth stay matte. Off for leaves, whose sheen is the translucency below.
+  let gloss = (1.0 - in.rough) * (1.0 - in.leaf);
+  if (gloss > 0.02) {
+    let hdir = normalize(view + frame.sunDir.xyz);
+    c += frame.sunColor.rgb * frame.sunDir.w * keyLight(in.world, n) *
+      pow(max(dot(n, hdir), 0.0), mix(12.0, 180.0, gloss * gloss)) * gloss * gloss * 0.6;
+    c += skyColor(reflect(-view, n)) * pow(1.0 - max(dot(n, view), 0.0), 5.0) * gloss * 0.5;
+  }
   // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
   let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
   c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
@@ -156,6 +168,7 @@ const vertexLayout: GPUVertexBufferLayout = {
     { shaderLocation: 0, offset: 0, format: "float32x3" },
     { shaderLocation: 1, offset: 12, format: "snorm8x4" },
     { shaderLocation: 2, offset: 16, format: "unorm8x4" },
+    { shaderLocation: 3, offset: 20, format: "unorm8x4" },
   ],
 };
 
