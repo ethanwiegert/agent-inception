@@ -269,9 +269,15 @@ fn wetness(world: vec3f) -> f32 {
     let above = 1.0 - smoothstep(0.0, 0.3, select(depth, 0.0, s.a == 0u));
     albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wetness(in.world) * above);
   }
+  // The meadow floor takes the blades' clump and occlusion terms, so thin or sparse grass never
+  // exposes a flat green sheet underneath.
+  if (in.face == 2u && block == 1u) {
+    albedo *= 0.85 + 0.3 * valueNoise(in.world.xz * 0.3);
+  }
   // The field map: ambient falls off under crowns and at the foot of cliffs and walls, and
   // villagers/animals sit in a soft contact blob.
   let field = fieldAt(in.world.xz);
+  if (in.face == 2u && block == 1u) { albedo *= mix(1.0, field.x, 0.5); }
   let ao = mix(1.0, in.ao, frame.groundAmbient.w) * mix(1.0, field.x, 0.8) *
     (1.0 - pusherShade(in.world.xz) * 0.4);
   let pattern = u32(info.w);

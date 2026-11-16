@@ -109,14 +109,26 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   if (!isGrassy(s, base.xz)) { return; }
   let fade = 1.0 - smoothstep(r * 0.75, r, d);
 
+  // Clumping at the 2-4 block scale: tufts grow taller and richer together, thin patches stay
+  // short and pale, and some blades never sprout in the bare spots.
+  let clump = valueNoise(base.xz * 0.3);
+  if (rand(&seed) > mix(0.55, 1.0, smoothstep(0.3, 0.5, clump))) { return; }
+  let dry = smoothstep(0.55, 0.75, valueNoise(base.xz * 0.18 + 61.0));
+
   let heightRand = rand(&seed);
   let angle = rand(&seed);
   let lean = rand(&seed);
   let tone = rand(&seed);
-  let flower = rand(&seed) < frame.grassTip.w;
+  // Flowers come in drifts, not a uniform chance.
+  let flower = rand(&seed) < frame.grassTip.w * smoothstep(0.42, 0.62, valueNoise(base.xz * 0.11 + 40.0)) * 1.7;
   let flowerKind = rand(&seed);
+  // Drier patches grow taller blades with pale seed heads (tip kind 3).
+  let seedHead = !flower && rand(&seed) < dry * 0.04;
+  let tipKind = select(min(u32(flowerKind * 3.0), 2u), 3u, seedHead);
+  let hasTip = flower || seedHead;
 
-  var h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * fade * select(1.0, 1.25, flower);
+  var h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * (0.75 + 0.55 * clump) * fade *
+    select(1.0, 1.25, flower) * select(1.0, 1.3, seedHead);
   let w = frame.grass.y / sqrt(keep);
   let facing = vec2f(cos(angle * 6.2831853), sin(angle * 6.2831853));
   let time = frame.cameraPos.w;
@@ -144,8 +156,9 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   let lushTint = vec3f(0.82, 1.07, 0.9);
   var root = meadowColor(frame.grassBase.rgb, base.xz);
   var tip = meadowColor(frame.grassTip.rgb, base.xz) * (0.8 + 0.4 * tone);
-  root = mix(root, root * lushTint, shoreLush * 0.7) * occ * (1.0 - press * 0.25);
-  tip = mix(tip, tip * lushTint, shoreLush * 0.7) * occ;
+  root = mix(root, root * lushTint, shoreLush * 0.7) * occ * (1.0 - press * 0.25) *
+    (0.85 + 0.3 * clump);
+  tip = mix(tip, tip * lushTint, shoreLush * 0.7) * occ * (0.85 + 0.3 * clump);
   let light = keyLightFast(base + vec3f(0.0, h * 0.5, 0.0)) * occ;
 
   let idx = atomicAdd(&args.instanceCount, 1u);
@@ -156,7 +169,7 @@ fn rand(seed: ptr<function, u32>) -> f32 {
     pack2x16unorm(vec2f(angle, light)),
     pack2x16float(bend),
     pack4x8unorm(vec4f(root * 4.0, smoothstep(0.5, 0.9, gust) * min(frame.wind.z, 1.0) * fade)),
-    pack4x8unorm(vec4f(tip * 4.0, select(0.0, 0.25 + flowerKind * 0.75, flower))));
+    pack4x8unorm(vec4f(tip * 4.0, select(0.0, 0.25 + 0.75 * (f32(tipKind) + 0.5) / 4.0, hasTip))));
 }
 `;
 
@@ -171,6 +184,8 @@ struct Out {
   @location(3) t: f32,
   @location(4) light: f32,
   @location(5) lamp: vec3f,
+  /** How hard a gust presses the blade flat: drives the sheen across the laid-over side. */
+  @location(6) press: f32,
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
@@ -202,15 +217,17 @@ struct Out {
   // Blades a gust lays over show their pale sides: waves of light roll across the meadow.
   color = mix(color, color * 1.35 + vec3f(0.035, 0.04, 0.012), rootc.a * t);
   if (tipc.a > 0.0 && level >= 2u) {
-    let petals = array<vec3f, 3>(vec3f(0.9, 0.85, 0.7), vec3f(0.95, 0.65, 0.08), vec3f(0.45, 0.25, 0.75));
-    color = petals[min(u32((tipc.a - 0.25) / 0.75 * 3.0), 2u)];
+    let petals = array<vec3f, 4>(vec3f(0.9, 0.85, 0.7), vec3f(0.95, 0.65, 0.08), vec3f(0.45, 0.25, 0.75), vec3f(0.42, 0.38, 0.2));
+    color = petals[min(u32((tipc.a - 0.25) / 0.75 * 4.0), 3u)];
   }
   out.pos = frame.viewProj * vec4f(p, 1.0);
   out.world = p;
-  out.normal = normalize(vec3f(0.0, 0.75, 0.0) + facing * 0.45);
+  // The normals fan across the blade's width so each blade shows a lit and a shaded side.
+  out.normal = normalize(vec3f(0.0, 0.75, 0.0) + facing * 0.45 + right * sideSign * 0.8);
   out.t = t;
   out.light = fl.y;
   out.lamp = lampLight(p, vec3f(0.0, 1.0, 0.0));
+  out.press = rootc.a * t;
   // Dense grass shades its own roots.
   out.color = color * mix(1.0, mix(0.35, 1.0, t), frame.groundAmbient.w);
   return out;
@@ -223,6 +240,10 @@ struct Out {
   let view = normalize(frame.cameraPos.xyz - in.world);
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0);
   c += in.color * frame.sunColor.rgb * frame.sunDir.w * back * in.t * 0.6 * in.light;
+  // A faint specular sheen along blades a gust has laid flat.
+  let hdir = normalize(view + frame.sunDir.xyz);
+  c += frame.sunColor.rgb * frame.sunDir.w * in.light *
+    pow(max(dot(n, hdir), 0.0), 12.0) * in.press * 0.15;
   return vec4f(fog(c, in.world), 1.0);
 }
 `;

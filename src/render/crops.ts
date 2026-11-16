@@ -64,8 +64,22 @@ struct Out {
   if (level >= 2u) { w = mix(w, 0.11, ripe * select(0.6, 1.0, level == 2u)); }
   let time = frame.cameraPos.w;
   let sway = sin(time * 1.7 + base.x * 0.7 + base.z * 0.5) * 0.08 * frame.wind.z;
-  let bend = (vec3f(frame.wind.x, 0.0, frame.wind.y) * sway + facing * 0.05) * h;
-  let p = base + right * sideSign * w + vec3f(0.0, h * t, 0.0) + bend * t * t;
+  var bend = (vec3f(frame.wind.x, 0.0, frame.wind.y) * sway + facing * 0.05) * h;
+
+  // Like the grass: crowns pool shade over the rows, villagers press stalks aside.
+  let field = fieldAt(base.xz);
+  var press = 0.0;
+  for (var i = 0; i < 16; i++) {
+    let pu = frame.pushers[i];
+    if (pu.w <= 0.0) { continue; }
+    let d = base.xz - pu.xz;
+    let dist = length(d);
+    if (dist >= pu.w) { continue; }
+    let k = 1.0 - dist / pu.w;
+    bend += vec3f(d.x / max(dist, 0.01), 0.0, d.y / max(dist, 0.01)) * k * h * 0.8;
+    press = max(press, k);
+  }
+  let p = base + right * sideSign * w + vec3f(0.0, h * t * (1.0 - press * 0.5), 0.0) + bend * t * t;
 
   let young = unpackColor(look.x) * vec3f(0.6, 0.93, 0.6);
   let ear = unpackColor(look.y);
@@ -76,7 +90,7 @@ struct Out {
   var out: Out;
   out.pos = frame.viewProj * vec4f(p, 1.0);
   out.world = p;
-  out.color = color;
+  out.color = color * mix(1.0, field.x, 0.7) * (1.0 - press * 0.2);
   out.t = t;
   return out;
 }

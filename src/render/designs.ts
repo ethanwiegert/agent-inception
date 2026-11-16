@@ -149,7 +149,8 @@ function meshPart(
   const style: Style = {
     color: [base[0] * k, base[1] * k, base[2] * k],
     sway: [lo * bend, hi * bend],
-    ao: lumpy ? 0.38 : rocky ? 0.3 : 0.25,
+    // A crown gradient: darker toward the trunk and underside, lighter outside and on top.
+    ao: lumpy ? 0.5 : rocky ? 0.3 : 0.25,
     jitter: mat.pattern === "leaves"
       ? 0.12
       : mat.pattern === "log"
