@@ -7,7 +7,7 @@ const BLOOM_LEVELS = 4;
 /**
  * Bloom: what is brighter than white (the sun, glints on water, lamps, fire) spills a soft glow
  * around itself. The scene is cut down to a quarter of its size keeping only that light, halved
- * a few more times, then added back up level by level, so the whole chain shades about a tenth of
+ * a few more times, then added back up level by level, so the whole chain shades about a sixth of
  * a screen's pixels with four taps each.
  */
 const bloomShader = frameWgsl + /* wgsl */ `
