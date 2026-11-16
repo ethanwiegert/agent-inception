@@ -87,7 +87,7 @@ fn place(v: VIn, ii: u32) -> vec3f {
   let view = normalize(frame.cameraPos.xyz - in.world);
   var c = shade(in.color, n, in.world, 1.0, 0.25) + selfLit(in.color * in.glow * EMISSIVE);
   // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
-  let rim = pow(1.0 - max(dot(n, view), 0.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
+  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
   c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
   // Crowns between the eye and the sun glow: light comes through the leaves.
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;

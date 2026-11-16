@@ -49,7 +49,8 @@ fn disc(dir: vec3f, d: vec3f, r: f32) -> vec4f {
   if (frame.extra.x > 0.0 && dir.y > -0.02) {
     var night = stars(dir, 160.0, 0.993, 0.16) * (0.5 + 1.5 * hash3(floor(dir * 160.0) + 5.0));
     night += stars(dir, 64.0, 0.988, 0.11) * 3.0;
-    let band = exp(-pow(dot(dir, vec3f(0.42, 0.48, -0.77)) * 3.6, 2.0));
+    let off = dot(dir, vec3f(0.42, 0.48, -0.77)) * 3.6;
+    let band = exp(-off * off);
     night += vec3f(0.5, 0.6, 0.95) * band * (0.2 + 0.8 * fbm(dir.xz * 7.0 + dir.y * 4.0)) * 0.045;
     color += night * frame.extra.x * above;
   }
