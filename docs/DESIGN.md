@@ -138,7 +138,19 @@ Settled with Ethan while workshopping M1; keep to it unless he asks otherwise.
   sand, gravel, clay and dirt by a noise-wobbled lookup), never in block squares. Grass blends only
   with neighbours within a block of height, so it doesn't creep up walls or into pits.
 - Skies: a warm twilight band hugs the horizon toward the sun; clouds are lit, thin edges bright and
-  thick cores grey, with a silver lining toward the sun.
+  thick cores grey, with a silver lining toward the sun. They are heaps with form (the side toward
+  the light bright, the far side shaded, edges eroded by finer noise), sink into the haze toward the
+  horizon instead of streaking, and show in the water. The dusk horizon and the sun's glow are laid
+  in dimmer as the exposure rises, so sunsets stay orange instead of washing out to pink. At night:
+  faint stars, a few bright ones in warm and cool whites, a faint Milky Way.
+- Light has depth without extra passes (fable 5.2): shade picks up warm light bounced off the
+  ground, low-poly crowns and villagers get a soft sky rim, and crowns between the eye and the sun
+  glow with the light coming through them. A thin mist pools over low ground and water around
+  sunrise and sunset. Gusts lay the grass over in pale waves that roll across the meadow. Bare
+  ground is wet and darker along the waterline, and thin foam laps at the shallows.
+- Bloom is the only extra pass: what is brighter than white (the sun, glints on water, lamps, fire)
+  spills a soft glow, worked out at a quarter of the resolution and below. It is tuned low per look,
+  so lit surfaces keep their true colors; `?debug=bloom` skips it.
 - Pacing is chill and methodical: ~2 blocks/s walking, 1-2 s per tile of work.
 - Nights are dark and blue but readable; golden hour has long soft shadows.
 

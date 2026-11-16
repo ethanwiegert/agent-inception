@@ -19,6 +19,8 @@ export interface Look {
   vignette: number;
   fogDensity: number;
   wind: number;
+  /** How much of the light above white spills around it (the sun, glints, lamps, fire). */
+  bloom: number;
 }
 
 export const LOOKS: Record<string, Look> = {
@@ -39,6 +41,7 @@ export const LOOKS: Record<string, Look> = {
     vignette: 0.16,
     fogDensity: 0.0016,
     wind: 0.9,
+    bloom: 0.1,
   },
   lush: {
     name: "Lush meadow",
@@ -56,6 +59,7 @@ export const LOOKS: Record<string, Look> = {
     vignette: 0.22,
     fogDensity: 0.006,
     wind: 1,
+    bloom: 0.14,
   },
   crisp: {
     name: "Crisp blocks",
@@ -73,6 +77,7 @@ export const LOOKS: Record<string, Look> = {
     vignette: 0.08,
     fogDensity: 0.004,
     wind: 0.6,
+    bloom: 0.06,
   },
   storybook: {
     name: "Storybook",
@@ -90,6 +95,7 @@ export const LOOKS: Record<string, Look> = {
     vignette: 0.38,
     fogDensity: 0.01,
     wind: 1.3,
+    bloom: 0.18,
   },
 };
 
@@ -167,8 +173,17 @@ export function applyLook(
 
   let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day01);
   let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day01);
+  // Eyes adjust as the light goes; the dusk horizon is laid in dimmer by as much, or the
+  // exposure would wash its orange out to a pale pink.
+  const exposure = mix(3.2, 1.0, day01);
+  const keep = (1 - twilight * 0.3) * (1 - twilight * 0.75);
+  const dusk = twilight * 0.75 / exposure;
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
-  horizon = mixRgb(horizon, SKY.duskHorizon, twilight * 0.75);
+  horizon = [
+    horizon[0] * keep + SKY.duskHorizon[0] * dusk,
+    horizon[1] * keep + SKY.duskHorizon[1] * dusk,
+    horizon[2] * keep + SKY.duskHorizon[2] * dusk,
+  ];
   // Overcast skies go grey.
   const grey = (c: Rgb): Rgb => {
     const l = (c[0] + c[1] + c[2]) / 3;
@@ -182,12 +197,15 @@ export function applyLook(
   out.set(keyColor, F.sunColor);
   out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast);
   out.set(zenith, F.skyZenith);
-  out[F.skyZenith + 3] = mix(3.2, 1.0, day01); // exposure: eyes adjust at night
+  out[F.skyZenith + 3] = exposure;
   out.set(horizon, F.skyHorizon);
   out[F.skyHorizon + 3] = look.fogDensity;
   out.set(mixRgb([0.01, 0.012, 0.02], [0.38, 0.32, 0.18], day01), F.groundAmbient);
   out[F.groundAmbient + 3] = look.aoStrength;
   out.set(look.grassBase, F.grassBase);
+  // Mist pools over low ground around sunrise and sunset, and a little under heavy cloud.
+  out[F.grassBase + 3] = 0.28 * smoothstep(0.25, 0.9, twilight) * (1 - 0.5 * night) +
+    0.1 * overcast * overcast;
   out.set(look.grassTip, F.grassTip);
   out[F.grassTip + 3] = look.flowerChance;
   out[F.grass] = look.bladeHeight;
@@ -208,4 +226,5 @@ export function applyLook(
   out[F.moonDir + 3] = illuminated * smoothstep(-0.05, 0.05, moon[1]) * (1 - overcast * 0.8);
   out[F.weather] = overcast;
   out[F.weather + 1] = 1;
+  out[F.weather + 3] = look.bloom;
 }

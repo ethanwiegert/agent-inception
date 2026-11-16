@@ -12,7 +12,7 @@ export const F = {
   skyZenith: 60, // rgb, exposure
   skyHorizon: 64, // rgb, fog density
   groundAmbient: 68, // rgb, AO strength
-  grassBase: 72, // rgb, -
+  grassBase: 72, // rgb, mist over low ground 0-1
   grassTip: 76, // rgb, flower chance
   grass: 80, // blade height, blade width, blades per block, radius (blocks)
   grassCenter: 84, // center x, center z, world size x, world size z
@@ -21,7 +21,7 @@ export const F = {
   extra: 96, // star visibility, 1 - moonlit grading, sea level, 1 if anything casts lamplight
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
-  weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, -
+  weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, bloom
   size: 112,
 } as const;
 
@@ -87,8 +87,21 @@ fn meadowColor(base: vec3f, xz: vec2f) -> vec3f {
 fn cloudDensity(xz: vec2f) -> f32 {
   let drift = frame.wind.xy * frame.cameraPos.w * frame.weather.y;
   let n = fbm((xz + drift) * 0.0045);
-  let cover = frame.weather.x;
-  return smoothstep(1.0 - cover - 0.05, 1.0 - cover + 0.25, n);
+  let lo = 0.95 - frame.weather.x;
+  return smoothstep(lo - 0.03, lo + 0.2, n);
+}
+
+/**
+ * The same layer as the sky draws it: the shadow-casting shape with its edges firmed up and
+ * eroded by finer noise, so clouds read as heaps rather than smears. Sky pixels only. Returns
+ * the density and the fine noise (the billows, to shade by).
+ */
+fn cloudShape(xz: vec2f) -> vec2f {
+  let drift = frame.wind.xy * frame.cameraPos.w * frame.weather.y;
+  let q = (xz + drift) * 0.0045;
+  let fine = valueNoise(q * 6.1 + vec2f(3.7, 9.2)) * 0.6 + valueNoise(q * 13.7 + vec2f(21.3, 4.4)) * 0.4;
+  let lo = 0.95 - frame.weather.x;
+  return vec2f(smoothstep(lo - 0.03, lo + 0.13, fbm(q) + (fine - 0.5) * 0.14), fine);
 }
 
 /** Fraction of key light that gets through the clouds above a point. */
@@ -110,10 +123,12 @@ fn skyColor(dir: vec3f) -> vec3f {
   let sunFlat = vec2f(frame.sunPos.x, frame.sunPos.z);
   let toward = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4) * 0.5 + 0.5;
   let band = exp(-max(up, 0.0) * 9.0) * twilight * (0.25 + 0.75 * toward * toward);
-  c += vec3f(1.0, 0.42, 0.14) * band * 0.45;
+  // (Over the exposure: the band and the sun's glow show as bright at dusk as by day, or the
+  // eyes adjusting would wash the sunset out.)
+  c += vec3f(1.0, 0.42, 0.14) * band * 0.55 / frame.skyZenith.w;
   let s = max(dot(dir, frame.sunPos.xyz), 0.0);
   let glow = mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0, 0.9, 0.75), clamp(frame.sunPos.y * 3.0, 0.0, 1.0));
-  c += glow * frame.sunPos.w * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.5);
+  c += glow * frame.sunPos.w * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.5) / frame.skyZenith.w;
   let m = max(dot(dir, frame.moonDir.xyz), 0.0);
   c += vec3f(0.55, 0.65, 1.0) * frame.moonDir.w * pow(m, 24.0) * 0.08;
   return c;
@@ -208,15 +223,32 @@ fn shadeWith(albedo: vec3f, n: vec3f, light: f32, ao: f32, wrap: f32) -> vec3f {
   return albedo * (direct + hemi * frame.sunColor.w * ao);
 }
 
-fn shade(albedo: vec3f, n: vec3f, world: vec3f, ao: f32, wrap: f32) -> vec3f {
-  return shadeWith(albedo, n, keyLight(world, n), ao, wrap) + albedo * lampLight(world, n) * ao;
+/**
+ * Sunlight the ground throws back: it warms what faces down and away from the sun, so shade isn't
+ * one flat sky blue. Nothing for what faces up (the ground itself, grass).
+ */
+fn groundBounce(n: vec3f) -> vec3f {
+  return frame.groundAmbient.rgb * frame.sunDir.w * 0.1 *
+    clamp(0.6 - n.y, 0.0, 1.0) * (0.5 - 0.5 * dot(n, frame.sunDir.xyz));
 }
 
-/** Aerial perspective: distant things fade toward the sky color in their direction. */
+fn shade(albedo: vec3f, n: vec3f, world: vec3f, ao: f32, wrap: f32) -> vec3f {
+  return shadeWith(albedo, n, keyLight(world, n), ao, wrap) +
+    albedo * (lampLight(world, n) + groundBounce(n)) * ao;
+}
+
+/**
+ * Aerial perspective: distant things fade toward the sky color in their direction. At dawn and
+ * dusk a thin mist also pools over low ground and water, much nearer than the haze.
+ */
 fn fog(color: vec3f, world: vec3f) -> vec3f {
   let v = world - frame.cameraPos.xyz;
-  let d = max(length(v) - 90.0, 0.0);
-  let f = 1.0 - exp(-d * frame.skyHorizon.w);
-  return mix(color, skyColor(normalize(vec3f(v.x, max(v.y, 0.0), v.z))) * 0.9, f);
+  let len = length(v);
+  var keep = exp(-max(len - 90.0, 0.0) * frame.skyHorizon.w);
+  if (frame.grassBase.w > 0.0) {
+    let low = exp(-max(world.y - frame.extra.z - 1.5, 0.0) * 0.22);
+    keep *= 1.0 - frame.grassBase.w * low * (1.0 - exp(-len * 0.009));
+  }
+  return mix(skyColor(normalize(vec3f(v.x, max(v.y, 0.0), v.z))) * 0.9, color, keep);
 }
 `;

@@ -172,19 +172,41 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
   return block;
 }
 
+/** How wet the ground at world is (0-1): near water that stands about level with it. */
+fn wetness(world: vec3f) -> f32 {
+  let last = vec2i(textureDimensions(surface)) - 1;
+  let p = world.xz - 0.5;
+  let i = vec2i(floor(p));
+  let f = fract(p);
+  var w = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+  for (var k = 0; k < 4; k++) {
+    let s = textureLoad(surface, clamp(i + vec2i(k & 1, k >> 1), vec2i(0), last), 0);
+    // Water whose surface is within a splash of this ground, above or below.
+    w[k] = select(0.0, 1.0, s.a > 0u && abs(f32(s.a) - 0.12 - world.y) < 0.9);
+  }
+  let near = mix(mix(w[0], w[1], f.x), mix(w[2], w[3], f.x), f.y);
+  return smoothstep(0.06, 0.42, near + (valueNoise(world.xz * 2.1) - 0.5) * 0.25);
+}
+
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let block = select(in.block, groundMaterial(in.block, in.world), in.face == 2u);
   let info = blockInfo[block];
   let n = normalize(in.normal);
   let cell = floor(in.world - n * 0.5);
   let jitter = 0.95 + 0.1 * hash21(cell.xz + cell.y * 17.0);
-  let albedo = patternAlbedo(u32(info.w), info.rgb, in.world, in.face) * jitter;
+  var albedo = patternAlbedo(u32(info.w), info.rgb, in.world, in.face) * jitter;
+  let s = textureLoad(surface, vec2i(floor(in.world.xz)), 0);
+  let depth = f32(s.a) - 0.12 - in.world.y;
+  // Bare ground at the waterline is wet: darker and richer, along a wobbling edge. Under the
+  // water the absorption below takes over.
+  if (in.face == 2u && block != 1u && natural(block) && (s.a == 0u || depth < 0.3)) {
+    let above = 1.0 - smoothstep(0.0, 0.3, select(depth, 0.0, s.a == 0u));
+    albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wetness(in.world) * above);
+  }
   let ao = mix(1.0, in.ao, frame.groundAmbient.w);
   var color = shade(albedo, n, in.world, ao, 0.0) + selfLit(albedo * fract(info.w) * EMISSIVE);
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.
-  let s = textureLoad(surface, vec2i(floor(in.world.xz)), 0);
-  let depth = f32(s.a) - 0.12 - in.world.y;
   if (s.a > 0u && depth > 0.0) {
     let t = frame.cameraPos.w;
     let q = in.world.xz * 1.3;

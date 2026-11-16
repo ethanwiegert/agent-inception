@@ -109,13 +109,22 @@ fn shadeWater(world: vec3f) -> vec4f {
   let body = mix(shallow, deep, smoothstep(0.0, 3.0, depth)) * lit;
 
   let r = reflect(-view, n);
-  var color = mix(body, skyColor(vec3f(r.x, abs(r.y), r.z)), fresnel);
+  let up = vec3f(r.x, abs(r.y), r.z);
+  var sky = skyColor(up);
+  // The clouds overhead show in the water, soft: the same layer that shades the ground.
+  let cloudAt = world.xz + up.xz * ((CLOUD_HEIGHT - world.y) / max(up.y, 0.08));
+  let cloud = frame.sunColor.rgb * frame.sunDir.w * 0.38 + frame.skyZenith.rgb * 0.9 + frame.skyHorizon.rgb * 0.4;
+  sky = mix(sky, cloud, cloudDensity(cloudAt) * smoothstep(0.05, 0.3, up.y) * 0.8);
+  var color = mix(body, sky, fresnel);
   let spec = pow(max(dot(r, frame.sunDir.xyz), 0.0), 600.0) * 30.0 + pow(max(dot(r, frame.sunDir.xyz), 0.0), 60.0) * 0.4;
   color += frame.sunColor.rgb * frame.sunDir.w * spec * light;
 
   // Foam where the water thins out against the shore.
   let foamNoise = valueNoise(world.xz * 3.0 + vec2f(t * 0.3, t * 0.2)) * valueNoise(world.xz * 7.0 - t * 0.25);
-  let foam = smoothstep(0.35, 0.0, depth) * smoothstep(0.08, 0.25, foamNoise + 0.15);
+  // Thin lines of foam lap toward the shore over the shallows, broken up by the same noise.
+  let lap = smoothstep(0.82, 1.0, sin(depth * 11.0 + t * 1.3 + valueNoise(world.xz * 0.7) * 6.0)) *
+    smoothstep(0.75, 0.3, depth) * smoothstep(0.03, 0.12, depth) * smoothstep(0.0, 0.2, foamNoise);
+  let foam = max(smoothstep(0.35, 0.0, depth) * smoothstep(0.08, 0.25, foamNoise + 0.15), lap * 0.7);
   color = mix(color, (ambient + frame.sunColor.rgb * frame.sunDir.w * light * 0.5) * 0.9, foam);
 
   // The floor below is already darkened by absorption, so the surface itself can stay fairly

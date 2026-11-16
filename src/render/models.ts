@@ -38,6 +38,8 @@ struct Out {
   @location(1) normal: vec3f,
   @location(2) color: vec3f,
   @location(3) glow: f32,
+  /** How loose in the wind (0-1): leaves and needles, which light shines through. */
+  @location(4) leaf: f32,
 };
 
 /** Wind sway: a slow lean with the gusts plus a quick flutter, scaled by how loose a vertex is. */
@@ -73,7 +75,7 @@ fn place(v: VIn, ii: u32) -> vec3f {
   // Glow: positive always; negative only while the instance's lights are on (tint.a >= 0).
   let g = v.normal.w;
   let glow = select(max(-g, 0.0) * step(0.0, inst.tint.a), g, g > 0.0);
-  return Out(clip, world, n, albedo, glow);
+  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0));
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -81,8 +83,17 @@ fn place(v: VIn, ii: u32) -> vec3f {
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let c = shade(in.color, normalize(in.normal), in.world, 1.0, 0.25) +
-    selfLit(in.color * in.glow * EMISSIVE);
+  let n = normalize(in.normal);
+  let view = normalize(frame.cameraPos.xyz - in.world);
+  var c = shade(in.color, n, in.world, 1.0, 0.25) + selfLit(in.color * in.glow * EMISSIVE);
+  // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
+  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
+  c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
+  // Crowns between the eye and the sun glow: light comes through the leaves.
+  let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;
+  if (back > 0.004) {
+    c += in.color * frame.sunColor.rgb * frame.sunDir.w * back * 0.45 * cloudLight(in.world);
+  }
   return vec4f(fog(c, in.world), 1.0);
 }
 `;

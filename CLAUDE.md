@@ -58,9 +58,9 @@ from 0.5 on a software adapter), `grass` (grass density 0.05-1; 0.3 by default o
 adapter), `sandbox` (1 switches the world to Sandbox, 0 back to Village Life; saved with the world),
 `time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
 `storybook`), `bridge` (WebSocket URL override, dev server only), `debug` (comma list of passes to
-skip for profiling: `shadow,terrain,grass,water,sky,bodies,props,fire`), `headless` (never touch the
-canvas; frames render only when `__game.capture()` asks; for software WebGPU, which can't back a
-canvas).
+skip for profiling: `shadow,terrain,grass,water,sky,bodies,props,fire,bloom`), `headless` (never
+touch the canvas; frames render only when `__game.capture()` asks; for software WebGPU, which can't
+back a canvas).
 
 ## Code map
 
@@ -128,7 +128,7 @@ src/render/         renderer.ts (passes into any target, shadows, GPU timer, deb
                     Materials' looks, role groups around joints) + body.ts (villager rigs from any
                     body Design, the tinted "farmer" by default, tools) + flora.ts (plant templates and
                     instances) + fauna.ts (animal rigs from their Designs; fish schools),
-                    sky.ts, post.ts (PBR Neutral tonemap, grading, sharpening), look.ts (presets,
+                    sky.ts, post.ts (quarter-res bloom, PBR Neutral tonemap, grading, sharpening), look.ts (presets,
                     sun/moon, weather), lighttex.ts (the light field as a 3D texture),
                     particles.ts (flames, smoke, lamp halos, signal sparks)
 relay/              core.ts (the relay: a Room per world link pipes MCP over HTTP to the tab's
