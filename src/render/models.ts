@@ -30,6 +30,7 @@ struct VIn {
   @location(0) pos: vec3f,
   @location(1) normal: vec4f,
   @location(2) color: vec4f,
+  @location(3) surf: vec4f,
 };
 
 struct Out {
@@ -40,6 +41,8 @@ struct Out {
   @location(3) glow: f32,
   /** How loose in the wind (0-1): leaves and needles, which light shines through. */
   @location(4) leaf: f32,
+  /** Surface roughness, from the Material's pattern (metal and glass glint, wood doesn't). */
+  @location(5) rough: f32,
 };
 
 /** Wind sway: a slow lean with the gusts plus a quick flutter, scaled by how loose a vertex is. */
@@ -49,8 +52,12 @@ fn windOffset(world: vec3f, origin: vec3f, sway: f32) -> vec3f {
   let w = frame.wind;
   let gust = valueNoise(origin.xz * 0.06 - w.xy * t * 0.8);
   let lean = gust * 0.8 + sin(t * 1.3 + dot(origin.xz, vec2f(0.37, 0.23))) * 0.25;
+  // Three scales: the whole tree leans with the gusts (the same field the grass reads), branches
+  // lag a slower sway of their own, and leaf tips flutter fast.
+  let branch = sin(t * 2.9 + dot(origin.xz, vec2f(0.53, 0.71)) + gust * 4.0) * 0.12;
   let flutter = sin(t * 6.0 + dot(world, vec3f(3.1, 1.7, 2.3))) * 0.05;
-  return (vec3f(w.x, 0.0, w.y) * lean * 0.22 + vec3f(flutter, flutter * 0.5, -flutter)) * w.z * sway;
+  return (vec3f(w.x, 0.0, w.y) * (lean * 0.22 + branch) + vec3f(flutter, flutter * 0.5, -flutter)) *
+    w.z * sway;
 }
 
 fn place(v: VIn, ii: u32) -> vec3f {
@@ -63,7 +70,9 @@ fn place(v: VIn, ii: u32) -> vec3f {
   let inst = instances[ii];
   let world = place(v, ii);
   let n = normalize((inst.model * vec4f(v.normal.xyz, 0.0)).xyz);
-  let albedo = pow(v.color.rgb, vec3f(2.2)) * inst.tint.rgb;
+  var albedo = pow(v.color.rgb, vec3f(2.2)) * inst.tint.rgb;
+  // Per-instance hue/value jitter so a stand of one species doesn't read as copies of one tree.
+  albedo *= 0.9 + 0.2 * hash21(inst.model[3].xz);
   var clip = frame.viewProj * vec4f(world, 1.0);
   if (batch.x > 0.0) {
     // Small things shrink into the ground past the fade distance, then aren't rasterized at all.
@@ -75,7 +84,7 @@ fn place(v: VIn, ii: u32) -> vec3f {
   // Glow: positive always; negative only while the instance's lights are on (tint.a >= 0).
   let g = v.normal.w;
   let glow = select(max(-g, 0.0) * step(0.0, inst.tint.a), g, g > 0.0);
-  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0));
+  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0), v.surf.x);
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -86,6 +95,17 @@ fn place(v: VIn, ii: u32) -> vec3f {
   let n = normalize(in.normal);
   let view = normalize(frame.cameraPos.xyz - in.world);
   var c = shade(in.color, n, in.world, 1.0, 0.25) + selfLit(in.color * in.glow * EMISSIVE);
+  // Plants sit in the meadow's pooled shade like the grass does; bodies and props keep theirs.
+  if (in.leaf > 0.3) { c *= mix(1.0, fieldAt(in.world.xz).x, 0.5); }
+  // The same specular term the terrain's pattern surfaces get: smooth Materials catch the sun,
+  // wood and cloth stay matte. Off for leaves, whose sheen is the translucency below.
+  let gloss = (1.0 - in.rough) * (1.0 - in.leaf);
+  if (gloss > 0.02) {
+    let hdir = normalize(view + frame.sunDir.xyz);
+    c += frame.sunColor.rgb * frame.sunDir.w * keyLight(in.world, n) *
+      pow(max(dot(n, hdir), 0.0), mix(12.0, 180.0, gloss * gloss)) * gloss * gloss * 0.6;
+    c += skyColor(reflect(-view, n)) * pow(1.0 - max(dot(n, view), 0.0), 5.0) * gloss * 0.5;
+  }
   // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
   let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
   c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
@@ -156,6 +176,7 @@ const vertexLayout: GPUVertexBufferLayout = {
     { shaderLocation: 0, offset: 0, format: "float32x3" },
     { shaderLocation: 1, offset: 12, format: "snorm8x4" },
     { shaderLocation: 2, offset: 16, format: "unorm8x4" },
+    { shaderLocation: 3, offset: 20, format: "unorm8x4" },
   ],
 };
 

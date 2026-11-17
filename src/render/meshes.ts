@@ -8,7 +8,7 @@ export type Rgb = readonly [number, number, number];
  * how bright a vertex shines by itself: positive always (a glowing Material), negative only while
  * its Object's lights are on (a lamp).
  */
-export const VERTEX_BYTES = 20;
+export const VERTEX_BYTES = 24;
 /** Floats per instance: model matrix (16) + linear tint rgb and wind weight (4). */
 export const INSTANCE_FLOATS = 20;
 
@@ -30,6 +30,8 @@ export interface Style {
   grainScale?: readonly [number, number, number];
   /** Shines by itself (see VERTEX_BYTES): 0-1 always, or -1-0 while lit. */
   glow?: number;
+  /** Surface roughness 0-1 for the specular term: low glints, high stays matte. */
+  rough?: number;
 }
 
 export interface SphereOptions {
@@ -59,6 +61,7 @@ export class MeshBuilder {
   readonly colors: number[] = [];
   readonly sways: number[] = [];
   readonly glows: number[] = [];
+  readonly roughs: number[] = [];
   readonly indices: number[] = [];
 
   get vertexCount() {
@@ -255,6 +258,7 @@ export class MeshBuilder {
     this.colors.push(...other.colors);
     this.sways.push(...other.sways);
     this.glows.push(...other.glows);
+    this.roughs.push(...other.roughs);
     for (const i of other.indices) this.indices.push(base + i);
     return this;
   }
@@ -303,6 +307,7 @@ export class MeshBuilder {
         this.colors.push(style.color[0] * k, style.color[1] * k, style.color[2] * k);
         this.sways.push(s0 + (s1 - s0) * t);
         this.glows.push(style.glow ?? 0);
+        this.roughs.push(style.rough ?? 0.85);
       },
     };
   }
@@ -398,6 +403,7 @@ export class MeshLibrary {
         view.setInt8(o + 15, snorm(m.glows[i] ?? 0));
         for (let c = 0; c < 3; c++) view.setUint8(o + 16 + c, srgb(m.colors[i * 3 + c]));
         view.setUint8(o + 19, Math.round(Math.max(0, Math.min(1, m.sways[i])) * 255));
+        view.setUint8(o + 20, Math.round(Math.max(0, Math.min(1, m.roughs[i] ?? 0.85)) * 255));
       }
       indices.set(m.indices, ix);
       const r = { firstIndex: ix, indexCount: m.indices.length, baseVertex: v, radius };

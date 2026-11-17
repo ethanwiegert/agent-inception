@@ -22,7 +22,14 @@ export const F = {
   sunPos: 100, // xyz toward the sun, visibility
   moonDir: 104, // xyz toward the moon, brightness
   weather: 108, // cloud cover 0-1, cloud drift speed, ticks since the crops were sent, bloom
-  size: 112,
+  depthParams: 112, // camera near, camera far, 1/width, 1/height of the scene depth
+  /** Villagers and animals nearest the camera target: xyz, radius (0 = slot unused). */
+  pushers: 116,
+  /** The wide shadow cascade (±260 blocks around the target), drawn at most every other frame. */
+  lightViewProj1: 180,
+  /** Per-look post options: split-tone strength (0 keeps colors true). */
+  lookParams: 196,
+  size: 116 + 16 * 4 + 16 + 4,
 } as const;
 
 export const frameWgsl = /* wgsl */ `
@@ -46,6 +53,10 @@ struct Frame {
   sunPos: vec4f,
   moonDir: vec4f,
   weather: vec4f,
+  depthParams: vec4f,
+  pushers: array<vec4f, 16>,
+  lightViewProj1: mat4x4f,
+  lookParams: vec4f,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 `;
@@ -53,6 +64,21 @@ struct Frame {
 /** Noise, sky and cloud helpers that only need the frame uniforms. */
 export const commonWgsl = /* wgsl */ `
 const CLOUD_HEIGHT = 260.0;
+
+/** View distance of a raw depth-buffer value (camera.ts's perspective, near/far in depthParams). */
+fn linearDepth(d: f32) -> f32 {
+  let n = frame.depthParams.x;
+  let f = frame.depthParams.y;
+  return n * f / (f - d * (f - n));
+}
+
+/** The world position of the pixel on screen (from its depth), via the inverse view projection. */
+fn worldAt(pixel: vec2f, d: f32) -> vec3f {
+  let ndc = vec4f(pixel.x * frame.depthParams.z * 2.0 - 1.0,
+    1.0 - pixel.y * frame.depthParams.w * 2.0, d, 1.0);
+  let w = frame.invViewProj * ndc;
+  return w.xyz / w.w;
+}
 
 fn hash21(p: vec2f) -> f32 {
   var q = fract(p * vec2f(123.34, 456.21));
@@ -115,17 +141,24 @@ fn cloudLight(world: vec3f) -> f32 {
 fn skyColor(dir: vec3f) -> vec3f {
   let up = clamp(dir.y, -1.0, 1.0);
   let h = pow(1.0 - max(up, 0.0), 5.0);
-  var c = mix(frame.skyZenith.rgb, frame.skyHorizon.rgb, h);
+  // Deeper zenith, a paler band at the horizon.
+  var c = mix(frame.skyZenith.rgb * 0.8, frame.skyHorizon.rgb * 1.12, h);
   c = mix(c, frame.skyHorizon.rgb * 0.8, smoothstep(0.0, -0.3, up));
-  // Around sunrise and sunset a warm band hugs the horizon, deepest on the sun's side.
+  // Around sunrise and sunset a warm band hugs the horizon, deepest on the sun's side, while the
+  // antisolar side gets its rose belt over the blue-grey earth shadow.
   let twilight = clamp(1.0 - abs(frame.sunPos.y) / 0.25, 0.0, 1.0);
   let flat = vec2f(dir.x, dir.z);
   let sunFlat = vec2f(frame.sunPos.x, frame.sunPos.z);
-  let toward = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4) * 0.5 + 0.5;
+  let azim = dot(flat, sunFlat) / max(length(flat) * length(sunFlat), 1e-4);
+  let toward = azim * 0.5 + 0.5;
   let band = exp(-max(up, 0.0) * 9.0) * twilight * (0.25 + 0.75 * toward * toward);
   // (Over the exposure: the band and the sun's glow show as bright at dusk as by day, or the
   // eyes adjusting would wash the sunset out.)
   c += vec3f(1.0, 0.42, 0.14) * band * 0.55 / frame.skyZenith.w;
+  let away = clamp(-azim, 0.0, 1.0) * twilight;
+  let belt = exp(-max(up, 0.0) * 8.0) * away;
+  c += vec3f(0.4, 0.13, 0.16) * belt * 0.45 / frame.skyZenith.w;
+  c = mix(c, vec3f(0.15, 0.19, 0.28), belt * smoothstep(0.14, 0.0, up) * 0.55);
   let s = max(dot(dir, frame.sunPos.xyz), 0.0);
   let glow = mix(vec3f(1.0, 0.55, 0.25), vec3f(1.0, 0.9, 0.75), clamp(frame.sunPos.y * 3.0, 0.0, 1.0));
   c += glow * frame.sunPos.w * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.5) / frame.skyZenith.w;
@@ -141,10 +174,30 @@ fn skyColor(dir: vec3f) -> vec3f {
  * every cell, rgb stored as square roots, alpha the share of fire (it flickers).
  */
 export const lightingWgsl = commonWgsl + /* wgsl */ `
-@group(0) @binding(1) var shadowMap: texture_depth_2d;
+@group(0) @binding(1) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(0) @binding(3) var lightField: texture_3d<f32>;
 @group(0) @binding(4) var lightSampler: sampler;
+// Binding 5: the field map (render/fieldmap.ts) — r sky occlusion, g shore distance.
+@group(0) @binding(5) var fieldmap: texture_2d<f32>;
+@group(0) @binding(6) var fieldmapSampler: sampler;
+
+/** Column-wise (x, z) -> fieldmap uv: r open sky, g shore distance (0.5 = waterline). */
+fn fieldAt(xz: vec2f) -> vec2f {
+  return textureSampleLevel(fieldmap, fieldmapSampler, xz / frame.grassCenter.zw, 0.0).rg;
+}
+
+/** Soft contact shade under a pusher (villager or animal), 0 off, 1 centred on it. */
+fn pusherShade(xz: vec2f) -> f32 {
+  var dark = 0.0;
+  for (var i = 0; i < 16; i++) {
+    let p = frame.pushers[i];
+    if (p.w <= 0.0) { continue; }
+    let d = distance(xz, p.xz) / p.w;
+    dark += max(0.0, 1.0 - d * d);
+  }
+  return min(dark, 1.0);
+}
 
 /** How bright the field's full light is, in the scene's HDR units. */
 const LAMP_INTENSITY = 2.2;
@@ -175,20 +228,46 @@ const POISSON = array<vec2f, 12>(
   vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893),
   vec2f(0.507, 0.064), vec2f(0.896, 0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598));
 
+/**
+ * The wide cascade (layer 1): four taps and a bigger normal bias suit its coarser texels. Shadows
+ * fade out at its rim — the cloud-shadow term takes over beyond it.
+ */
+fn shadowWide(world: vec3f, n: vec3f) -> f32 {
+  let p = frame.lightViewProj1 * vec4f(world + n * 0.2, 1.0);
+  let ndc = p.xyz / p.w;
+  let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
+  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
+  if (!inside) { return 1.0; }
+  let t = 1.5 / vec2f(textureDimensions(shadowMap).xy);
+  let sum = textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, -t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, t.y), 1, ndc.z) +
+    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y), 1, ndc.z);
+  let rim = smoothstep(0.86, 0.98, max(abs(ndc.x), abs(ndc.y)));
+  return mix(sum * 0.25, 1.0, rim);
+}
+
 fn shadowAt(world: vec3f, n: vec3f) -> f32 {
   let p = frame.lightViewProj * vec4f(world + n * 0.05, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
-  let texel = 1.8 / vec2f(textureDimensions(shadowMap));
-  // Rotate the disc per pixel so the 12 taps blur into soft penumbrae instead of banding.
-  let a = hash21(floor(world.xz * 37.0) + world.y) * 6.2831853;
-  let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
-  var sum = 0.0;
-  for (var i = 0; i < 12; i++) {
-    sum += textureSampleCompareLevel(shadowMap, shadowSampler, uv + rot * POISSON[i] * texel, ndc.z);
+  let m = smoothstep(0.9, 1.0, max(abs(ndc.x), abs(ndc.y)));
+  var s = 1.0;
+  if (m < 1.0 && ndc.z < 1.0) {
+    let texel = 1.8 / vec2f(textureDimensions(shadowMap).xy);
+    // Rotate the disc per pixel so the 12 taps blur into soft penumbrae instead of banding.
+    let a = hash21(floor(world.xz * 37.0) + world.y) * 6.2831853;
+    let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
+    var sum = 0.0;
+    for (var i = 0; i < 12; i++) {
+      sum += textureSampleCompareLevel(
+        shadowMap, shadowSampler, uv + rot * POISSON[i] * texel, 0, ndc.z);
+    }
+    s = sum / 12.0;
   }
-  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
-  return select(1.0, sum / 12.0, inside);
+  // Blend into the wide cascade over the near box's last tenth: no seam, no pop when orbiting.
+  if (m > 0.0) { s = mix(s, shadowWide(world, n), m); }
+  return s;
 }
 
 /** Four hardware-filtered taps: cheap enough for every grass vertex or water pixel. */
@@ -196,13 +275,19 @@ fn shadowFast(world: vec3f) -> f32 {
   let p = frame.lightViewProj * vec4f(world, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
-  let t = 1.2 / vec2f(textureDimensions(shadowMap));
-  let sum = textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y * 0.5), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x * 0.5, -t.y), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y * 0.5), ndc.z) +
-    textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x * 0.5, t.y), ndc.z);
-  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0;
-  return select(1.0, sum * 0.25, inside);
+  let m = smoothstep(0.9, 1.0, max(abs(ndc.x), abs(ndc.y)));
+  var s = 1.0;
+  if (m < 1.0 && ndc.z < 1.0) {
+    let t = 1.2 / vec2f(textureDimensions(shadowMap).xy);
+    let sum =
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x, -t.y * 0.5), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x * 0.5, -t.y), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(t.x, t.y * 0.5), 0, ndc.z) +
+      textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(-t.x * 0.5, t.y), 0, ndc.z);
+    s = sum * 0.25;
+  }
+  if (m > 0.0) { s = mix(s, shadowWide(world, vec3f(0.0, 1.0, 0.0)), m); }
+  return s;
 }
 
 /** Direct key light reaching a point: shadows and clouds. */
@@ -244,11 +329,18 @@ fn shade(albedo: vec3f, n: vec3f, world: vec3f, ao: f32, wrap: f32) -> vec3f {
 fn fog(color: vec3f, world: vec3f) -> vec3f {
   let v = world - frame.cameraPos.xyz;
   let len = length(v);
-  var keep = exp(-max(len - 90.0, 0.0) * frame.skyHorizon.w);
+  // Haze thins with height by day too: valleys keep more of it than the hilltops.
+  let thin = mix(1.0, 0.45, clamp((world.y - frame.extra.z) / 90.0, 0.0, 1.0));
+  var keep = exp(-max(len - 90.0, 0.0) * frame.skyHorizon.w * thin);
   if (frame.grassBase.w > 0.0) {
     let low = exp(-max(world.y - frame.extra.z - 1.5, 0.0) * 0.22);
     keep *= 1.0 - frame.grassBase.w * low * (1.0 - exp(-len * 0.009));
   }
-  return mix(skyColor(normalize(vec3f(v.x, max(v.y, 0.0), v.z))) * 0.9, color, keep);
+  let dir = normalize(v);
+  var scatter = skyColor(normalize(vec3f(dir.x, max(dir.y, 0.0), dir.z))) * 0.9;
+  // The in-scatter leans toward the key light near its bearing, like real air.
+  scatter += frame.sunColor.rgb * frame.sunDir.w * pow(max(dot(dir, frame.sunDir.xyz), 0.0), 5.0)
+    * 0.12;
+  return mix(scatter, color, keep);
 }
 `;

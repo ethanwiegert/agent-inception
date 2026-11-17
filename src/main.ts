@@ -9,7 +9,7 @@ import { createFrameStats } from "./perf.ts";
 import { pref, setPref } from "./prefs.ts";
 import { newSecret, relayFor } from "../relay/core.ts";
 import { LOOKS } from "./render/look.ts";
-import { type Capture, Renderer, type RenderTarget } from "./render/renderer.ts";
+import { type Capture, type Quality, Renderer, type RenderTarget } from "./render/renderer.ts";
 import { FIRE_STRIDE, SLOTS, type SlotsReply } from "./sim/protocol.ts";
 import { mcpTools, TOOL_DEFS } from "./sim/tools.ts";
 import { SimClient } from "./simclient.ts";
@@ -123,6 +123,7 @@ client.onReady = (world, caughtUp, notice) => {
   renderer = new Renderer(device, world);
   readyMs ||= performance.now();
   renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
+  renderer.quality = quality;
   renderer.grassDensity = params.has("grass")
     ? Number(params.get("grass")) || 1
     : softwareGpu
@@ -479,6 +480,10 @@ const worldHandlers = {
 
 const panel = createDevPanel({
   look: (id) => (look = id),
+  quality: (q) => {
+    qualityFixed = q !== "auto";
+    if (q !== "auto") setQuality(q);
+  },
   time: (t) => client.send({ type: "setTime", timeOfDay: t }),
   speed: (speed) => client.send({ type: "speed", speed }),
   worlds: worldHandlers,
@@ -505,14 +510,36 @@ const panel = createDevPanel({
 const fixedScale = params.has("scale")
   ? Math.min(1, Math.max(0.25, Number(params.get("scale")) || 1))
   : null;
+/** Feature tier from `?quality=` (`low|medium|high`), or null when the governor may move it. */
+const fixedQuality = params.get("quality");
+const QUALITIES: Quality[] = ["low", "medium", "high"];
+/** A software adapter starts at low: it can't afford the scene-depth passes at all. */
+let quality: Quality = fixedQuality === "low" || fixedQuality === "medium" ||
+    fixedQuality === "high"
+  ? fixedQuality
+  : softwareGpu
+  ? "low"
+  : "high";
+/** Locked out of the governor: a `?quality=` URL tier, or a tier picked in the panel. */
+let qualityFixed = fixedQuality === "low" || fixedQuality === "medium" ||
+  fixedQuality === "high";
 const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, WINDOW_MS = 2000;
 /** A software adapter starts at the floor; there's no GPU headroom to earn pixels back from. */
 let renderScale = fixedScale ?? (softwareGpu ? SCALE_MIN : 1);
 let windowStart = 0, windowFrames = 0, windowSlow = 0, slowWindows = 0, fastWindows = 0;
 
-/** Count this frame; every two seconds, step the render scale if the frame rate asks for it. */
+/** Change the feature tier, on the URL value, the panel, or the adaptive governor. */
+function setQuality(q: Quality) {
+  if (q === quality || !QUALITIES.includes(q)) return;
+  quality = q;
+  if (renderer) renderer.quality = q;
+}
+
+/** Count this frame; every two seconds, step the quality tier or render scale if the frame rate
+ * asks for it: a slow GPU sheds features (high → medium → low) before it gives up resolution,
+ * and earns the features back only once it's back at full resolution. */
 function adaptScale(now: number, interval: number) {
-  if (fixedScale !== null || !context) return;
+  if (!context) return;
   // A hidden tab or a stall (a big world load) isn't the GPU being slow.
   if (document.hidden || interval > 250) {
     windowStart = now, windowFrames = windowSlow = 0;
@@ -529,10 +556,21 @@ function adaptScale(now: number, interval: number) {
   fastWindows = roomy ? fastWindows + 1 : 0;
   windowStart = now, windowFrames = windowSlow = 0;
   const was = renderScale;
-  if (slowWindows >= 2 && renderScale > SCALE_MIN) {
-    renderScale = Math.max(SCALE_MIN, renderScale - SCALE_STEP), slowWindows = 0;
-  } else if (fastWindows >= 3 && renderScale < 1) {
-    renderScale = Math.min(1, renderScale + SCALE_STEP), fastWindows = 0;
+  if (slowWindows >= 2) {
+    const tier = QUALITIES.indexOf(quality);
+    if (!qualityFixed && tier > 0) {
+      setQuality(QUALITIES[tier - 1]);
+    } else if (fixedScale === null && renderScale > SCALE_MIN) {
+      renderScale = Math.max(SCALE_MIN, renderScale - SCALE_STEP);
+    }
+    slowWindows = 0;
+  } else if (fastWindows >= 3) {
+    if (fixedScale === null && renderScale < 1) {
+      renderScale = Math.min(1, renderScale + SCALE_STEP);
+    } else if (!qualityFixed && quality !== "high") {
+      setQuality(QUALITIES[QUALITIES.indexOf(quality) + 1]);
+    }
+    fastWindows = 0;
   }
   if (renderScale !== was) resize();
 }
@@ -548,7 +586,7 @@ resize();
 const stats = createFrameStats();
 Object.assign(globalThis, {
   __perf: {
-    summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs, renderScale }),
+    summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs, renderScale, quality }),
     gpuErrors,
   },
   // Lets tests and the harness drive agents without the bridge.
@@ -562,6 +600,8 @@ Object.assign(globalThis, {
     agentUrl: () => link?.agentUrl ?? null,
     /** Switch the look preset, as the spectator panel does. */
     setLook: (id: string) => (look = id),
+    /** Switch the feature tier (`low|medium|high`), as the spectator panel does. */
+    setQuality: (id: string) => setQuality(id as Quality),
     /** A PNG data URL of the current view (or `pose`, at render time `at`), rendered offscreen. */
     capture: async (
       width = canvas.width,
@@ -677,11 +717,14 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
       board: client.board,
       boardVersion: client.boardVersion,
       muted: sound.muted,
+      quality,
+      qualityAuto: !qualityFixed,
       stats: [
         `${(1000 / s.meanMs).toFixed(0)} fps`,
         `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
         `${(r.grassBlades / 1000).toFixed(0)}k blades`,
         ...(renderScale < 1 ? [`${Math.round(renderScale * 100)}% res`] : []),
+        ...(quality !== "high" ? [quality] : []),
       ],
     });
   }

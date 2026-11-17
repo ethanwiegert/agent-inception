@@ -70,6 +70,9 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
   switch pattern {
     case ${P.grass}u: {
       var green = meadowColor(frame.grassBase.rgb, world.xz) * 0.85;
+      // Lusher close to the waterline; the field map's shore distance fades it inland.
+      let shoreLush = smoothstep(0.64, 0.52, fieldAt(world.xz).y);
+      green = mix(green, green * vec3f(0.82, 1.07, 0.9), shoreLush * 0.7);
       if (face == 2u) {
         // Past the blades' reach the ground stands in for them: fade from shaded roots to the
         // canopy's color so the edge of the grass doesn't show as a darker band on far hills.
@@ -139,6 +142,78 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
   }
 }
 
+/** Relief height per pattern (the gaps and joints in patternAlbedo): mortar, plank and tile
+ * edges, furrows, cobble joints and strata are low, the faces between them high. */
+fn patternHeight(pattern: u32, world: vec3f, face: u32) -> f32 {
+  let uv = faceUV(world, face);
+  switch pattern {
+    case ${P.farmland}u: {
+      return select(1.0, smoothstep(0.0, 0.45, abs(fract(world.z * 3.0) - 0.5) * 2.0), face == 2u);
+    }
+    case ${P.stone}u: { return valueNoise(uv * 2.5) * 0.4 + 0.5; }
+    case ${P.planks}u: { return smoothstep(0.09, 0.16, fract(uv.y * 4.0)) * 0.7 + 0.3; }
+    case ${P.bricks}u: {
+      let row = floor(uv.y * 4.0);
+      let bu = uv.x * 2.0 + row * 0.5;
+      let mortar = max(smoothstep(0.11, 0.05, fract(uv.y * 4.0)), smoothstep(0.08, 0.02, fract(bu)));
+      return 1.0 - mortar;
+    }
+    case ${P.log}u: {
+      if (top(world, face)) { return 0.5 + 0.5 * sin(length(fract(uv) - 0.5) * 40.0); }
+      return valueNoise(vec2f(uv.x * 9.0, uv.y * 1.2));
+    }
+    case ${P.cobble}u: {
+      let n = valueNoise(uv * 3.0) + 0.5 * valueNoise(uv * 6.0);
+      return 1.0 - smoothstep(0.16, 0.05, abs(fract(n * 2.5) - 0.5)) * 0.8;
+    }
+    case ${P.tiles}u: {
+      let row = fract(uv.y * 3.0);
+      let col = fract(uv.x * 3.0 + floor(uv.y * 3.0) * 0.5);
+      return 1.0 - clamp(smoothstep(0.7, 0.95, row) + smoothstep(0.1, 0.02, col), 0.0, 1.0) * 0.6;
+    }
+    case ${P.thatch}u: { return 0.6 + 0.4 * valueNoise(vec2f(uv.x * 28.0 + uv.y * 4.0, uv.y * 2.5)); }
+    default: { return 0.5; }
+  }
+}
+
+fn top(world: vec3f, face: u32) -> bool { return face == 2u || face == 3u; }
+
+/** Specular roughness per pattern: sand and plain ground stay rough, tiles and dressed stone shine. */
+fn patternRough(pattern: u32) -> f32 {
+  switch pattern {
+    case ${P.tiles}u: { return 0.42; }
+    case ${P.stone}u: { return 0.78; }
+    case ${P.cobble}u: { return 0.85; }
+    case ${P.planks}u: { return 0.8; }
+    case ${P.bricks}u: { return 0.88; }
+    case ${P.log}u: { return 0.9; }
+    case ${P.thatch}u: { return 0.95; }
+    case ${P.farmland}u, ${P.dirt}u: { return 0.95; }
+    case ${P.grass}u, ${P.sand}u: { return 0.92; }
+    default: { return 0.85; }
+  }
+}
+
+/** Perturb the face normal by the screen-space gradient of the pattern's height field (classic
+ * derivative bump mapping), fading out before the relief would shimmer at a distance. */
+fn bumpNormal(n: vec3f, world: vec3f, h: f32) -> vec3f {
+  // Derivatives must all run in uniform control flow, so every dpdx/dpdy comes first.
+  let dpx = dpdx(world);
+  let dpy = dpdy(world);
+  let dhx = dpdx(h);
+  let dhy = dpdy(h);
+  let foot = max(length(dpx), length(dpy));
+  let fade = 1.0 - smoothstep(0.2, 0.9, foot);
+  let t0 = dpx - n * dot(n, dpx);
+  let tl = max(length(t0), 1e-4);
+  let t = t0 / tl;
+  let b = cross(n, t);
+  let hx = dhx / tl;
+  let hy = dhy / max(length(dpy), 1e-4);
+  let bumped = normalize(n - (t * hx + b * hy) * 0.4 * fade);
+  return select(bumped, n, fade <= 0.0 || length(t0) < 1e-5);
+}
+
 /**
  * Natural ground tops blend across material edges along organic boundaries rather than block
  * steps: grass by the same edge the grass blades use, so meadow and beach meet in curves; other
@@ -172,20 +247,11 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
   return block;
 }
 
-/** How wet the ground at world is (0-1): near water that stands about level with it. */
+/** How wet the ground at world is (0-1): the field map's shore distance, with a noise
+ * wobble so the band wiggles at any angle. g is 0.5 at the waterline and rises inland. */
 fn wetness(world: vec3f) -> f32 {
-  let last = vec2i(textureDimensions(surface)) - 1;
-  let p = world.xz - 0.5;
-  let i = vec2i(floor(p));
-  let f = fract(p);
-  var w = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
-  for (var k = 0; k < 4; k++) {
-    let s = textureLoad(surface, clamp(i + vec2i(k & 1, k >> 1), vec2i(0), last), 0);
-    // Water whose surface is within a splash of this ground, above or below.
-    w[k] = select(0.0, 1.0, s.a > 0u && abs(f32(s.a) - 0.12 - world.y) < 0.9);
-  }
-  let near = mix(mix(w[0], w[1], f.x), mix(w[2], w[3], f.x), f.y);
-  return smoothstep(0.06, 0.42, near + (valueNoise(world.xz * 2.1) - 0.5) * 0.25);
+  let g = fieldAt(world.xz).y + (valueNoise(world.xz * 2.1) - 0.5) * 0.05;
+  return smoothstep(0.64, 0.53, g);
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
@@ -203,8 +269,50 @@ fn wetness(world: vec3f) -> f32 {
     let above = 1.0 - smoothstep(0.0, 0.3, select(depth, 0.0, s.a == 0u));
     albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wetness(in.world) * above);
   }
-  let ao = mix(1.0, in.ao, frame.groundAmbient.w);
-  var color = shade(albedo, n, in.world, ao, 0.0) + selfLit(albedo * fract(info.w) * EMISSIVE);
+  // The meadow floor takes the blades' clump and occlusion terms, so thin or sparse grass never
+  // exposes a flat green sheet underneath.
+  if (in.face == 2u && block == 1u) {
+    albedo *= 0.85 + 0.3 * valueNoise(in.world.xz * 0.3);
+  }
+  // The field map: ambient falls off under crowns and at the foot of cliffs and walls, and
+  // villagers/animals sit in a soft contact blob.
+  let field = fieldAt(in.world.xz);
+  if (in.face == 2u && block == 1u) { albedo *= mix(1.0, field.x, 0.5); }
+  let ao = mix(1.0, in.ao, frame.groundAmbient.w) * mix(1.0, field.x, 0.8) *
+    (1.0 - pusherShade(in.world.xz) * 0.4);
+  let pattern = u32(info.w);
+  let h = patternHeight(pattern, in.world, in.face);
+  let n2 = bumpNormal(n, in.world, h);
+  var color = shade(albedo, n2, in.world, ao, 0.0) +
+    selfLit(albedo * fract(info.w) * EMISSIVE * mix(1.0, 1.8, frame.extra.x));
+
+  // One specular lobe for the key light and a Fresnel-weighted sky sheen for smooth or wet
+  // surfaces: stone and tiles get a soft sheen, the wet band goes glossy.
+  let view = normalize(frame.cameraPos.xyz - in.world);
+  var rough = patternRough(pattern);
+  if (in.face == 2u) { rough = mix(rough, 0.2, wetness(in.world)); }
+  let gloss = 1.0 - rough;
+  if (gloss > 0.03) {
+    let hdir = normalize(view + frame.sunDir.xyz);
+    color += frame.sunColor.rgb * frame.sunDir.w * keyLight(in.world, n2) *
+      pow(max(dot(n2, hdir), 0.0), mix(10.0, 200.0, gloss * gloss)) * gloss * gloss * 0.55;
+    color += skyColor(reflect(-view, n2)) * pow(1.0 - max(dot(n2, view), 0.0), 5.0) * gloss * 0.6;
+  }
+
+  // Cliff faces: strata bands and darker seams on tall stone and dirt sides, moss where the
+  // field map says the face is shaded and grass is near. No block-grid lines.
+  if (in.face != 2u && natural(block)) {
+    let col = hash21(floor(in.world.xz));
+    let strata = 0.9 + 0.1 * sin(in.world.y * 2.3 + col * 9.0) +
+      0.08 * valueNoise(vec2f(in.world.y * 1.4, col * 5.0));
+    let seam = smoothstep(0.85, 0.98, sin(in.world.y * 1.9 + col * 6.0));
+    color *= strata * (1.0 - 0.28 * seam);
+    let moss = smoothstep(0.6, 0.25, field.x) * smoothstep(0.6, 0.3, field.y) *
+      smoothstep(0.4, 0.7, valueNoise(in.world.xz * 2.6 + in.world.y));
+    color = mix(color, vec3f(0.10, 0.22, 0.07) * dirtTone(faceUV(in.world, in.face)) *
+      (frame.skyZenith.rgb * frame.sunColor.w * 0.5 + frame.groundAmbient.rgb * 0.3 +
+        keyLight(in.world, n2) * frame.sunColor.rgb * frame.sunDir.w), moss * 0.7);
+  }
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.
   if (s.a > 0u && depth > 0.0) {

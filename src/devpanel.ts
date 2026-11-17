@@ -32,6 +32,8 @@ export interface DevHandlers {
   unpin: (id: number) => void;
   /** Hide one reply on a Wish (or show it again), without touching the Wish. */
   hideReply: (wish: number, index: number, hidden: boolean) => void;
+  /** Feature tier: a tier locks it (the governor holds its hands off), "auto" frees it. */
+  quality: (q: "auto" | "low" | "medium" | "high") => void;
   sound: (muted: boolean) => void;
 }
 
@@ -53,6 +55,9 @@ export interface DevStatus {
   boardVersion: number;
   muted: boolean;
   stats: string[];
+  quality: "low" | "medium" | "high";
+  /** true while the frame-rate governor may move the tier (the "auto" button). */
+  qualityAuto: boolean;
 }
 
 const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
@@ -211,6 +216,11 @@ export function createDevPanel(on: DevHandlers) {
     return [id, b] as const;
   });
 
+  const quality = section("quality");
+  const QUALITY_BUTTONS = ["auto", "low", "medium", "high"] as const;
+  const qualityButtons = QUALITY_BUTTONS.map((id) => button(id, () => on.quality(id)));
+  quality.body.append(...qualityButtons);
+
   const time = section("time");
   const slider = document.createElement("input");
   slider.type = "range";
@@ -354,6 +364,11 @@ export function createDevPanel(on: DevHandlers) {
     /** Refresh readouts; call a few times a second, not every frame. */
     update(s: DevStatus) {
       lookButtons.forEach(([id, b]) => mark(b, id === s.look));
+      qualityButtons.forEach((b, i) => {
+        const id = QUALITY_BUTTONS[i];
+        mark(b, id === "auto" ? s.qualityAuto : id === s.quality && !s.qualityAuto);
+      });
+      quality.head.textContent = `quality · ${s.qualityAuto ? `auto (${s.quality})` : s.quality}`;
       speedButtons.forEach((b, i) => mark(b, SPEEDS[i][1] === s.speed));
       if (!dragging) slider.value = String(s.timeOfDay);
       const minutes = Math.floor(s.timeOfDay * 24 * 60);

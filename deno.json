@@ -12,7 +12,8 @@
     "check": "deno check src tools relay && deno lint && deno fmt --check",
     "test": "deno test --parallel --allow-read=.",
     "shot": "deno run -A tools/shot.ts",
-    "camshot": "deno run -A tools/camshot.ts"
+    "camshot": "deno run -A tools/camshot.ts",
+    "shotset": "deno run -A tools/shotset.ts"
   },
   "fmt": { "lineWidth": 100, "exclude": ["dist"] },
   "lint": { "exclude": ["dist"] }

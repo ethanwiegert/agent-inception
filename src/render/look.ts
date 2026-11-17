@@ -17,6 +17,8 @@ export interface Look {
   contrast: number;
   warmth: number;
   vignette: number;
+  /** Split-tone strength after the tonemap: cool shade, warm light (0 keeps colors true). */
+  splitTone?: number;
   fogDensity: number;
   wind: number;
   /** How much of the light above white spills around it (the sun, glints, lamps, fire). */
@@ -80,6 +82,7 @@ export const LOOKS: Record<string, Look> = {
     bloom: 0.06,
   },
   storybook: {
+    splitTone: 0.4,
     name: "Storybook",
     grassBase: [0.06, 0.15, 0.035],
     grassTip: [0.3, 0.48, 0.12],
@@ -167,15 +170,18 @@ export function applyLook(
   const keyDir: Rgb = isSun ? (elev > 0 ? sun : [0, 1, 0]) : moon;
   const sunColor = mixRgb([1.0, 0.45, 0.2], [1.0, 0.93, 0.82], smoothstep(0.0, 0.45, elev));
   const keyColor = isSun ? sunColor : ([0.3, 0.42, 1.0] as Rgb);
+  // The moon key runs stronger and cooler than a flat night fill so moon shadows actually read;
+  // its strength follows the phase — a full moon lights the island, a new moon is starlight.
   const keyIntensity = isSun
     ? 2.3 * smoothstep(0.0, 0.12, elev) * mix(1, 0.55, overcast)
-    : 0.15 + 0.35 * illuminated * smoothstep(0.0, 0.12, moon[1]);
+    : (0.2 + 0.65 * illuminated) * smoothstep(0.0, 0.12, moon[1]);
 
   let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day01);
   let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day01);
   // Eyes adjust as the light goes; the dusk horizon is laid in dimmer by as much, or the
   // exposure would wash its orange out to a pale pink.
-  const exposure = mix(3.2, 1.0, day01);
+  // Eyes adjust less under a thin moon: a new moon is genuinely dark, a full one readable.
+  const exposure = mix(mix(1.7, 3.2, illuminated), 1.0, day01);
   const keep = (1 - twilight * 0.3) * (1 - twilight * 0.75);
   const dusk = twilight * 0.75 / exposure;
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
@@ -195,7 +201,10 @@ export function applyLook(
   out.set(keyDir, F.sunDir);
   out[F.sunDir + 3] = keyIntensity;
   out.set(keyColor, F.sunColor);
-  out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast);
+  // At night the ambient floor drops with the moon's phase, so the cool key has contrast to work
+  // against instead of a flat blue wash.
+  out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast) *
+    mix(1.0, mix(0.4, 0.8, illuminated), night);
   out.set(zenith, F.skyZenith);
   out[F.skyZenith + 3] = exposure;
   out.set(horizon, F.skyHorizon);
@@ -226,5 +235,6 @@ export function applyLook(
   out[F.moonDir + 3] = illuminated * smoothstep(-0.05, 0.05, moon[1]) * (1 - overcast * 0.8);
   out[F.weather] = overcast;
   out[F.weather + 1] = 1;
+  out[F.lookParams] = look.splitTone ?? 0;
   out[F.weather + 3] = look.bloom;
 }

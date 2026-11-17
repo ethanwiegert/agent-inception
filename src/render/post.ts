@@ -33,18 +33,34 @@ fn bright(color: vec3f) -> vec3f {
   return c * max(knee * knee / (4.0 * KNEE), peak - THRESHOLD) / max(peak, 1e-4);
 }
 
-/** Four bilinear taps a texel out: together they average the 4×4 texels under the pixel. */
-fn tap(uv: vec2f, k: i32, reach: f32) -> vec3f {
-  let o = (vec2f(f32(k & 1), f32(k >> 1)) * 2.0 - 1.0) * reach;
-  return textureSampleLevel(src, smp, uv + o / vec2f(textureDimensions(src)), 0.0).rgb;
+fn tapAt(uv: vec2f, ox: f32, oy: f32) -> vec3f {
+  return textureSampleLevel(src, smp, uv + vec2f(ox, oy) / vec2f(textureDimensions(src)), 0.0).rgb;
+}
+
+/** 13-tap downsample: center weighted 1/8, the cross 1/16 each, the corners 1/32 each. Wider
+ * than the old 4-tap box, so the chain is smoother and one glint can't flood a level. */
+fn down13(uv: vec2f) -> vec3f {
+  let e = tapAt(uv, 0.0, 0.0);
+  var c = e * 0.125;
+  c += (tapAt(uv, 0.0, -2.0) + tapAt(uv, -2.0, 0.0) + tapAt(uv, 2.0, 0.0) + tapAt(uv, 0.0, 2.0)) * 0.0625;
+  c += (tapAt(uv, -2.0, -2.0) + tapAt(uv, 2.0, -2.0) + tapAt(uv, -2.0, 2.0) + tapAt(uv, 2.0, 2.0)) * 0.03125;
+  c += (tapAt(uv, -1.0, -1.0) + tapAt(uv, 1.0, -1.0) + tapAt(uv, -1.0, 1.0) + tapAt(uv, 1.0, 1.0)) * 0.125;
+  return c;
 }
 
 @fragment fn fsFirst(in: Out) -> @location(0) vec4f {
+  // First level: the 13-tap footprint with a Karis-style average — every tap runs through the
+  // threshold and is weighted down by how bright it is, so a single glinting pixel can't
+  // flicker the whole glow.
+  let offs = array<vec2f, 13>(
+    vec2f(0.0, 0.0),
+    vec2f(0.0, -2.0), vec2f(-2.0, 0.0), vec2f(2.0, 0.0), vec2f(0.0, 2.0),
+    vec2f(-2.0, -2.0), vec2f(2.0, -2.0), vec2f(-2.0, 2.0), vec2f(2.0, 2.0),
+    vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0), vec2f(1.0, 1.0));
   var sum = vec3f(0.0);
   var weight = 0.0;
-  for (var k = 0; k < 4; k++) {
-    let c = bright(tap(in.uv, k, 1.0));
-    // Weigh bright taps down, or one glinting pixel flickers the whole glow.
+  for (var k = 0; k < 13; k++) {
+    let c = bright(tapAt(in.uv, offs[k].x, offs[k].y));
     let w = 1.0 / (1.0 + max(c.r, max(c.g, c.b)) * frame.skyZenith.w);
     sum += c * w;
     weight += w;
@@ -53,12 +69,16 @@ fn tap(uv: vec2f, k: i32, reach: f32) -> vec3f {
 }
 
 @fragment fn fsDown(in: Out) -> @location(0) vec4f {
-  return vec4f((tap(in.uv, 0, 1.0) + tap(in.uv, 1, 1.0) + tap(in.uv, 2, 1.0) + tap(in.uv, 3, 1.0)) * 0.25, 1.0);
+  return vec4f(down13(in.uv), 1.0);
 }
 
-/** A smaller level, smoothed, added onto the one above it (the pipeline blends one + one). */
+/** 9-tap tent upsample: center 1/4, the cross 1/8 each, the corners 1/16 each — a rounder glow
+ * than the old 4-tap average. The pipeline blends one + one onto the level above. */
 @fragment fn fsUp(in: Out) -> @location(0) vec4f {
-  return vec4f((tap(in.uv, 0, 0.5) + tap(in.uv, 1, 0.5) + tap(in.uv, 2, 0.5) + tap(in.uv, 3, 0.5)) * 0.25, 1.0);
+  var c = tapAt(in.uv, 0.0, 0.0) * 0.25;
+  c += (tapAt(in.uv, 0.0, -1.0) + tapAt(in.uv, -1.0, 0.0) + tapAt(in.uv, 1.0, 0.0) + tapAt(in.uv, 0.0, 1.0)) * 0.125;
+  c += (tapAt(in.uv, -1.0, -1.0) + tapAt(in.uv, 1.0, -1.0) + tapAt(in.uv, -1.0, 1.0) + tapAt(in.uv, 1.0, 1.0)) * 0.0625;
+  return vec4f(c, 1.0);
 }
 `;
 
@@ -72,6 +92,8 @@ const shader = frameWgsl + /* wgsl */ `
 @group(1) @binding(0) var scene: texture_2d<f32>;
 @group(1) @binding(1) var bloom: texture_2d<f32>;
 @group(1) @binding(2) var bloomSampler: sampler;
+// GTAO at half res (r8); a 1x1 white texture stands in when the tier has no AO pass.
+@group(1) @binding(3) var aoMap: texture_2d<f32>;
 
 /** Midtone gain ahead of the tonemap (brightness parity with a filmic curve). */
 const GAIN = 1.6;
@@ -105,7 +127,13 @@ fn toSrgb(c: vec3f) -> vec3f {
 /** One scene pixel plus its glow, exposed, tonemapped, graded and in sRGB (before the vignette). */
 fn display(p: vec2i, glow: vec3f) -> vec3f {
   let size = vec2i(textureDimensions(scene));
-  let raw = (textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb + glow) * frame.skyZenith.w;
+  var raw = textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb;
+  // Ambient occlusion: it eats the ambient term, not sunlight, so its strength fades on the
+  // brightest pixels (sunlit surfaces, glints, lamps).
+  let ao = textureSampleLevel(aoMap, bloomSampler, (vec2f(p) + 0.5) / vec2f(size), 0.0).r;
+  let aoK = 0.75 * (1.0 - smoothstep(0.5, 1.4, max(raw.r, max(raw.g, raw.b))));
+  raw *= mix(1.0, ao, aoK);
+  raw = (raw + glow) * frame.skyZenith.w;
   var c = toSrgb(neutral(raw * GAIN));
   let g = frame.grade;
   // Moonlit grading (washed-out colors, a blue cast) is for things lit only by the moon; what a
@@ -117,7 +145,16 @@ fn display(p: vec2i, glow: vec3f) -> vec3f {
   c = mix(vec3f(luma), c, saturation);
   c = (c - 0.5) * g.y + 0.5;
   c += vec3f(g.z, g.z * 0.3, -g.z) * 0.06;
-  return c * mix(vec3f(0.6, 0.78, 1.3), vec3f(1.0), lit); // moonlight
+  // Per-look split-tone: shadows drift cool, highlights drift warm. Small in Natural so authored
+  // colors stay true; Storybook leans into it (lookParams.x carries the amount).
+  if (frame.lookParams.x > 0.0) {
+    let lum = dot(c, vec3f(0.2126, 0.7152, 0.0722));
+    c += mix(vec3f(-0.03, -0.005, 0.05), vec3f(0.05, 0.02, -0.04), smoothstep(0.2, 0.8, lum)) *
+      frame.lookParams.x;
+  }
+  // A narrower blue cast than the old blanket grade: foliage, sand and water keep their hues
+  // separated in moonlight, and lamplit pixels stay fully warm through the lit mask.
+  return c * mix(vec3f(0.72, 0.86, 1.2), vec3f(1.0), lit); // moonlight
 }
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
@@ -178,6 +215,7 @@ export class PostRenderer {
         { binding: 0, visibility: FRAGMENT, texture: { sampleType: "unfilterable-float" } },
         { binding: 1, visibility: FRAGMENT, texture: {} },
         { binding: 2, visibility: FRAGMENT, sampler: {} },
+        { binding: 3, visibility: FRAGMENT, texture: { sampleType: "float" } },
       ],
     });
     this.module = device.createShaderModule({ code: shader, label: "post" });
@@ -260,14 +298,27 @@ export class PostRenderer {
     pass.end();
   }
 
-  /** A bind group that reads `view` as the HDR scene and `bloom` as the glow to add to it. */
-  bindInput(view: GPUTextureView, bloom: Bloom): GPUBindGroup {
+  private white: GPUTextureView | null = null;
+
+  /** A bind group that reads `view` as the HDR scene, `bloom` as the glow, `ao` as the
+   * ambient-occlusion map (or white where the tier has none). */
+  bindInput(view: GPUTextureView, bloom: Bloom, ao: GPUTextureView | null): GPUBindGroup {
+    if (!this.white) {
+      const t = this.device.createTexture({
+        size: [1, 1],
+        format: "r8unorm",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.device.queue.writeTexture({ texture: t }, new Uint8Array([255]), {}, [1, 1]);
+      this.white = t.createView();
+    }
     return this.device.createBindGroup({
       layout: this.layout,
       entries: [
         { binding: 0, resource: view },
         { binding: 1, resource: bloom.views[0] },
         { binding: 2, resource: this.sampler },
+        { binding: 3, resource: ao ?? this.white },
       ],
     });
   }
