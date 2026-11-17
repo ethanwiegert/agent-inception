@@ -558,7 +558,7 @@ function adaptScale(now: number, interval: number) {
   const was = renderScale;
   if (slowWindows >= 2) {
     const tier = QUALITIES.indexOf(quality);
-    if (fixedQuality === null && tier > 0) {
+    if (!qualityFixed && tier > 0) {
       setQuality(QUALITIES[tier - 1]);
     } else if (fixedScale === null && renderScale > SCALE_MIN) {
       renderScale = Math.max(SCALE_MIN, renderScale - SCALE_STEP);
