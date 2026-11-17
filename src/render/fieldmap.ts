@@ -31,6 +31,9 @@ export class FieldMap {
   private seenSurface = -1;
   private seenProps = -1;
   private builtTick = -REBUILD_TICKS;
+  /** True while any prop's crown is still growing — growth tracks the tick, not the
+   * props version, so the map keeps refreshing until every tree is full size. */
+  private growing = false;
 
   constructor(private device: GPUDevice, private world: World) {
     this.texture = device.createTexture({
@@ -52,6 +55,7 @@ export class FieldMap {
    */
   update(surface: SurfaceTexture, props: Props | null, tick: number) {
     if (
+      !this.growing &&
       surface.version === this.seenSurface &&
       (props?.version ?? -1) === this.seenProps
     ) return;
@@ -95,6 +99,7 @@ export class FieldMap {
     }
 
     // Crown shade: a soft disc under every tree and bush, sized by its growth.
+    let stillGrowing = false;
     if (props) {
       for (const [key, p] of props.map) {
         const info = props.info(p);
@@ -103,7 +108,9 @@ export class FieldMap {
         if (!big && info.small) continue;
         const tx = key % w, tz = Math.floor(key / w);
         const size = 0.85 + hash2(tx, tz, 3) * 0.3;
-        const growth = 0.15 + 0.85 * props.growth(p, tick);
+        const g01 = props.growth(p, tick);
+        if (g01 < 1) stillGrowing = true;
+        const growth = 0.15 + 0.85 * g01;
         const radius = (big ? 1.2 + 1.8 : 0.7 + 0.8) * size * growth;
         const weight = big ? 0.5 : 0.3;
         const cx = tx + 0.5 + (hash2(tx, tz, 1) - 0.5) * (big ? 0.3 : 0.5);
@@ -120,6 +127,7 @@ export class FieldMap {
         }
       }
     }
+    this.growing = stillGrowing;
 
     // One separable blur (radius 2) so the shade pools instead of stepping.
     const blur = this.scratch;
