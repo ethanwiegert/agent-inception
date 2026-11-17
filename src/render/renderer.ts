@@ -401,16 +401,11 @@ export class Renderer {
     const encoder = device.createCommandEncoder();
     // The GPU timer's start stamp goes on the frame's first pass, whatever it turns out to be
     // (cull compute today; the cloud slab once it exists); the end stays on the post pass.
-    let started = false;
-    const firstStamp = () => {
-      if (started) return undefined;
-      started = true;
-      return this.timer?.writes(0);
-    };
+    this.stampStarted = false;
     if (!this.debug.has("props")) {
       const cull = encoder.beginComputePass({
         label: "models-cull",
-        timestampWrites: firstStamp() as GPUComputePassTimestampWrites | undefined,
+        timestampWrites: this.firstStamp() as GPUComputePassTimestampWrites | undefined,
       });
       this.models.cull(cull, this.flora, 0, this.planes, camera.eye, LOD_DISTANCE);
       this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye, 0);
@@ -426,7 +421,7 @@ export class Renderer {
         depthLoadOp: "clear",
         depthStoreOp: "store",
       },
-      timestampWrites: firstStamp(),
+      timestampWrites: this.firstStamp(),
     });
     shadowPass.setBindGroup(0, this.plainFrameBindGroup);
     if (!this.debug.has("shadow")) {
@@ -652,30 +647,48 @@ export class Renderer {
   /** Scratch distances for the pusher selection (squared, sorted ascending). */
   private pusherD2 = new Float32Array(16);
 
+  private stampStarted = false;
+  private pusherCount = 0;
+  private pusherFd: Float32Array | null = null;
+  private pusherTx = 0;
+  private pusherTz = 0;
+
+  /** The frame's first timestamp write — only one pass gets it. */
+  private firstStamp() {
+    if (this.stampStarted) return undefined;
+    this.stampStarted = true;
+    return this.timer?.writes(0);
+  }
+
+  private putPusher(x: number, y: number, z: number, radius: number) {
+    const fd = this.pusherFd as Float32Array;
+    const d2 = this.pusherD2;
+    const dd = (x - this.pusherTx) ** 2 + (z - this.pusherTz) ** 2;
+    if (this.pusherCount === 16 && dd >= d2[15]) return;
+    let i = this.pusherCount < 16 ? this.pusherCount++ : 15;
+    // Keep slots sorted by distance so the nearest pushers win the 16 slots.
+    while (i > 0 && d2[i - 1] > dd) {
+      d2[i] = d2[i - 1];
+      fd.copyWithin(F.pushers + i * 4, F.pushers + (i - 1) * 4, F.pushers + i * 4);
+      i--;
+    }
+    const o = F.pushers + i * 4;
+    fd[o] = x;
+    fd[o + 1] = y;
+    fd[o + 2] = z;
+    fd[o + 3] = radius;
+    d2[i] = dd;
+  }
+
   /** Fill `Frame.pushers` with the 16 villagers/animals nearest the camera target. */
   private fillPushers(fd: Float32Array, scene: SceneState, target: Vec3) {
-    let count = 0;
-    const d2 = this.pusherD2;
-    const put = (x: number, y: number, z: number, radius: number) => {
-      const dd = (x - target[0]) ** 2 + (z - target[2]) ** 2;
-      if (count === 16 && dd >= d2[15]) return;
-      let i = count < 16 ? count++ : 15;
-      // Keep slots sorted by distance so the nearest pushers win the 16 slots.
-      while (i > 0 && d2[i - 1] > dd) {
-        d2[i] = d2[i - 1];
-        fd.copyWithin(F.pushers + i * 4, F.pushers + (i - 1) * 4, F.pushers + i * 4);
-        i--;
-      }
-      const o = F.pushers + i * 4;
-      fd[o] = x;
-      fd[o + 1] = y;
-      fd[o + 2] = z;
-      fd[o + 3] = radius;
-      d2[i] = dd;
-    };
-    for (const a of scene.agents) put(a.x, a.y, a.z, 0.9);
-    for (const a of scene.animals) put(a.x, a.y, a.z, 0.75);
-    for (let i = count; i < 16; i++) fd[F.pushers + i * 4 + 3] = 0;
+    this.pusherCount = 0;
+    this.pusherFd = fd;
+    this.pusherTx = target[0];
+    this.pusherTz = target[2];
+    for (const a of scene.agents) this.putPusher(a.x, a.y, a.z, 0.9);
+    for (const a of scene.animals) this.putPusher(a.x, a.y, a.z, 0.75);
+    for (let i = this.pusherCount; i < 16; i++) fd[F.pushers + i * 4 + 3] = 0;
   }
 
   /** Orthographic sun/moon shadow volume around the view target, snapped to texels to stop shimmer. */
