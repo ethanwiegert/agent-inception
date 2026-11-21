@@ -207,29 +207,41 @@ struct Out {
   let t = f32(level) / f32(SEGMENTS);
   let sideSign = select(-0.5, 0.5, (vi & 1u) == 1u);
   let curve = t * t;
-  var p = b.pos + right * sideSign * hw.y * (1.0 - t) + vec3f(0.0, hw.x * t, 0.0) + bend * curve;
-  p.y -= length(bend) * curve * 0.3;
-
+  let painterly = frame.lookParams.y;
   let rootc = unpack4x8unorm(b.base);
   let root = rootc.rgb * 0.25;
   let tipc = unpack4x8unorm(b.tip);
+  let isFlower = tipc.a > 0.0 && tipc.a < 0.85;
+  // Plumper rounded botanical blade profile in Miniature mode (with slightly fuller wildflower tips).
+  let taper = mix(1.0 - t, pow(max(1.0 - t, 0.0), 0.58), painterly);
+  let widthBoost = select(1.0, 1.35, isFlower && level >= 2u);
+  var p = b.pos + right * sideSign * hw.y * taper * widthBoost + vec3f(0.0, hw.x * t, 0.0) + bend * curve;
+  p.y -= length(bend) * curve * 0.25;
+
   var color = mix(root, tipc.rgb * 0.25, smoothstep(0.0, 1.0, t));
   // Blades a gust lays over show their pale sides: waves of light roll across the meadow.
-  color = mix(color, color * 1.35 + vec3f(0.035, 0.04, 0.012), rootc.a * t);
+  color = mix(color, color * 1.28 + vec3f(0.03, 0.036, 0.01), rootc.a * t);
   if (tipc.a > 0.0 && level >= 2u) {
-    let petals = array<vec3f, 4>(vec3f(0.9, 0.85, 0.7), vec3f(0.95, 0.65, 0.08), vec3f(0.45, 0.25, 0.75), vec3f(0.42, 0.38, 0.2));
+    let petals = array<vec3f, 4>(
+      vec3f(0.96, 0.92, 0.78), // warm cream daisy
+      vec3f(0.98, 0.74, 0.16), // sunlit buttercup gold
+      vec3f(0.92, 0.44, 0.58), // storybook coral-rose blossom
+      vec3f(0.56, 0.44, 0.82), // soft lavender-blue wildflower
+    );
     color = petals[min(u32((tipc.a - 0.25) / 0.75 * 4.0), 3u)];
   }
   out.pos = frame.viewProj * vec4f(p, 1.0);
   out.world = p;
-  // The normals fan across the blade's width so each blade shows a lit and a shaded side.
-  out.normal = normalize(vec3f(0.0, 0.75, 0.0) + facing * 0.45 + right * sideSign * 0.8);
+  // Soften side-to-side normal contrast in Miniature mode so grass reads as velvety moss tufts.
+  let fan = mix(0.8, 0.36, painterly);
+  out.normal = normalize(vec3f(0.0, mix(0.75, 0.92, painterly), 0.0) + facing * 0.32 + right * sideSign * fan);
   out.t = t;
   out.light = fl.y;
   out.lamp = lampLight(p, vec3f(0.0, 1.0, 0.0));
   out.press = rootc.a * t;
-  // Dense grass shades its own roots.
-  out.color = color * mix(1.0, mix(0.35, 1.0, t), frame.groundAmbient.w);
+  // Blend roots gently into the mossy terrain so tufts never look like dark spiky cutouts.
+  let rootDark = mix(0.35, 0.68, painterly);
+  out.color = color * mix(1.0, mix(rootDark, 1.0, t), frame.groundAmbient.w);
   return out;
 }
 

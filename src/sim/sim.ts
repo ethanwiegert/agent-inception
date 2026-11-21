@@ -17,12 +17,11 @@ import {
 import { Fire, type FireSave } from "./fire.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { daylight, LightField, lightSources } from "./light.ts";
-import { perlin2 } from "./noise.ts";
 import { Objects, type WorldObject } from "./objects.ts";
 import { levelAt, standY, step as stepTo } from "./path.ts";
 import { foldPieces, type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "./physics.ts";
 import { type PropDiff, Props } from "./props.ts";
-import { Rng } from "./rng.ts";
+import { hash2, Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
 import { Signals } from "./signals.ts";
 import { TICK_HZ, TICKS_PER_DAY } from "./time.ts";
@@ -287,8 +286,8 @@ export class Sim {
   }
 
   /**
-   * Cloud cover 0-1: slow natural drift over the days unless a spectator holds the weather, or an
-   * agent's Rule set it for a while.
+   * Cloud cover 0-1: random per game day (deterministically from world seed + day) with a soft
+   * transition at each new day, unless a Rule temporarily overrides it.
    */
   clouds(): number {
     if (this.spectatorClouds !== null) return this.spectatorClouds;
@@ -296,7 +295,23 @@ export class Sim {
       return this.weatherOverride.clouds;
     }
     const days = (this.tick + this.dayOffset) / TICKS_PER_DAY;
-    return Math.min(1, Math.max(0, 0.35 + perlin2(days * 1.7, 0.5, this.seed + 3) * 0.9));
+    const dayIdx = Math.floor(days);
+    const frac = days - dayIdx;
+    const forDay = (d: number) => {
+      // Weighted daily weather bands: crisp clear, light sun-clouds, partly cloudy, cloudy, overcast.
+      const r = hash2(d, this.seed, 9137);
+      if (r < 0.28) return 0.05 + (r / 0.28) * 0.1;
+      if (r < 0.56) return 0.18 + ((r - 0.28) / 0.28) * 0.16;
+      if (r < 0.78) return 0.38 + ((r - 0.56) / 0.22) * 0.2;
+      if (r < 0.92) return 0.64 + ((r - 0.78) / 0.14) * 0.18;
+      return 0.85 + ((r - 0.92) / 0.08) * 0.13;
+    };
+    const today = forDay(dayIdx);
+    if (frac >= 0.08) return today;
+    const prev = forDay(dayIdx - 1);
+    const t = frac / 0.08;
+    const blend = t * t * (3 - 2 * t);
+    return prev + (today - prev) * blend;
   }
 
   /** A spectator holds the sky at `clouds` (0-1), or lets the weather drift again (null). */

@@ -1,5 +1,4 @@
 import type { LinkState } from "./agentlink.ts";
-import { LOOKS } from "./render/look.ts";
 import { type SlotInfo, SLOTS } from "./sim/protocol.ts";
 import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
@@ -7,7 +6,6 @@ import type { VillageStatus } from "./sim/village.ts";
 import { pref, setPref } from "./prefs.ts";
 
 export interface DevHandlers {
-  look: (id: string) => void;
   time: (t: number) => void;
   speed: (s: number) => void;
   /** World slots: open one, start a new world, delete, export or import a world file. */
@@ -25,8 +23,6 @@ export interface DevHandlers {
   follow: (agentId: number | null) => void;
   /** Village Life on, or the world a Sandbox. */
   villageLife: (on: boolean) => void;
-  /** Hold the sky at this cloud cover, or let the weather drift (null). */
-  weather: (clouds: number | null) => void;
   /** Pin a Wish on the Notice Board, for anyone (null) or one villager by name. */
   wish: (text: string, forName: string | null) => void;
   unpin: (id: number) => void;
@@ -38,7 +34,6 @@ export interface DevHandlers {
 }
 
 export interface DevStatus {
-  look: string;
   timeOfDay: number;
   day: number;
   speed: number;
@@ -50,7 +45,6 @@ export interface DevStatus {
   catalog: Catalog;
   village: VillageStatus | null;
   clouds: number;
-  heldClouds: number | null;
   board: Wish[];
   boardVersion: number;
   muted: boolean;
@@ -61,12 +55,16 @@ export interface DevStatus {
 }
 
 const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
-const WEATHER: [string, number | null][] = [
-  ["natural", null],
-  ["clear", 0.05],
-  ["cloudy", 0.5],
-  ["overcast", 0.92],
-];
+const skyLabel = (clouds: number) =>
+  clouds < 0.16
+    ? "clear sky"
+    : clouds < 0.36
+    ? "light clouds"
+    : clouds < 0.62
+    ? "partly cloudy"
+    : clouds < 0.84
+    ? "cloudy"
+    : "overcast";
 const LINK_DOT: Record<LinkState, string> = {
   connecting: "",
   connected: "on",
@@ -199,25 +197,11 @@ export function createDevPanel(on: DevHandlers) {
   panel.append(bar, body);
   document.body.append(panel);
 
-  // Minimal frosted-glass bottom-right quick bar (weather, time-of-day mood, village life heart).
+  // Minimal frosted-glass bottom-right quick bar (time-of-day mood, village life heart).
   const dock = document.createElement("div");
   dock.className = "ai-dock";
-  let curWeatherIdx = 0;
   let curTimeIdx = 0;
   let curLife = true;
-  const weatherQuick = document.createElement("button");
-  weatherQuick.type = "button";
-  weatherQuick.title = "Cycle weather (Natural / Clear / Cloudy / Overcast)";
-  weatherQuick.append(
-    svgIcon([
-      "M12 4v2M5.6 6.6l1.4 1.4M18.4 6.6l-1.4 1.4M9 11a3 3 0 0 1 5.7-1.2",
-      "M7 18h10a3.5 3.5 0 0 0 .5-7 4.5 4.5 0 0 0-8.6-1.1A3.2 3.2 0 0 0 7 18Z",
-    ]),
-  );
-  weatherQuick.onclick = () => {
-    curWeatherIdx = (curWeatherIdx + 1) % WEATHER.length;
-    on.weather(WEATHER[curWeatherIdx][1]);
-  };
   const timeQuick = document.createElement("button");
   timeQuick.type = "button";
   timeQuick.title = "Cycle time of day (Morning / Noon / Golden Dusk / Twilight)";
@@ -235,7 +219,7 @@ export function createDevPanel(on: DevHandlers) {
     ]),
   );
   heartQuick.onclick = () => on.villageLife(!curLife);
-  dock.append(weatherQuick, timeQuick, heartQuick);
+  dock.append(timeQuick, heartQuick);
   document.body.append(dock);
 
   // Open on a laptop, tucked away on a phone, unless the spectator chose otherwise here before.
@@ -285,13 +269,6 @@ export function createDevPanel(on: DevHandlers) {
   };
   const mark = (b: HTMLButtonElement, active: boolean) => b.classList.toggle("on", active);
 
-  const looks = section("look");
-  const lookButtons = Object.entries(LOOKS).map(([id, l]) => {
-    const b = button(l.name, () => on.look(id));
-    looks.body.append(b);
-    return [id, b] as const;
-  });
-
   const quality = section("quality");
   const QUALITY_BUTTONS = ["auto", "low", "medium", "high"] as const;
   const qualityButtons = QUALITY_BUTTONS.map((id) => button(id, () => on.quality(id)));
@@ -312,10 +289,9 @@ export function createDevPanel(on: DevHandlers) {
   time.body.append(slider, ...speedButtons);
 
   const world = section("world");
-  const weatherButtons = WEATHER.map(([label, c]) => button(label, () => on.weather(c)));
   let muted = false;
   const soundButton = button("", () => on.sound(!muted));
-  world.body.append(...weatherButtons, soundButton);
+  world.body.append(soundButton);
 
   // World slots: three worlds per browser, each with its own seed, save and agent link.
   const worlds = section("worlds");
@@ -439,7 +415,6 @@ export function createDevPanel(on: DevHandlers) {
     },
     /** Refresh readouts; call a few times a second, not every frame. */
     update(s: DevStatus) {
-      lookButtons.forEach(([id, b]) => mark(b, id === s.look));
       qualityButtons.forEach((b, i) => {
         const id = QUALITY_BUTTONS[i];
         mark(b, id === "auto" ? s.qualityAuto : id === s.quality && !s.qualityAuto);
@@ -452,8 +427,8 @@ export function createDevPanel(on: DevHandlers) {
         String(Math.floor(minutes / 60)).padStart(2, "0")
       }:${String(minutes % 60).padStart(2, "0")}`;
       worlds.head.textContent = `worlds · seed ${s.seed}`;
-      weatherButtons.forEach((b, i) => mark(b, WEATHER[i][1] === s.heldClouds));
-      weatherButtons[0].title = `clouds ${Math.round(s.clouds * 100)}%`;
+      world.head.textContent = `world · ${skyLabel(s.clouds)}`;
+      world.head.title = `today's sky (${Math.round(s.clouds * 100)}% clouds, random per day)`;
       muted = s.muted;
       soundButton.textContent = muted ? "sound off" : "sound on";
       mark(soundButton, !muted);
@@ -524,9 +499,6 @@ export function createDevPanel(on: DevHandlers) {
       summary.textContent = `day ${s.day} ${clock} · ${n} floatsee${n === 1 ? "" : "s"}`;
       dot.className = `dot ${LINK_DOT[s.link]}`;
       bar.setAttribute("aria-label", `${summary.textContent}, ${LINK_TEXT[s.link]}: panel`);
-      const wIdx = WEATHER.findIndex(([, v]) => v === s.heldClouds);
-      if (wIdx >= 0) curWeatherIdx = wIdx;
-      mark(weatherQuick, s.heldClouds !== null);
 
       const v = s.village;
       if (v) {

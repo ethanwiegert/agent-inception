@@ -205,3 +205,26 @@ Deno.test("bunnies spawn in herds and turnip seeds grow into harvestable turnip 
   assert(!harvested.isError, harvested.text);
   assert((a.inventory.turnip ?? 0) >= 2, `got turnips: ${JSON.stringify(a.inventory)}`);
 });
+
+Deno.test("weather varies randomly per game day and stays steady within a day", () => {
+  const sim = new Sim(77);
+  const sim2 = new Sim(77);
+  const perDay = sim.ticksPerDay;
+  // Midday and late afternoon on day 1 share the same daily weather.
+  sim.tick = Math.round(perDay * 0.3);
+  const morning = sim.clouds();
+  sim.tick = Math.round(perDay * 0.7);
+  assertEquals(sim.clouds(), morning);
+  // Deterministic across identical seeds.
+  sim2.tick = Math.round(perDay * 0.3);
+  assertEquals(sim2.clouds(), morning);
+  // Across 10 days, weather varies cleanly across distinct daily values in [0, 1].
+  const seen = new Set<number>();
+  for (let d = 0; d < 10; d++) {
+    sim.tick = Math.round(perDay * (d + 0.5));
+    const c = sim.clouds();
+    assert(c >= 0 && c <= 1, `clouds out of range: ${c}`);
+    seen.add(Math.round(c * 100));
+  }
+  assert(seen.size >= 5, `expected varied daily weather across 10 days, got ${seen.size}`);
+});

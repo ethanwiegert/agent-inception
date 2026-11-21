@@ -30,24 +30,24 @@ export interface Look {
 export const LOOKS: Record<string, Look> = {
   miniature: {
     name: "Miniature",
-    // Unified painterly miniature look: 5A sunlit botanical day -> 06 golden dusk -> 5B glowing twilight.
-    grassBase: [0.068, 0.175, 0.036],
-    grassTip: [0.24, 0.44, 0.095],
-    bladeHeight: 0.3,
-    bladeWidth: 0.088,
-    bladesPerBlock: 44,
-    flowerChance: 0.032,
-    aoStrength: 0.95,
-    edgeDarken: 0.08,
-    saturation: 1.08,
-    contrast: 1.04,
-    warmth: 0.46,
-    vignette: 0.24,
-    splitTone: 0.34,
+    // Hard-set painterly miniature look: 5A sunlit botanical day -> 06 golden dusk -> 5B glowing twilight.
+    grassBase: [0.072, 0.148, 0.044],
+    grassTip: [0.22, 0.34, 0.082],
+    bladeHeight: 0.25,
+    bladeWidth: 0.095,
+    bladesPerBlock: 56,
+    flowerChance: 0.048,
+    aoStrength: 0.92,
+    edgeDarken: 0.11,
+    saturation: 1.04,
+    contrast: 1.05,
+    warmth: 0.52,
+    vignette: 0.26,
+    splitTone: 0.36,
     painterly: 1,
-    fogDensity: 0.0022,
-    wind: 0.8,
-    bloom: 0.24,
+    fogDensity: 0.0024,
+    wind: 0.72,
+    bloom: 0.25,
   },
   natural: {
     name: "Natural",
@@ -139,12 +139,13 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 const SKY = {
   nightZenith: [0.008, 0.016, 0.045] as Rgb,
   nightHorizon: [0.025, 0.04, 0.085] as Rgb,
-  velvetNightZenith: [0.022, 0.024, 0.095] as Rgb,
-  velvetNightHorizon: [0.06, 0.055, 0.155] as Rgb,
-  duskZenith: [0.12, 0.14, 0.32] as Rgb,
-  duskHorizon: [0.95, 0.42, 0.18] as Rgb,
+  velvetNightZenith: [0.015, 0.017, 0.078] as Rgb,
+  velvetNightHorizon: [0.042, 0.04, 0.132] as Rgb,
+  duskZenith: [0.12, 0.13, 0.34] as Rgb,
+  duskHorizon: [0.96, 0.44, 0.18] as Rgb,
   dayZenith: [0.08, 0.22, 0.6] as Rgb,
   dayHorizon: [0.36, 0.53, 0.8] as Rgb,
+  sanctuaryHorizon: [0.46, 0.58, 0.72] as Rgb,
 };
 
 /** Moon phases cycle over this many game days. */
@@ -194,22 +195,24 @@ export function applyLook(
   // The key light is the sun by day and the moon (by its phase) at night.
   const isSun = elev > 0 || moon[1] <= 0;
   const keyDir: Rgb = isSun ? (elev > 0 ? sun : [0, 1, 0]) : moon;
-  const sunColor = mixRgb([1.0, 0.48, 0.22], [1.0, 0.94, 0.83], smoothstep(0.0, 0.45, elev));
-  const keyColor = isSun ? sunColor : mixRgb([0.3, 0.42, 1.0], [0.44, 0.5, 1.0], painterly);
+  const noonSun = mixRgb([1.0, 0.94, 0.83], [1.0, 0.91, 0.74], painterly);
+  const sunColor = mixRgb([1.0, 0.48, 0.22], noonSun, smoothstep(0.0, 0.45, elev));
+  const keyColor = isSun ? sunColor : mixRgb([0.3, 0.42, 1.0], [0.38, 0.44, 1.0], painterly);
   // The moon key runs stronger and cooler than a flat night fill so moon shadows actually read;
   // its strength follows the phase — a full moon lights the island, a new moon is starlight.
   const keyIntensity = isSun
     ? 2.3 * smoothstep(0.0, 0.12, elev) * mix(1, 0.55, overcast)
-    : (0.24 + 0.68 * illuminated) * smoothstep(0.0, 0.12, moon[1]);
+    : (0.2 + 0.58 * illuminated) * smoothstep(0.0, 0.12, moon[1]);
 
   const nightZ = mixRgb(SKY.nightZenith, SKY.velvetNightZenith, painterly);
   const nightH = mixRgb(SKY.nightHorizon, SKY.velvetNightHorizon, painterly);
+  const dayH = mixRgb(SKY.dayHorizon, SKY.sanctuaryHorizon, painterly * 0.45);
   let zenith = mixRgb(nightZ, SKY.dayZenith, day01);
-  let horizon = mixRgb(nightH, SKY.dayHorizon, day01);
-  // Eyes adjust as the light goes; the dusk horizon is laid in dimmer by as much, or the
-  // exposure would wash its orange out to a pale pink.
-  // Eyes adjust less under a thin moon: a new moon is genuinely dark, a full one readable.
-  const exposure = mix(mix(1.7, 3.2, illuminated), 1.0, day01);
+  let horizon = mixRgb(nightH, dayH, day01);
+  // Eyes adjust as the light goes; in Miniature mode keep twilight deeper indigo so glowing
+  // lanterns, campfires, fireflies, and Floatsee faces pop with dramatic terrarium contrast.
+  const nightExp = mix(mix(1.7, 3.2, illuminated), mix(1.25, 1.85, illuminated), painterly);
+  const exposure = mix(nightExp, 1.0, day01);
   const keep = (1 - twilight * 0.3) * (1 - twilight * 0.75);
   const dusk = twilight * 0.75 / exposure;
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
@@ -232,15 +235,15 @@ export function applyLook(
   // At night the ambient floor drops with the moon's phase, so the cool key has contrast to work
   // against instead of a flat blue wash.
   out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast) *
-    mix(1.0, mix(0.45 + painterly * 0.12, 0.85, illuminated), night);
+    mix(1.0, mix(0.42, 0.72, illuminated), night);
   out.set(zenith, F.skyZenith);
   out[F.skyZenith + 3] = exposure;
   out.set(horizon, F.skyHorizon);
   out[F.skyHorizon + 3] = look.fogDensity;
   out.set(
     mixRgb(
-      mixRgb([0.01, 0.012, 0.02], [0.025, 0.022, 0.055], painterly),
-      mixRgb([0.38, 0.32, 0.18], [0.46, 0.38, 0.22], painterly),
+      mixRgb([0.01, 0.012, 0.02], [0.022, 0.02, 0.052], painterly),
+      mixRgb([0.38, 0.32, 0.18], [0.46, 0.37, 0.21], painterly),
       day01,
     ),
     F.groundAmbient,

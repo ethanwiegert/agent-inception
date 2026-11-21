@@ -39,38 +39,47 @@ const material = (
   });
 
 // Blocks: the terrain and what villagers build with.
-material("grass", "block", "#4a8a2a", "grass", 1.3, 1, false, "Meadow ground.");
-material("dirt", "block", "#7a5232", "dirt", 1.3, 1, false, "Soil; piles into mounds.");
-material("stone", "block", "#8a8a88", "stone", 2.6, 6, false, "Bedrock under the soil.");
-material("farmland", "block", "#3c2414", "farmland", 1.2, 1, false, "Tilled soil for seeds.");
-material("water", "liquid", "#2a6f8a", "plain", 1, 0, false, "Rivers, lakes and the sea.");
-material("sand", "block", "#b8a272", "sand", 1.6, 1, false, "Beaches and riverbeds.");
-material("gravel", "block", "#7a6f62", "cobble", 1.8, 2, false, "Loose stones under water.");
-material("clay", "block", "#8a7c68", "dirt", 1.8, 2, false, "Riverbank clay; craft into bricks.");
-material("log", "block", "#6b4a2c", "log", 0.7, 3, true, "Tree trunks; craft into planks.");
-material("planks", "block", "#b08850", "planks", 0.6, 2, true, "Sawn wood for floors and walls.");
-material("cobble", "block", "#77756f", "cobble", 2.4, 5, false, "Rough stone for walls and paths.");
+material("grass", "block", "#5c8c38", "grass", 1.3, 1, false, "Meadow ground.");
+material("dirt", "block", "#7b5638", "dirt", 1.3, 1, false, "Soil; piles into mounds.");
+material("stone", "block", "#8d887e", "stone", 2.6, 6, false, "Bedrock under the soil.");
+material("farmland", "block", "#422717", "farmland", 1.2, 1, false, "Tilled soil for seeds.");
+material("water", "liquid", "#2a7490", "plain", 1, 0, false, "Rivers, lakes and the sea.");
+material("sand", "block", "#cbb686", "sand", 1.6, 1, false, "Beaches and riverbeds.");
+material("gravel", "block", "#807568", "cobble", 1.8, 2, false, "Loose stones under water.");
+material("clay", "block", "#8f806c", "dirt", 1.8, 2, false, "Riverbank clay; craft into bricks.");
+material("log", "block", "#6b492d", "log", 0.7, 3, true, "Tree trunks; craft into planks.");
+material("planks", "block", "#b68952", "planks", 0.6, 2, true, "Sawn wood for floors and walls.");
+material("cobble", "block", "#7e796e", "cobble", 2.4, 5, false, "Rough stone for walls and paths.");
 material("brick", "block", "#a4523a", "bricks", 1.9, 5, false, "Fired clay bricks.");
-material("thatch", "block", "#c9a85a", "thatch", 0.2, 1, true, "Bundled straw for roofs.");
-material("tiles", "block", "#9a4a35", "tiles", 2, 4, false, "Fired roof tiles.");
+material("thatch", "block", "#cfa95c", "thatch", 0.2, 1, true, "Bundled straw for roofs.");
+material("tiles", "block", "#9e4d37", "tiles", 2, 4, false, "Fired roof tiles.");
 material(
   "fieldstone",
   "block",
-  "#72706d",
+  "#858176",
   "stone",
   2.7,
   6,
   false,
-  "Weathered grey stone of boulders.",
+  "Weathered warm stone of boulders.",
 );
 
 // Things villagers carry: harvests, seeds, saplings, animal products and fish.
-material("wheat", "item", "#e6c76f", "thatch", 0.3, 0.5, true, "Ripe grain; animals follow it.");
+material("wheat", "item", "#e8c86e", "thatch", 0.3, 0.5, true, "Ripe grain; animals follow it.");
 material("wheat seeds", "item", "#c8a46a", "plain", 0.7, 1, true, "Plant them on farmland.");
-material("oak sapling", "item", "#517838", "leaves", 0.6, 0.5, true, "A young oak to plant.");
-material("birch sapling", "item", "#7b9841", "leaves", 0.6, 0.5, true, "A young birch to plant.");
-material("pine sapling", "item", "#346541", "leaves", 0.6, 0.5, true, "A young pine to plant.");
-material("wool", "item", "#e4e0d6", "fleece", 0.2, 0.5, true, "Soft fleece from sheep.");
+material("oak sapling", "item", "#5a863a", "leaves", 0.6, 0.5, true, "A young oak to plant.");
+material(
+  "birch sapling",
+  "item",
+  "#d88aa4",
+  "leaves",
+  0.6,
+  0.5,
+  true,
+  "A young blossom birch to plant.",
+);
+material("pine sapling", "item", "#305d4b", "leaves", 0.6, 0.5, true, "A young pine to plant.");
+material("wool", "item", "#ece6dc", "fleece", 0.2, 0.5, true, "Soft fleece from sheep.");
 material("milk", "item", "#f4f1ea", "plain", 1.03, 0, false, "Fresh from a cow.");
 material("egg", "item", "#e8d8bd", "plain", 1.05, 1, false, "Laid by a chicken.");
 material("minnow", "item", "#616851", "plain", 1.05, 1, false, "A tiny river fish.");
@@ -80,21 +89,30 @@ material("mackerel", "item", "#34616c", "plain", 1.05, 1, false, "A quick sea fi
 material("cod", "item", "#7b6f5a", "plain", 1.05, 1, false, "A big sea fish.");
 
 // What plants are made of. Softer materials bend more in the wind; leaves are lumpy.
-material("bark", "item", "#6f5541", "log", 0.7, 3, true, "Rough brown bark of oaks and pines.");
-material("birch bark", "item", "#e4e1d9", "log", 0.7, 3, true, "Papery white bark.");
-material("dark bark", "item", "#474141", "plain", 0.7, 3, true, "The black bands on birches.");
-material("leaves", "item", "#517838", "leaves", 0.3, 0.2, true, "Broad green leaves.");
-material("birch leaves", "item", "#7b9841", "leaves", 0.3, 0.2, true, "Light, bright leaves.");
-material("pine needles", "item", "#346541", "leaves", 0.3, 0.3, true, "Dark evergreen needles.");
-material("stem", "item", "#619441", "plain", 0.5, 0.3, true, "Green stalks of small plants.");
-material("red petals", "item", "#e04741", "plain", 0.3, 0.1, true, "Poppy red.");
-material("yellow petals", "item", "#f3d941", "plain", 0.3, 0.1, true, "Buttercup yellow.");
-material("white petals", "item", "#f3f1e9", "plain", 0.3, 0.1, true, "Daisy white.");
-material("purple petals", "item", "#a86cd9", "plain", 0.3, 0.1, true, "Violet purple.");
-material("pink petals", "item", "#f3baca", "plain", 0.3, 0.1, true, "Water lily pink.");
-material("reed", "item", "#94a05a", "plain", 0.4, 0.5, true, "Tall waterside grass.");
-material("cattail", "item", "#755134", "fleece", 0.4, 0.3, true, "Brown seed heads on reeds.");
-material("lily leaf", "item", "#4c8841", "plain", 0.5, 0.1, true, "Round leaves that float.");
+material("bark", "item", "#6a472d", "log", 0.7, 3, true, "Warm brown bark of oaks and pines.");
+material("birch bark", "item", "#dfd5c4", "log", 0.7, 3, true, "Warm cream papery bark.");
+material("dark bark", "item", "#544842", "plain", 0.7, 3, true, "The dark bands on birches.");
+material("leaves", "item", "#5a863a", "leaves", 0.3, 0.2, true, "Lush botanical oak leaves.");
+material(
+  "birch leaves",
+  "item",
+  "#d88aa4",
+  "leaves",
+  0.3,
+  0.2,
+  true,
+  "Soft rose-blossom birch leaves.",
+);
+material("pine needles", "item", "#305d4b", "leaves", 0.3, 0.3, true, "Deep spruce-teal needles.");
+material("stem", "item", "#6e9942", "plain", 0.5, 0.3, true, "Green stalks of small plants.");
+material("red petals", "item", "#e2524c", "plain", 0.3, 0.1, true, "Poppy red.");
+material("yellow petals", "item", "#f5d752", "plain", 0.3, 0.1, true, "Buttercup yellow.");
+material("white petals", "item", "#f6f2e8", "plain", 0.3, 0.1, true, "Daisy white.");
+material("purple petals", "item", "#ae7ad8", "plain", 0.3, 0.1, true, "Violet purple.");
+material("pink petals", "item", "#f4b2c4", "plain", 0.3, 0.1, true, "Blossom pink.");
+material("reed", "item", "#9aa65c", "plain", 0.4, 0.5, true, "Tall waterside grass.");
+material("cattail", "item", "#785336", "fleece", 0.4, 0.3, true, "Brown seed heads on reeds.");
+material("lily leaf", "item", "#4e8b46", "plain", 0.5, 0.1, true, "Round leaves that float.");
 
 // What villagers gather from plants with interact; each grows back into its plant when planted.
 material("poppy", "item", "#e04741", "plain", 0.3, 0.1, true, "A picked poppy; plant it.");
@@ -276,107 +294,125 @@ add("design", "windmill", "A post mill whose sails turn on a motor. use it to st
 
 const TREE_GROUND = ["grass", "dirt"];
 
-add("design", "oak", "A broad oak with a round crown.", {
+add("design", "oak", "A broad painterly miniature oak with clustered foliage and a sturdy trunk.", {
   mark: "T",
   habitat: { on: TREE_GROUND, zones: ["forest"], share: 0.65 },
   parts: [
-    part("cone", "bark", [0.5, 0.09, 0.5], [0.62, 0.28, 0.62]),
-    part("cylinder", "bark", [0.5, 1.425, 0.5], [0.34, 2.85, 0.34]),
-    part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 57, 46), [0.13, 0.9, 0.13], 57, 46),
-    part("cylinder", "bark", lean([0.5, 1.575, 0.5], 0.9, 195, 46), [0.13, 0.9, 0.13], 195, 46),
-    part("cylinder", "bark", lean([0.5, 1.8, 0.5], 0.85, 310, 40), [0.11, 0.85, 0.11], 310, 40),
-    part("cylinder", "bark", [0.5, 2.9, 0.5], [0.2, 1.1, 0.2]),
-    part("sphere", "leaves", [0.45, 3.42, 0.48], [1.85, 1.65, 1.95]),
-    part("sphere", "leaves", [1.22, 3.04, 0.72], [1.65, 1.35, 1.55]),
-    part("sphere", "leaves", [-0.12, 3.17, 0.82], [1.7, 1.45, 1.75]),
-    part("sphere", "leaves", [0.25, 2.9, -0.22], [1.55, 1.25, 1.5]),
-    part("sphere", "leaves", [0.78, 3.65, 1.1], [1.35, 1.15, 1.4]),
-    part("sphere", "leaves", [0.5, 4.15, 0.5], [1.05, 0.85, 1.05]),
-    part("sphere", "leaves", [-0.55, 2.75, -0.35], [1.0, 0.85, 1.0]),
-    part("sphere", "leaves", [1.45, 3.55, -0.2], [0.95, 0.8, 0.95]),
-    part("sphere", "cattail", [0.3, 2.95, 1.05], [0.09, 0.12, 0.09]),
-    part("sphere", "cattail", [1.05, 3.3, -0.55], [0.09, 0.12, 0.09]),
-    part("sphere", "cattail", [-0.35, 3.35, 0.3], [0.09, 0.12, 0.09]),
+    // Flared root buttress & sturdy carved trunk (part 0 stays bark cone for grain consistency).
+    part("cone", "bark", [0.5, 0.14, 0.5], [0.76, 0.38, 0.76]),
+    part("cylinder", "bark", [0.5, 1.32, 0.5], [0.42, 2.55, 0.42]),
+    part("cylinder", "bark", lean([0.5, 1.5, 0.5], 1.0, 52, 44), [0.16, 1.0, 0.16], 52, 44),
+    part("cylinder", "bark", lean([0.5, 1.55, 0.5], 0.95, 188, 45), [0.15, 0.95, 0.15], 188, 45),
+    part("cylinder", "bark", lean([0.5, 1.72, 0.5], 0.9, 308, 40), [0.14, 0.9, 0.14], 308, 40),
+    // Deep cool-teal shaded lower bough clusters (mockup 01/02/06).
+    part("box", "pine needles", [0.15, 2.48, 0.25], [1.15, 0.85, 1.1], 14),
+    part("box", "pine needles", [0.95, 2.45, 0.78], [1.1, 0.82, 1.05], -18),
+    part("sphere", "pine needles", [-0.28, 2.55, 0.82], [1.15, 0.95, 1.1]),
+    // Sculpted rounded-voxel & tufted botanical mid-crown.
+    part("box", "leaves", [0.5, 3.05, 0.5], [1.55, 1.25, 1.55], 8),
+    part("box", "leaves", [1.18, 2.95, 0.32], [1.22, 1.02, 1.18], 26),
+    part("box", "leaves", [-0.15, 3.0, 0.65], [1.25, 1.05, 1.2], -22),
+    part("box", "leaves", [0.32, 2.86, -0.22], [1.18, 0.96, 1.14], 38),
+    part("sphere", "leaves", [0.85, 3.38, 0.98], [1.28, 1.08, 1.24]),
+    part("sphere", "leaves", [0.12, 3.45, 0.12], [1.22, 1.04, 1.2]),
+    // Sunlit warm golden-olive upper crown tufts.
+    part("box", "leaves", [0.55, 3.85, 0.52], [1.15, 0.9, 1.15], 18),
+    part("sphere", "leaves", [0.95, 3.72, 0.22], [0.92, 0.78, 0.92]),
+    part("sphere", "leaves", [0.18, 3.88, 0.86], [0.88, 0.76, 0.88]),
+    // Tiny warm golden blossom buds tucked into the crown.
+    part("sphere", "yellow petals", [0.92, 3.45, 1.32], [0.11, 0.11, 0.11]),
+    part("sphere", "yellow petals", [-0.28, 3.18, 0.95], [0.1, 0.1, 0.1]),
   ],
 });
 
-add("design", "birch", "A slim white birch with a tall, light crown.", {
+add("design", "birch", "A storybook cream-bark birch crowned with soft rose blossoms.", {
   mark: "T",
   habitat: { on: TREE_GROUND, zones: ["forest"], share: 0.35 },
   parts: [
-    part("cone", "birch bark", [0.5, 0.08, 0.5], [0.34, 0.24, 0.34]),
-    part("cylinder", "birch bark", [0.5, 1.85, 0.5], [0.2, 3.7, 0.2]),
-    ...[0.42, 1.07, 1.72, 2.37, 3.02].map((y) =>
-      part("cylinder", "dark bark", [0.5, y, 0.5], [0.25, 0.05, 0.25])
+    part("cone", "birch bark", [0.5, 0.11, 0.5], [0.46, 0.3, 0.46]),
+    part("cylinder", "birch bark", [0.5, 1.65, 0.5], [0.26, 3.25, 0.26]),
+    ...[0.46, 1.08, 1.68, 2.28, 2.84].map((y) =>
+      part("cylinder", "dark bark", [0.5, y, 0.5], [0.29, 0.055, 0.29])
     ),
-    part("cylinder", "birch bark", lean([0.5, 2.6, 0.5], 0.7, 40, 38), [0.06, 0.7, 0.06], 40, 38),
     part(
       "cylinder",
       "birch bark",
-      lean([0.5, 2.9, 0.5], 0.65, 220, 42),
-      [0.06, 0.65, 0.06],
-      220,
+      lean([0.5, 2.35, 0.5], 0.78, 38, 38),
+      [0.09, 0.78, 0.09],
+      38,
+      38,
+    ),
+    part(
+      "cylinder",
+      "birch bark",
+      lean([0.5, 2.55, 0.5], 0.72, 215, 42),
+      [0.09, 0.72, 0.09],
+      215,
       42,
     ),
-    part("sphere", "birch leaves", [0.48, 3.85, 0.48], [1.35, 1.8, 1.4]),
-    part("sphere", "birch leaves", [0.98, 3.48, 0.62], [1.25, 1.5, 1.25]),
-    part("sphere", "birch leaves", [0.18, 3.62, 0.88], [1.2, 1.55, 1.3]),
-    part("sphere", "birch leaves", [0.38, 4.25, 0.05], [1.05, 1.35, 1.1]),
-    part("sphere", "birch leaves", [0.52, 4.7, 0.5], [0.7, 0.8, 0.7]),
-    part("sphere", "birch leaves", [-0.28, 3.1, -0.25], [0.95, 1.05, 0.95]),
-    part("sphere", "birch leaves", [1.25, 2.95, -0.15], [0.9, 1.0, 0.9]),
+    // Soft tucked-in rose-mauve under-blossoms (mockup 01/02/03 top-center tree!).
+    part("sphere", "birch leaves", [0.16, 2.94, 0.28], [1.05, 0.84, 1.02]),
+    part("sphere", "birch leaves", [0.9, 2.88, 0.68], [0.98, 0.8, 0.98]),
+    // Rounded-voxel & fluffy rose-blossom main canopy.
+    part("box", "birch leaves", [0.5, 3.45, 0.5], [1.42, 1.18, 1.42], 12),
+    part("box", "birch leaves", [1.02, 3.25, 0.52], [1.1, 0.95, 1.08], -20),
+    part("box", "birch leaves", [-0.04, 3.32, 0.74], [1.08, 0.94, 1.1], 28),
+    part("sphere", "birch leaves", [0.42, 3.72, -0.05], [1.14, 1.0, 1.12]),
+    part("sphere", "birch leaves", [0.55, 4.18, 0.52], [1.04, 0.88, 1.04]),
+    // Sunlit pale-pink petal highlights crowning the top.
+    part("sphere", "pink petals", [0.78, 3.92, 0.82], [0.78, 0.68, 0.78]),
+    part("sphere", "pink petals", [0.22, 3.98, 0.35], [0.74, 0.64, 0.74]),
   ],
 });
 
-add("design", "pine", "A dark evergreen of stacked cones; it grows up high.", {
+add("design", "pine", "A tiered miniature spruce-teal evergreen with mossy sunlit tips.", {
   mark: "A",
   habitat: { on: TREE_GROUND, zones: ["highland"] },
   parts: [
-    part("cone", "bark", [0.5, 0.08, 0.5], [0.44, 0.24, 0.44]),
-    part("cylinder", "bark", [0.5, 0.8, 0.5], [0.27, 1.6, 0.27]),
-    ...[0, 1, 2, 3, 4, 5].map((i) => {
-      const t = i / 6, h = 1.6 * (1 - t * 0.38), d = 2.6 * (1 - t * 0.78);
-      return part("cone", "pine needles", [0.5, 1.0 + i * 0.62 + h / 2, 0.5], [d, h, d]);
+    part("cone", "bark", [0.5, 0.12, 0.5], [0.54, 0.3, 0.54]),
+    part("cylinder", "bark", [0.5, 0.85, 0.5], [0.32, 1.65, 0.32]),
+    // Tiered sculpted evergreen cones + rounded botanical bough pads.
+    ...[0, 1, 2, 3, 4].map((i) => {
+      const t = i / 5, h = 1.48 * (1 - t * 0.32), d = 2.45 * (1 - t * 0.72);
+      return part("cone", "pine needles", [0.5, 1.05 + i * 0.68 + h / 2, 0.5], [d, h, d], i * 33);
     }),
-    part("cone", "pine needles", [0.5, 5.05, 0.5], [0.16, 0.5, 0.16]),
-    part("sphere", "cattail", [0.55, 1.9, 0.85], [0.11, 0.14, 0.11]),
-    part("sphere", "cattail", [0.35, 2.6, 0.4], [0.11, 0.14, 0.11]),
-    part("sphere", "cattail", [0.65, 3.2, 0.55], [0.1, 0.13, 0.1]),
+    part("box", "pine needles", [0.5, 1.68, 0.5], [1.55, 0.52, 1.55], 18),
+    part("box", "leaves", [0.5, 2.55, 0.5], [1.22, 0.48, 1.22], 42),
+    part("box", "leaves", [0.5, 3.45, 0.5], [0.88, 0.42, 0.88], 12),
+    part("cone", "leaves", [0.5, 4.65, 0.5], [0.42, 0.65, 0.42]),
+    part("sphere", "cattail", [0.62, 1.95, 0.92], [0.11, 0.14, 0.11]),
+    part("sphere", "cattail", [0.28, 2.75, 0.36], [0.11, 0.14, 0.11]),
   ],
 });
 
-add("design", "bush", "A round leafy shrub at the edges of woods.", {
+add("design", "bush", "A compact flowering miniature shrub at the edges of woods.", {
   mark: "b",
   habitat: { on: ["grass"], zones: ["forest edge"] },
   parts: [
-    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.35, 30, 18), [0.05, 0.35, 0.05], 30, 18),
-    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.3, 150, 22), [0.045, 0.3, 0.045], 150, 22),
-    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.32, 270, 20), [0.045, 0.32, 0.045], 270, 20),
-    part("sphere", "leaves", [0.5, 0.27, 0.5], [0.9, 0.72, 0.9]),
-    part("sphere", "leaves", [0.72, 0.25, 0.62], [0.85, 0.68, 0.85]),
-    part("sphere", "leaves", [0.3, 0.27, 0.35], [0.8, 0.64, 0.8]),
-    part("sphere", "leaves", [0.5, 0.5, 0.5], [0.7, 0.55, 0.7]),
-    part("sphere", "leaves", [0.85, 0.38, 0.3], [0.6, 0.5, 0.6]),
-    part("sphere", "leaves", [0.15, 0.36, 0.72], [0.6, 0.48, 0.6]),
-    part("sphere", "berries", [0.62, 0.42, 0.82], [0.08, 0.08, 0.08]),
-    part("sphere", "berries", [0.28, 0.38, 0.58], [0.08, 0.08, 0.08]),
-    part("sphere", "berries", [0.78, 0.3, 0.42], [0.08, 0.08, 0.08]),
-    part("sphere", "berries", [0.45, 0.55, 0.3], [0.07, 0.07, 0.07]),
-    part("sphere", "pink petals", [0.38, 0.48, 0.72], [0.07, 0.06, 0.07]),
-    part("sphere", "pink petals", [0.68, 0.5, 0.55], [0.07, 0.06, 0.07]),
+    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.24, 30, 22), [0.045, 0.24, 0.045], 30, 22),
+    part("cylinder", "cattail", lean([0.5, 0, 0.5], 0.22, 165, 24), [0.045, 0.22, 0.045], 165, 24),
+    part("box", "pine needles", [0.5, 0.2, 0.5], [0.64, 0.36, 0.62], 16),
+    part("sphere", "leaves", [0.64, 0.28, 0.58], [0.5, 0.42, 0.48]),
+    part("sphere", "leaves", [0.34, 0.26, 0.42], [0.48, 0.4, 0.48]),
+    part("box", "leaves", [0.5, 0.4, 0.5], [0.44, 0.32, 0.44], 34),
+    part("sphere", "berries", [0.62, 0.38, 0.72], [0.075, 0.075, 0.075]),
+    part("sphere", "berries", [0.32, 0.34, 0.56], [0.075, 0.075, 0.075]),
+    part("sphere", "yellow petals", [0.46, 0.53, 0.44], [0.09, 0.08, 0.09]),
+    part("sphere", "pink petals", [0.68, 0.44, 0.48], [0.085, 0.075, 0.085]),
+    part("sphere", "pink petals", [0.36, 0.45, 0.64], [0.08, 0.07, 0.08]),
   ],
 });
 
-/** A patch of six flowers on thin stems. */
+/** A patch of six plump miniature wildflowers. */
 function flowers(seed: number, petals: string) {
   const r = scatter(seed);
   const parts = [];
   for (let i = 0; i < 6; i++) {
-    const base: Vec3 = [0.5 + r(-0.35, 0.35), 0, 0.5 + r(-0.35, 0.35)];
-    const h = r(0.22, 0.42), turn = r(0, 360), tilt = r(0, 11);
-    parts.push(part("cylinder", "stem", lean(base, h, turn, tilt), [0.024, h, 0.024], turn, tilt));
+    const base: Vec3 = [0.5 + r(-0.34, 0.34), 0, 0.5 + r(-0.34, 0.34)];
+    const h = r(0.18, 0.34), turn = r(0, 360), tilt = r(0, 12);
+    parts.push(part("cylinder", "stem", lean(base, h, turn, tilt), [0.028, h, 0.028], turn, tilt));
     const top = lean(base, h * 2, turn, tilt);
-    parts.push(part("box", petals, top, [0.07, 0.025, 0.07], (turn + 45) % 360, tilt));
+    parts.push(part("sphere", petals, top, [0.1, 0.07, 0.1], (turn + 45) % 360, tilt));
   }
   return parts;
 }
@@ -421,18 +457,18 @@ add("design", "reeds", "Tall reeds with cattails along the water's edge.", {
   })(),
 });
 
-add("design", "rock", "A mossy boulder of stone; it blocks the way.", {
+add("design", "rock", "A hand-carved mossy diorama boulder; it blocks the way.", {
   mark: "o",
   habitat: {
     on: ["grass", "sand", "dirt", "gravel", "stone"],
     zones: ["slope", "scattered", "riverbed"],
   },
   parts: [
-    part("sphere", "fieldstone", [0.5, 0.125, 0.5], [1.0, 0.6, 0.85]),
-    part("sphere", "fieldstone", [0.25, 0.06, 0.5], [0.5, 0.24, 0.45]),
-    part("sphere", "fieldstone", [0.72, 0.05, 0.68], [0.55, 0.22, 0.5]),
-    part("sphere", "leaves", [0.42, 0.42, 0.45], [0.4, 0.22, 0.4]),
-    part("sphere", "leaves", [0.62, 0.38, 0.6], [0.3, 0.18, 0.3]),
+    part("box", "fieldstone", [0.5, 0.2, 0.5], [0.84, 0.44, 0.72], 14),
+    part("sphere", "fieldstone", [0.24, 0.14, 0.54], [0.52, 0.34, 0.48]),
+    part("box", "fieldstone", [0.72, 0.11, 0.66], [0.46, 0.26, 0.42], -22),
+    part("sphere", "leaves", [0.44, 0.42, 0.46], [0.52, 0.18, 0.46]),
+    part("sphere", "leaves", [0.68, 0.34, 0.6], [0.34, 0.14, 0.32]),
   ],
 });
 
