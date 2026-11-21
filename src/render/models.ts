@@ -107,8 +107,16 @@ fn place(v: VIn, ii: u32) -> vec3f {
     c += skyColor(reflect(-view, n)) * pow(1.0 - max(dot(n, view), 0.0), 5.0) * gloss * 0.5;
   }
   // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
-  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
-  c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
+  let painterly = frame.lookParams.y;
+  let rimPow = mix(3.0, 2.35, painterly);
+  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), rimPow) * (0.4 + 0.6 * max(n.y, 0.0));
+  c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) *
+    frame.sunColor.w * rim * mix(0.6, 0.92, painterly);
+  // Soft warm painted-ceramic top sheen in Miniature mode (gives figurines their sculptural feel).
+  if (painterly > 0.01 && in.leaf < 0.25) {
+    let upLift = smoothstep(0.15, 0.95, n.y) * (1.0 - in.rough * 0.5) * 0.14 * painterly;
+    c += in.color * mix(vec3f(1.0, 0.94, 0.82), vec3f(0.72, 0.78, 1.0), frame.extra.x) * upLift;
+  }
   // Crowns between the eye and the sun glow: light comes through the leaves.
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;
   if (back > 0.004) {

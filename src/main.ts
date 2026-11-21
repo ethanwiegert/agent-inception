@@ -66,7 +66,7 @@ const context = headless ? null : canvas.getContext("webgpu") as GPUCanvasContex
 const format = navigator.gpu.getPreferredCanvasFormat();
 context?.configure({ device, format, alphaMode: "opaque" });
 
-let look = params.get("look") ?? "natural";
+let look = params.get("look") ?? "miniature";
 let linkState: LinkState = "connecting";
 let link: Link | null = null;
 
@@ -655,7 +655,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
 
   renderer.render(
     camera,
-    LOOKS[look] ?? LOOKS.natural,
+    LOOKS[look] ?? LOOKS.miniature,
     client.timeOfDay,
     now / 1000,
     {

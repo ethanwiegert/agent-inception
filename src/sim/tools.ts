@@ -31,6 +31,16 @@ import { octile } from "./path.ts";
 import type { DesignContent, Entry, RelationContent } from "./catalog.ts";
 import { partBounds } from "./objects.ts";
 import { habitatRefusal, plantInfo } from "./props.ts";
+import {
+  applyFloatseeArgs,
+  COLOR_PRESET_NAMES,
+  defaultFloatsee,
+  EXPRESSION_PRESETS,
+  EXPRESSIONS,
+  HEAD_SHAPES,
+  parseExpression,
+  TEE_PRESETS,
+} from "./floatsee.ts";
 import { type Agent, Anim, type Job, type Sim, TICK_HZ, TICKS_PER_DAY } from "./sim.ts";
 import { Block } from "./world.ts";
 import { daylight } from "./light.ts";
@@ -93,15 +103,60 @@ const area = {
 const areaNote = `Covers width × depth tiles (at most ${MAX_AREA}) starting at (x, z); ` +
   "you walk to each tile yourself. Returns when done.";
 
+const floatseeProps = {
+  head: {
+    type: "string",
+    enum: [...HEAD_SHAPES],
+    description: `Floating head shape: ${HEAD_SHAPES.join(", ")}.`,
+  },
+  color_scheme: {
+    type: "string",
+    description: `Palette preset (${COLOR_PRESET_NAMES.join(", ")}), "#rrggbb" hex, or ` +
+      `JSON '{"primary":"#rrggbb","accent":"#rrggbb","glow":"#rrggbb"}'.`,
+  },
+  front_image: {
+    type: "string",
+    description: `Framed front graphic tee art: preset (${TEE_PRESETS.join(", ")}), ` +
+      `JSON 1-16×16 '{"palette":{"g":"#4a8"},"pixels":["..g."]}', or base64 data:image/png or data:image/svg+xml URL.`,
+  },
+  back_image: {
+    type: "string",
+    description: `Framed back graphic tee art: preset (${TEE_PRESETS.join(", ")}), ` +
+      `JSON 1-16×16 '{"palette":{"g":"#4a8"},"pixels":["..g."]}', or base64 data:image/png or data:image/svg+xml URL.`,
+  },
+  expressions: {
+    type: "object",
+    description: "Optional custom faces for each mood (happy, sad, angry, excited): " +
+      `preset style (${EXPRESSION_PRESETS.join(", ")}), JSON pixel grid, ` +
+      "or base64 PNG/SVG data URL.",
+    properties: Object.fromEntries(
+      EXPRESSIONS.map((e) => [
+        e,
+        {
+          type: "string",
+          description: `Custom ${e} face: preset (${EXPRESSION_PRESETS.join(", ")}), ` +
+            "JSON pixel grid, or base64 PNG/SVG data URL.",
+        },
+      ]),
+    ),
+  },
+  expression: {
+    type: "string",
+    enum: [...EXPRESSIONS],
+    description: `Starting/current expression: ${EXPRESSIONS.join(", ")}.`,
+  },
+};
+
 export const TOOL_DEFS: ToolDef[] = [
   {
     name: "join",
-    description: "Enter the world as a villager with this name. Call this first. " +
-      "Using a name that already exists puts you back in that body, with its inventory and " +
-      "journal, unless another agent is playing it (a villager is held while its agent is " +
-      "active). Each join gives you a rejoin key: if your connection resets and your name is " +
-      "held, join again with it to step straight back in. A name that only looks like a " +
-      "villager's (Nett1e for Nettle) is refused.",
+    description: "Enter the world as a customizable Floatsee villager with this name. Call this " +
+      "first. Choose an optional head shape, color scheme, front/back graphic tee images, and " +
+      "expressions (happy, sad, angry, excited). Using a name that already exists puts you back " +
+      "in that body, with its inventory and journal, unless another agent is playing it (a " +
+      "villager is held while its agent is active). Each join gives you a rejoin key: if your " +
+      "connection resets and your name is held, join again with it to step straight back in. " +
+      "A name that only looks like a villager's (Nett1e for Nettle) is refused.",
     inputSchema: {
       type: "object",
       properties: {
@@ -111,6 +166,7 @@ export const TOOL_DEFS: ToolDef[] = [
           description: "The rejoin key your last join gave you, to take your villager back " +
             "after your connection reset. Leave it out the first time.",
         },
+        ...floatseeProps,
       },
       required: ["name"],
     },
@@ -143,8 +199,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "plant",
-    description: "Plant something from your inventory that grows, one per tile: wheat seeds on " +
-      "farmland (ripe in about 18 game hours), or a sapling (oak, birch, pine) on grass or dirt " +
+    description: "Plant something from your inventory that grows, one per tile: wheat seeds or " +
+      "turnip seeds on farmland, or a sapling (oak, birch, pine) on grass or dirt " +
       "(a tree in about 2 game days; trees block the tile). What grows from what, on which " +
       `ground and how fast is in the Catalog (grows_into Relations, a Design's habitat). ${areaNote}`,
     inputSchema: {
@@ -153,8 +209,8 @@ export const TOOL_DEFS: ToolDef[] = [
         ...area,
         seed: {
           type: "string",
-          description: 'What to plant: "wheat seeds" (the default), "oak sapling", or the ' +
-            'plant\'s name ("wheat", "oak", "birch", "pine").',
+          description: 'What to plant: "wheat seeds" (the default), "turnip seeds", ' +
+            '"oak sapling", or the plant\'s name ("wheat", "turnip", "oak", "birch", "pine").',
         },
       },
       required: ["x", "z"],
@@ -194,26 +250,67 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
+    name: "customize",
+    description: "Customize your Floatsee appearance at any time: head shape, color scheme, " +
+      "front and back graphic tee images (presets, 1-16×16 pixel-art grids, or base64 PNG/SVG " +
+      "data URLs), and custom faces for your 4 expressions (happy, sad, angry, excited).",
+    inputSchema: {
+      type: "object",
+      properties: floatseeProps,
+    },
+  },
+  {
+    name: "emote",
+    description: "Switch your Floatsee's glowing facial expression right away (happy, sad, " +
+      "angry, or excited). Expressions also react automatically to harvesting, eating, " +
+      "knockdowns, and low needs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        expression: {
+          type: "string",
+          enum: [...EXPRESSIONS],
+          description: `Expression to show: ${EXPRESSIONS.join(", ")}.`,
+        },
+        duration: {
+          type: "number",
+          minimum: 1,
+          maximum: 300,
+          description:
+            "Real seconds to hold this expression before returning to ambient mood (default 60).",
+        },
+      },
+      required: ["expression"],
+    },
+  },
+  {
     name: "set_body",
     description: "Choose how you look: your body becomes any Design with a part whose role " +
       'is "body" and that fits in about 1.2 × 2.4 × 1.2 blocks (stand on (0.5, 0, 0.5)). Its ' +
       "roles move: head turns, arms and legs swing; parts with other roles ride on the body. " +
-      'Read the "farmer" Design (catalog_get) as the worked example, fork it with your own ' +
-      'parts and Materials, then set_body it. design "farmer" goes back to the default look.',
+      'design "floatsee" (or "farmer") goes back to your customizable Floatsee look.',
     inputSchema: {
       type: "object",
       properties: {
-        design: { type: "string", description: 'The Design\'s name or id, e.g. "farmer".' },
+        design: { type: "string", description: 'The Design\'s name or id, e.g. "floatsee".' },
       },
       required: ["design"],
     },
   },
   {
     name: "say",
-    description: "Say something out loud. It appears over your head for anyone watching.",
+    description: "Say something out loud. It appears over your head for anyone watching, and " +
+      "optionally switches your Floatsee expression while you speak.",
     inputSchema: {
       type: "object",
-      properties: { text: { type: "string", maxLength: 140 } },
+      properties: {
+        text: { type: "string", maxLength: 140 },
+        expression: {
+          type: "string",
+          enum: [...EXPRESSIONS],
+          description: "Optional expression to show while speaking (happy, sad, angry, excited).",
+        },
+      },
       required: ["text"],
     },
   },
@@ -351,21 +448,32 @@ function join(sim: Sim, session: string, args: Args): string {
       `This world has its ${MAX_VILLAGERS} villagers. Rejoin as one of them once it's free.`,
     );
   }
+  // Validate Floatsee customization before creating/modifying the villager.
+  const baseLook = agent ? agent.floatsee : defaultFloatsee(sim.agents.length);
+  const custom = applyFloatseeArgs(args, baseLook);
   agent ??= sim.addAgent(name);
+  if (custom.changed) {
+    agent.floatsee = custom.appearance;
+    sim.agentsVersion++;
+  }
+  if (custom.expression) {
+    agent.baseExpression = custom.expression;
+    sim.setExpression(agent, custom.expression, TICK_HZ * 60);
+  }
   sim.sessions.set(session, agent);
   agent.lastActive = sim.tick;
   agent.key = rejoinKey(session, agent.id, sim.tick);
   const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
   sim.fire("joined", agent, fx, sim.world.heightAt(fx, fz), fz, agent.name);
   const hello = `${returning ? "Welcome back" : "Welcome"}, ${agent.name}.` +
-    ` You're standing at x=${fx} z=${fz} in a meadow.\n`;
+    ` You're standing at x=${fx} z=${fz} in a meadow as a ${agent.floatsee.head}-head Floatsee.\n`;
   const rejoin = `\nRejoin key: ${agent.key}. Keep it: if your connection resets and join says ` +
     `${agent.name} is held, join with your name and this key to step straight back in.`;
   if (returning && (same || keyed)) {
     return hello +
-      "Your inventory and journal are as you left them. This is a slow, peaceful village " +
+      "Your inventory and journal are as you left them. This is a slow, peaceful sanctuary " +
       "that people watch: farm, build, craft and add to the Catalog with your tools (each " +
-      "tool's description says how), and narrate now and then with say. " +
+      "tool's description says how), express yourself with emote/customize, and narrate with say. " +
       `${catalogSummary(sim)}\n` +
       `${villageText(sim, agent)}\n` +
       (agent.journal.length
@@ -374,27 +482,29 @@ function join(sim: Sim, session: string, args: Args): string {
       rejoin;
   }
   return hello +
-    "This is a slow, peaceful farm: till grass into farmland, plant seeds, wait for wheat " +
-    "to ripen, harvest, and build what you like: place_block lays a floor or raises a wall in " +
-    "one call, break_block digs, and build puts up a whole Design (its blocks, and its parts as " +
-    "an Object like a bench). interact chops trees, breaks rocks, picks flowers and shears, " +
-    "milks or collects from animals; craft turns logs into planks, stone into cobble and clay " +
-    "into brick. Objects built from parts are real things: they fall, stack, roll, float or " +
-    "sink, and you can push them along or carry light ones and put_down them anywhere (mind " +
-    "anyone standing downhill of a rolling boulder). Designs can have moving pieces on hinges, " +
-    "axles, sliders and motors (doors, carts, windmills): use opens a door or switches a " +
-    "motor, and a closed door is a wall. Lamps and glowing Materials light the night, a flame " +
-    "part is a tame fire, and levers and pressure plates send signals on named channels to " +
-    "doors, motors and lamps (use flips a lever, or tunes a channel). ignite starts a wild fire " +
-    "that spreads to what burns and burns it away, and douse puts it out. People are watching " +
-    "you live here, so take your time and narrate now and then with say; they may pin Wishes " +
-    "for you on the Notice Board (board), suggestions that are never orders. Choose how you look " +
-    "with set_body: any Design with a body part, like the farmer you are now.\n" +
+    "This is a slow, peaceful sanctuary island: till grass into farmland, plant wheat or turnip " +
+    "seeds, wait for crops to ripen, harvest, and build what you like: place_block lays a floor " +
+    "or raises a wall in one call, break_block digs, and build puts up a whole Design (its " +
+    "blocks, and its parts as an Object like a bench, notice board, lantern post, or workbench). " +
+    "interact chops trees, breaks rocks, picks flowers and shears, milks or collects from " +
+    "animals; craft turns logs into planks, stone into cobble and clay into brick. Objects " +
+    "built from parts are real things: they fall, stack, roll, float or sink, and you can push " +
+    "them along or carry light ones and put_down them anywhere (mind anyone standing downhill " +
+    "of a rolling boulder). Designs can have moving pieces on hinges, axles, sliders and motors " +
+    "(doors, carts, windmills): use opens a door or switches a motor, and a closed door is a " +
+    "wall. Lamps and glowing Materials light the night, a flame part is a tame fire, and levers " +
+    "and pressure plates send signals on named channels to doors, motors and lamps (use flips a " +
+    "lever, or tunes a channel). ignite starts a wild fire that spreads to what burns and burns " +
+    "it away, and douse puts it out. People are watching you live here, so take your time and " +
+    "narrate now and then with say; they may pin Wishes for you on the Notice Board (board), " +
+    "suggestions that are never orders. Customize your Floatsee head, color scheme, front/back " +
+    "graphic tee art, and 4 expressions anytime with customize and emote (or wear any Catalog " +
+    "Design with set_body).\n" +
     "Everything that can exist here is listed in the Catalog, and you can add to it: new " +
     "Materials, Designs, Rules that make things happen, and Relations between them " +
     "(catalog_find, catalog_get, catalog_add, catalog_fork). What you carry is a Material too " +
-    "(seeds, saplings, wheat, wool, milk, eggs, fish), counted by its Catalog name. Changing " +
-    `shared entries goes through propose and vote. ${catalogSummary(sim)}\n` +
+    "(seeds, saplings, wheat, turnips, wool, milk, eggs, fish), counted by its Catalog name. " +
+    `Changing shared entries goes through propose and vote. ${catalogSummary(sim)}\n` +
     villageIntro(sim) + "\nStart with look." +
     (returning && agent.journal.length
       ? "\nYour journal has notes from before — journal_read."
@@ -655,16 +765,51 @@ const HANDLERS: Record<string, Handler> = {
     })();
   },
 
+  customize(sim, agent, args) {
+    const custom = applyFloatseeArgs(args, agent.floatsee);
+    if (!custom.changed && !custom.expression) {
+      return `Your Floatsee look: head="${agent.floatsee.head}", primary=${agent.floatsee.colors.primary}, ` +
+        `accent=${agent.floatsee.colors.accent}, glow=${agent.floatsee.colors.glow}, ` +
+        `expression="${sim.effectiveExpression(agent)}". Pass head, color_scheme, front_image, ` +
+        "back_image, expressions, or expression to change it.";
+    }
+    if (custom.changed) {
+      agent.floatsee = custom.appearance;
+      agent.body = null;
+      sim.agentsVersion++;
+    }
+    if (custom.expression) {
+      agent.baseExpression = custom.expression;
+      sim.setExpression(agent, custom.expression, TICK_HZ * 60);
+    }
+    return `Updated your Floatsee look (${agent.floatsee.head} head, ` +
+      `${agent.floatsee.colors.primary}, expression "${sim.effectiveExpression(agent)}"). ` +
+      "Anyone watching sees the change.";
+  },
+
+  emote(sim, agent, args) {
+    const expr = parseExpression(args.expression);
+    const secs = args.duration === undefined
+      ? 60
+      : Math.min(300, Math.max(1, Number(args.duration) || 60));
+    sim.setExpression(agent, expr, Math.round(secs * TICK_HZ));
+    return `Expression set to "${expr}".`;
+  },
+
   set_body(sim, agent, args) {
     const e = sim.catalog.resolve(args.design, "Design");
     if (e.kind !== "design") throw new Error(`"${e.name}" is a ${e.kind}, not a Design.`);
     const live = sim.catalog.current(e);
     if (!live) throw new Error(`"${e.name}" is retired, so nobody takes its shape now.`);
     const farmer = sim.catalog.byName("farmer");
-    if (farmer && sim.catalog.current(farmer)?.id === live.id) {
+    const floatsee = sim.catalog.byName("floatsee");
+    if (
+      (farmer && sim.catalog.current(farmer)?.id === live.id) ||
+      (floatsee && sim.catalog.current(floatsee)?.id === live.id)
+    ) {
       agent.body = null;
       sim.agentsVersion++;
-      return `You look like the "${live.name}" again, in your own shirt and skin.`;
+      return `You look like your Floatsee self again (${agent.floatsee.head} head).`;
     }
     const why = bodyRefusal(live.content as DesignContent);
     if (why) throw new Error(`"${live.name}" can't be a body: ${why}.`);
@@ -676,6 +821,9 @@ const HANDLERS: Record<string, Handler> = {
   say(sim, agent, args) {
     const text = String(args.text ?? "").slice(0, 140).trim();
     if (!text) throw new Error("Say something.");
+    if (args.expression !== undefined && args.expression !== null) {
+      sim.setExpression(agent, parseExpression(args.expression), TICK_HZ * 20);
+    }
     sim.events.push({ type: "say", agent: agent.id, text });
     const fx = Math.floor(agent.x), fz = Math.floor(agent.z);
     sim.fire("said", agent, fx, sim.world.heightAt(fx, fz), fz, text);

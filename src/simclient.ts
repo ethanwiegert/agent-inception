@@ -18,6 +18,12 @@ import { Props } from "./sim/props.ts";
 import type { Wish } from "./sim/board.ts";
 import type { SimEvent } from "./sim/sim.ts";
 import type { VillageStatus } from "./sim/village.ts";
+import {
+  defaultFloatsee,
+  type Expression,
+  expressionFromIndex,
+  type FloatseeAppearance,
+} from "./sim/floatsee.ts";
 import { World } from "./sim/world.ts";
 
 export interface AgentView {
@@ -30,8 +36,12 @@ export interface AgentView {
   anim: number;
   stride: number;
   color: number;
-  /** The Design they look like; null for the default farmer. */
+  /** The Design they look like; null for their customizable Floatsee body. */
   body: number | null;
+  /** Custom Floatsee appearance (head shape, colors, graphic tees, expressions). */
+  floatsee: FloatseeAppearance;
+  /** Current expression: happy, sad, angry, or excited. */
+  expression: Expression;
   /** Holding something overhead. */
   carrying: boolean;
   /** Ticks left lying down after being knocked over (0: on their feet). */
@@ -185,17 +195,21 @@ export class SimClient {
         stride: 0,
         color: 0,
         body: null,
+        floatsee: defaultFloatsee(j),
+        expression: "happy",
         carrying: false,
         down: 0,
       };
       v.id = c[i];
       v.name = this.profiles[j]?.name ?? "?";
       v.body = this.profiles[j]?.body ?? null;
+      v.floatsee = this.profiles[j]?.floatsee ?? defaultFloatsee(c[i + 7]);
       v.x = mix(p, c, i + 1, t), v.y = mix(p, c, i + 2, t), v.z = mix(p, c, i + 3, t);
       v.yaw = p[i + 4] + dyaw * t, v.anim = c[i + 5], v.stride = mix(p, c, i + 6, t);
       v.color = c[i + 7];
       v.carrying = c[i + 8] > 0;
       v.down = mix(p, c, i + 9, t);
+      v.expression = expressionFromIndex(c[i + 10]);
     }
     return views;
   }

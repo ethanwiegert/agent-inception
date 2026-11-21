@@ -831,7 +831,7 @@ export class Rules {
       const key = keys[Math.floor(hash2(sim.tick, n, sim.seed + design.id) * keys.length)];
       const placedKey = this.spreadFrom(key, design.id, info);
       if (typeof placedKey === "number") keys.push(placedKey), placed++;
-      else why = placedKey;
+      else if (!why.includes("too crowded")) why = placedKey;
     }
     if (!placed) return why;
   }

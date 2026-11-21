@@ -74,15 +74,18 @@ struct Out {
   var size = 0.05;
   var flap = 0.0;
 
+  let painterly = frame.lookParams.y;
+  let twilight = frame.lookParams.z;
   switch kind {
     case 0u: {
-      // Pollen and dust: slow drift, lit only where the key light reaches (bright inside shafts).
+      // Pollen and golden sanctuary motes: slow warm drift through sunlit air and dusk.
       world += vec3f(sin(t * 0.31 + h1 * 6.0) * 1.5, 0.4 + h2 * 2.5 + sin(t * 0.5 + h3 * 9.0) * 0.4,
         cos(t * 0.27 + h4 * 6.0) * 1.5);
       let lit = keyLightFast(world);
-      color = vec3f(1.0, 0.95, 0.8) * (0.25 + lit * 1.4);
-      alpha = (0.06 + lit * 0.5) * dayness;
-      size = 0.035 + h5 * 0.03;
+      color = mix(vec3f(1.0, 0.95, 0.8), vec3f(1.0, 0.86, 0.45), painterly * 0.7) *
+        (0.25 + lit * (1.4 + 1.2 * painterly));
+      alpha = (0.06 + lit * (0.5 + 0.35 * painterly)) * max(dayness, twilight * 0.9);
+      size = (0.035 + h5 * 0.03) * (1.0 + 0.55 * painterly);
     }
     case 1u: {
       // Butterflies weave over the meadow in daylight.
@@ -116,14 +119,20 @@ struct Out {
       flap = sin(t * 5.0 + h5 * 9.0) * 0.7;
     }
     case 4u: {
-      // Fireflies blink over the meadow near water after dark.
-      world += vec3f(sin(t * 0.4 + h1 * 9.0) * 2.2, 0.5 + h3 * 1.2 + sin(t * 0.9 + h4 * 9.0) * 0.3,
+      // Fireflies & terrarium spores: warm amber and bioluminescent cyan-mint at dusk & night!
+      world += vec3f(sin(t * 0.4 + h1 * 9.0) * 2.2, 0.5 + h3 * 1.8 + sin(t * 0.9 + h4 * 9.0) * 0.35,
         cos(t * 0.33 + h2 * 9.0) * 2.2);
-      let blink = smoothstep(0.2, 0.8, sin(t * (1.5 + h5) + h1 * 20.0));
-      color = vec3f(0.6, 1.0, 0.35) * 3.0 * blink;
-      alpha = night * blink * smoothstep(0.62, 0.45, field.y) *
-        select(0.0, 1.0, cell.g == 1u || cell.g == 2u);
-      size = 0.07;
+      let blink = smoothstep(0.15, 0.8, sin(t * (1.5 + h5) + h1 * 20.0));
+      let sporeColor = select(vec3f(1.0, 0.78, 0.3), vec3f(0.35, 1.0, 0.88), h5 > 0.55);
+      color = mix(vec3f(0.6, 1.0, 0.35), sporeColor, painterly) * (3.0 + 1.4 * painterly) * blink;
+      let duskNight = max(night, twilight * 0.85);
+      let area = mix(
+        smoothstep(0.62, 0.45, field.y) * select(0.0, 1.0, cell.g == 1u || cell.g == 2u),
+        1.0,
+        painterly * 0.85,
+      );
+      alpha = duskNight * blink * area;
+      size = 0.07 + 0.03 * painterly;
     }
     default: {
       // Moths bat around lamps at night: they only show where lamplight reaches.

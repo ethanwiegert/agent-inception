@@ -21,6 +21,7 @@ import {
   type SlotsReply,
   type ToWorker,
 } from "./sim/protocol.ts";
+import { expressionIndex } from "./sim/floatsee.ts";
 import { FILE_FORMAT, migrateSave, SaveError } from "./sim/save.ts";
 import { type SaveData, Sim, TICK_HZ, TICKS_PER_DAY } from "./sim/sim.ts";
 import { callTool } from "./sim/tools.ts";
@@ -171,8 +172,9 @@ function send() {
   const agents = new Float32Array(s.agents.length * AGENT_STRIDE);
   s.agents.forEach((a, i) => {
     const carry = s.carried(a) ? 1 : 0, down = Math.max(0, (a.downUntil ?? 0) - s.tick);
+    const expr = expressionIndex(s.effectiveExpression(a));
     agents.set(
-      [a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color, carry, down],
+      [a.id, a.x, a.y, a.z, a.yaw, a.anim, a.stride, a.color, carry, down, expr],
       i * AGENT_STRIDE,
     );
   });
@@ -211,7 +213,11 @@ function send() {
   let profiles: AgentProfile[] | undefined;
   if (s.agentsVersion !== sentAgentsVersion) {
     sentAgentsVersion = s.agentsVersion;
-    profiles = s.agents.map((a) => ({ name: a.name, body: a.body }));
+    profiles = s.agents.map((a) => ({
+      name: a.name,
+      body: a.body,
+      floatsee: structuredClone(a.floatsee),
+    }));
   }
 
   let catalog: CatalogDelta | undefined;

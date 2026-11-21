@@ -533,83 +533,87 @@ function legs(mat: string, dx: number, dz: number, top: number, len: number, w: 
   return { parts, joints };
 }
 
-const sheepLegs = legs("dark hide", 0.13, 0.22, 0.38, 0.36, 0.09);
-add("design", "sheep", "A woolly sheep. Shear it for wool; it follows wheat.", {
+const sheepLegs = legs("dark hide", 0.14, 0.2, 0.24, 0.22, 0.11);
+add("design", "sheep", "A plush woolly sheep. Shear it for wool; it follows wheat.", {
   parts: [
-    part("sphere", "dark hide", [0.5, 0.56, 0.5], [0.55, 0.5, 0.55], 0, 0, "body"),
-    part("sphere", "wool", [0.5, 0.58, 0.5], [0.68, 0.61, 0.68], 0, 0, "product"),
-    part("sphere", "wool", [0.5, 0.62, 0.7], [0.56, 0.5, 0.56], 0, 0, "product"),
-    part("sphere", "wool", [0.5, 0.61, 0.3], [0.6, 0.54, 0.6], 0, 0, "product"),
-    part("sphere", "wool", [0.5, 0.72, 0.5], [0.5, 0.35, 0.5], 0, 0, "product"),
-    part("sphere", "wool", [0.28, 0.62, 0.55], [0.4, 0.42, 0.42], 0, 0, "product"),
-    part("sphere", "wool", [0.5, 0.6, 0.08], [0.32, 0.3, 0.3], 0, 0, "tail"),
-    part("box", "dark hide", [0.5, 0.66, 1.0], [0.19, 0.22, 0.28], 0, 0, "head"),
-    part("sphere", "dark hide", [0.5, 0.63, 1.06], [0.16, 0.16, 0.16], 0, 0, "head"),
-    part("sphere", "wool", [0.5, 0.76, 0.92], [0.26, 0.16, 0.24], 0, 0, "head"),
-    part("box", "dark hide", [0.37, 0.71, 0.94], [0.07, 0.04, 0.12], 90, 28.6, "head"),
-    part("box", "dark hide", [0.63, 0.71, 0.94], [0.07, 0.04, 0.12], -90, 28.6, "head"),
-    part("box", "amber", [0.42, 0.7, 1.08], [0.035, 0.035, 0.02], 0, 0, "head"),
-    part("box", "amber", [0.58, 0.7, 1.08], [0.035, 0.035, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.44, 0.62, 1.16], [0.02, 0.02, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.56, 0.62, 1.16], [0.02, 0.02, 0.02], 0, 0, "head"),
+    part("sphere", "dark hide", [0.5, 0.44, 0.5], [0.52, 0.44, 0.54], 0, 0, "body"),
+    // Plush multi-puff cloud of wool around the chunky body.
+    part("sphere", "wool", [0.5, 0.48, 0.5], [0.7, 0.58, 0.72], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.54, 0.72], [0.56, 0.48, 0.5], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.52, 0.28], [0.58, 0.5, 0.52], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.66, 0.5], [0.54, 0.36, 0.56], 0, 0, "product"),
+    part("sphere", "wool", [0.24, 0.5, 0.52], [0.36, 0.38, 0.46], 0, 0, "product"),
+    part("sphere", "wool", [0.76, 0.5, 0.52], [0.36, 0.38, 0.46], 0, 0, "product"),
+    part("sphere", "wool", [0.5, 0.48, 0.1], [0.28, 0.26, 0.26], 0, 0, "tail"),
+    // Cozy rounded warm-grey face with wool crown puff and gentle bead eyes.
+    part("sphere", "dark hide", [0.5, 0.49, 0.92], [0.3, 0.28, 0.28], 0, 0, "head"),
+    part("sphere", "wool", [0.5, 0.63, 0.87], [0.32, 0.18, 0.28], 0, 0, "head"),
+    part("sphere", "dark hide", [0.32, 0.53, 0.88], [0.12, 0.08, 0.14], 25, 25, "head"),
+    part("sphere", "dark hide", [0.68, 0.53, 0.88], [0.12, 0.08, 0.14], -25, 25, "head"),
+    part("sphere", "ink", [0.41, 0.5, 1.05], [0.045, 0.032, 0.03], 0, 0, "head"),
+    part("sphere", "ink", [0.59, 0.5, 1.05], [0.045, 0.032, 0.03], 0, 0, "head"),
+    part("sphere", "snout", [0.5, 0.44, 1.06], [0.08, 0.05, 0.04], 0, 0, "head"),
     ...sheepLegs.parts,
   ],
   joints: {
-    product: [0.5, 0.58, 0.5],
-    head: [0.5, 0.66, 0.88],
-    tail: [0.5, 0.6, 0.3],
+    product: [0.5, 0.48, 0.5],
+    head: [0.5, 0.5, 0.82],
+    tail: [0.5, 0.48, 0.22],
     ...sheepLegs.joints,
   },
 });
 
-const cowLegs = legs("cowhide", 0.2, 0.42, 0.62, 0.6, 0.14);
-add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
+const cowLegs = legs("cowhide", 0.22, 0.34, 0.36, 0.34, 0.17);
+add("design", "cow", "A chunky mossy-horned spotted cow. Milk it; it follows wheat.", {
   parts: [
-    part("sphere", "cowhide", [0.5, 0.9, 0.5], [0.62, 0.6, 1.2], 0, 0, "body"),
-    part("sphere", "dark hide", [0.8, 0.95, 0.7], [0.1, 0.4, 0.4], 0, 0, "body"),
-    part("sphere", "dark hide", [0.2, 0.88, 0.25], [0.12, 0.48, 0.48], 0, 0, "body"),
-    part("sphere", "dark hide", [0.78, 1.0, 0.15], [0.075, 0.3, 0.3], 0, 0, "body"),
-    part("sphere", "dark hide", [0.5, 1.2, 0.45], [0.44, 0.09, 0.44], 0, 0, "body"),
-    part("sphere", "snout", [0.5, 0.62, 0.15], [0.2, 0.16, 0.2], 0, 0, "body"),
-    part("sphere", "cowhide", [0.5, 1.08, 0.95], [0.42, 0.4, 0.42], 0, 0, "body"),
+    // Chunky rounded-blocky cream body with rich warm chestnut patches and mossy accents.
+    part("box", "cowhide", [0.5, 0.68, 0.5], [0.72, 0.62, 0.98], 0, 0, "body"),
+    part("sphere", "bark", [0.82, 0.72, 0.66], [0.14, 0.36, 0.38], 0, 0, "body"),
+    part("sphere", "bark", [0.18, 0.68, 0.32], [0.14, 0.42, 0.44], 0, 0, "body"),
+    part("sphere", "bark", [0.5, 0.98, 0.44], [0.52, 0.12, 0.44], 0, 0, "body"),
+    part("sphere", "stem", [0.56, 1.01, 0.72], [0.22, 0.08, 0.2], 0, 0, "body"),
+    part("sphere", "snout", [0.5, 0.38, 0.28], [0.22, 0.16, 0.22], 0, 0, "body"),
     part(
       "cylinder",
-      "cowhide",
-      lean([0.5, 1.1, -0.1], 0.6, 0, -154.7),
-      [0.05, 0.6, 0.05],
+      "bark",
+      lean([0.5, 0.76, -0.02], 0.38, 0, -148),
+      [0.06, 0.38, 0.06],
       0,
-      -154.7,
+      -148,
       "tail",
     ),
-    part("sphere", "dark hide", [0.5, 0.56, -0.36], [0.1, 0.14, 0.1], 0, 0, "tail"),
-    part("box", "cowhide", [0.5, 1.05, 1.3], [0.32, 0.34, 0.42], 0, 0, "head"),
-    part("sphere", "snout", [0.5, 1.0, 1.48], [0.28, 0.2, 0.18], 0, 0, "head"),
-    part("sphere", "dark hide", [0.5, 1.2, 1.3], [0.18, 0.12, 0.18], 0, 0, "head"),
-    part("cone", "horn", lean([0.63, 1.2, 1.22], 0.18, 90, 63), [0.08, 0.18, 0.08], 90, 63, "head"),
+    part("sphere", "leather", [0.5, 0.44, -0.2], [0.1, 0.12, 0.1], 0, 0, "tail"),
+    // Adorable boxy-plush head with wide rosy muzzle, sweet bead eyes, and curved mossy horns.
+    part("box", "bark", [0.5, 0.78, 1.08], [0.54, 0.5, 0.48], 0, 0, "head"),
+    part("box", "cowhide", [0.5, 0.88, 1.1], [0.34, 0.3, 0.46], 0, 0, "head"),
+    part("box", "snout", [0.5, 0.66, 1.32], [0.46, 0.24, 0.22], 0, 0, "head"),
+    part("cone", "horn", lean([0.74, 1.0, 1.05], 0.24, 80, 42), [0.12, 0.24, 0.12], 80, 42, "head"),
     part(
       "cone",
       "horn",
-      lean([0.37, 1.2, 1.22], 0.18, -90, 63),
-      [0.08, 0.18, 0.08],
-      -90,
-      63,
+      lean([0.26, 1.0, 1.05], 0.24, -80, 42),
+      [0.12, 0.24, 0.12],
+      -80,
+      42,
       "head",
     ),
-    part("box", "dark hide", [0.71, 1.12, 1.2], [0.08, 0.05, 0.14], -90, 22.9, "head"),
-    part("box", "dark hide", [0.29, 1.12, 1.2], [0.08, 0.05, 0.14], 90, 22.9, "head"),
-    part("box", "ink", [0.6, 1.11, 1.51], [0.04, 0.04, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.4, 1.11, 1.51], [0.04, 0.04, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.44, 0.99, 1.6], [0.025, 0.025, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.56, 0.99, 1.6], [0.025, 0.025, 0.02], 0, 0, "head"),
+    part("sphere", "stem", [0.82, 1.1, 1.06], [0.11, 0.09, 0.11], 0, 0, "head"),
+    part("sphere", "stem", [0.18, 1.1, 1.06], [0.11, 0.09, 0.11], 0, 0, "head"),
+    part("sphere", "bark", [0.82, 0.84, 1.04], [0.16, 0.09, 0.14], -25, 18, "head"),
+    part("sphere", "bark", [0.18, 0.84, 1.04], [0.16, 0.09, 0.14], 25, 18, "head"),
+    part("sphere", "ink", [0.64, 0.82, 1.33], [0.06, 0.075, 0.04], 0, 0, "head"),
+    part("sphere", "ink", [0.36, 0.82, 1.33], [0.06, 0.075, 0.04], 0, 0, "head"),
+    part("sphere", "ink", [0.42, 0.67, 1.44], [0.035, 0.04, 0.03], 0, 0, "head"),
+    part("sphere", "ink", [0.58, 0.67, 1.44], [0.035, 0.04, 0.03], 0, 0, "head"),
     ...cowLegs.parts,
-    ...[-0.2, 0.2].flatMap((x) =>
-      [0.42, -0.42].map((z) => {
+    ...[-0.22, 0.22].flatMap((x) =>
+      [0.34, -0.34].map((z) => {
         const role = `${z > 0 ? "front" : "back"} ${x < 0 ? "left" : "right"} leg`;
         return part(
           "cylinder",
           "dark hide",
-          [0.5 + x, 0.05, 0.5 + z],
-          [0.16, 0.1, 0.16],
+          [0.5 + x, 0.045, 0.5 + z],
+          [0.18, 0.09, 0.18],
           0,
           0,
           role,
@@ -617,34 +621,33 @@ add("design", "cow", "A spotted cow. Milk it; it follows wheat.", {
       })
     ),
   ],
-  joints: { head: [0.5, 1.05, 1.12], tail: [0.5, 1.1, -0.1], ...cowLegs.joints },
+  joints: { head: [0.5, 0.78, 0.94], tail: [0.5, 0.76, 0.02], ...cowLegs.joints },
 });
 
-add("design", "chicken", "A clucking chicken. Collect its eggs; it follows wheat.", {
+add("design", "chicken", "A plump miniature chicken. Collect its eggs; it follows wheat.", {
   parts: [
-    part("sphere", "feathers", [0.5, 0.27, 0.5], [0.3, 0.28, 0.38], 0, 0, "body"),
-    part("sphere", "feathers", [0.5, 0.28, 0.62], [0.22, 0.24, 0.22], 0, 0, "body"),
-    part("sphere", "feathers", [0.36, 0.3, 0.5], [0.08, 0.2, 0.26], 0, 0, "body"),
-    part("sphere", "feathers", [0.64, 0.3, 0.5], [0.08, 0.2, 0.26], 0, 0, "body"),
-    part("box", "feathers", [0.5, 0.35, 0.33], [0.12, 0.16, 0.05], 0, -34.4, "body"),
-    part("box", "feathers", [0.44, 0.38, 0.3], [0.08, 0.14, 0.04], 20, -28, "body"),
-    part("box", "feathers", [0.56, 0.38, 0.3], [0.08, 0.14, 0.04], -20, -28, "body"),
-    part("sphere", "feathers", [0.5, 0.42, 0.67], [0.15, 0.17, 0.15], 0, 0, "head"),
-    part("box", "comb", [0.5, 0.51, 0.67], [0.025, 0.06, 0.09], 0, 0, "head"),
-    part("box", "comb", [0.5, 0.36, 0.74], [0.025, 0.05, 0.025], 0, 0, "head"),
-    part("sphere", "comb", [0.5, 0.33, 0.72], [0.05, 0.07, 0.04], 0, 0, "head"),
-    part("cone", "beak", [0.5, 0.41, 0.755], [0.05, 0.07, 0.05], 0, 90, "head"),
-    part("box", "ink", [0.435, 0.44, 0.7], [0.015, 0.02, 0.02], 0, 0, "head"),
-    part("box", "ink", [0.565, 0.44, 0.7], [0.015, 0.02, 0.02], 0, 0, "head"),
-    part("cylinder", "beak", [0.45, 0.085, 0.5], [0.026, 0.17, 0.026], 0, 0, "left leg"),
-    part("cylinder", "beak", [0.55, 0.085, 0.5], [0.026, 0.17, 0.026], 0, 0, "right leg"),
-    part("box", "beak", [0.45, 0.01, 0.56], [0.05, 0.02, 0.1], 0, 0, "left leg"),
-    part("box", "beak", [0.55, 0.01, 0.56], [0.05, 0.02, 0.1], 0, 0, "right leg"),
+    // Chubby egg-shaped cream body sitting cozy on tiny orange feet.
+    part("sphere", "feathers", [0.5, 0.26, 0.5], [0.44, 0.4, 0.48], 0, 0, "body"),
+    part("sphere", "feathers", [0.3, 0.26, 0.48], [0.12, 0.22, 0.26], 0, 12, "body"),
+    part("sphere", "feathers", [0.7, 0.26, 0.48], [0.12, 0.22, 0.26], 0, -12, "body"),
+    part("sphere", "feathers", [0.5, 0.34, 0.26], [0.18, 0.18, 0.16], 0, -25, "body"),
+    // Plump integrated head with 3-lobe red comb, cute beak, and shiny dark bead eyes.
+    part("sphere", "feathers", [0.5, 0.41, 0.58], [0.32, 0.3, 0.3], 0, 0, "head"),
+    part("sphere", "comb", [0.5, 0.57, 0.61], [0.08, 0.1, 0.09], 0, 0, "head"),
+    part("sphere", "comb", [0.5, 0.56, 0.54], [0.075, 0.09, 0.08], 0, 0, "head"),
+    part("sphere", "comb", [0.5, 0.53, 0.47], [0.065, 0.075, 0.075], 0, 0, "head"),
+    part("cone", "beak", [0.5, 0.39, 0.75], [0.09, 0.1, 0.09], 0, 90, "head"),
+    part("sphere", "ink", [0.39, 0.43, 0.71], [0.04, 0.045, 0.035], 0, 0, "head"),
+    part("sphere", "ink", [0.61, 0.43, 0.71], [0.04, 0.045, 0.035], 0, 0, "head"),
+    part("cylinder", "beak", [0.43, 0.055, 0.5], [0.035, 0.11, 0.035], 0, 0, "left leg"),
+    part("cylinder", "beak", [0.57, 0.055, 0.5], [0.035, 0.11, 0.035], 0, 0, "right leg"),
+    part("box", "beak", [0.43, 0.015, 0.54], [0.07, 0.025, 0.11], 0, 0, "left leg"),
+    part("box", "beak", [0.57, 0.015, 0.54], [0.07, 0.025, 0.11], 0, 0, "right leg"),
   ],
   joints: {
-    head: [0.5, 0.36, 0.64],
-    "left leg": [0.45, 0.17, 0.5],
-    "right leg": [0.55, 0.17, 0.5],
+    head: [0.5, 0.36, 0.56],
+    "left leg": [0.43, 0.11, 0.5],
+    "right leg": [0.57, 0.11, 0.5],
   },
 });
 
@@ -777,13 +780,13 @@ const wired = (p: ReturnType<typeof part>, channel: string) => ({ ...p, channel 
 add(
   "design",
   "lantern post",
-  'A post with a glass lamp, on the "lanterns" channel (nature lights them at dusk).',
+  'A crooked wooden post with a hanging glass lantern, on the "lanterns" channel (nature lights them at dusk).',
   {
     anchored: true,
     parts: [
-      part("box", "planks", [0.5, 1.1, 0.5], [0.16, 2.2, 0.16]),
-      part("box", "planks", [0.5, 2.6, 0.5], [0.36, 0.06, 0.36]),
-      wired(part("lamp", "lantern glass", [0.5, 2.38, 0.5], [0.3, 0.36, 0.3]), "lanterns"),
+      part("box", "planks", [0.36, 1.1, 0.5], [0.16, 2.2, 0.16]),
+      part("box", "planks", [0.58, 2.2, 0.5], [0.62, 0.14, 0.24]),
+      wired(part("lamp", "lantern glass", [0.76, 1.94, 0.5], [0.3, 0.36, 0.3]), "lanterns"),
     ],
   },
 );
@@ -794,21 +797,22 @@ add("design", "torch", "A stick with a small tame flame: warm light that never s
     part("flame", "planks", [0.5, 1.12, 0.5], [0.18, 0.3, 0.18]),
   ],
 });
-add("design", "campfire", "Logs in a ring of cobble with a tame fire on them.", {
+add("design", "campfire", "Crossed logs in a snug ring of river cobble with a warm tame fire.", {
   anchored: true,
   parts: [
-    ...[0, 60, 120, 180, 240, 300].map((t) =>
+    ...[0, 45, 90, 135, 180, 225, 270, 315].map((t, i) =>
       part(
-        "box",
+        "sphere",
         "cobble",
-        [0.5 + 0.38 * Math.sin(t * DEG), 0.08, 0.5 + 0.38 * Math.cos(t * DEG)],
-        [0.2, 0.16, 0.2],
+        [0.5 + 0.4 * Math.sin(t * DEG), 0.09, 0.5 + 0.4 * Math.cos(t * DEG)],
+        [0.24 + (i % 2) * 0.04, 0.18, 0.22],
         t,
       )
     ),
-    part("cylinder", "log", [0.5, 0.1, 0.5], [0.12, 0.6, 0.12], 45, 90),
-    part("cylinder", "log", [0.5, 0.16, 0.5], [0.12, 0.6, 0.12], -45, 90),
-    part("flame", "log", [0.5, 0.42, 0.5], [0.42, 0.55, 0.42]),
+    part("cylinder", "log", [0.5, 0.12, 0.5], [0.13, 0.62, 0.13], 35, 86),
+    part("cylinder", "log", [0.5, 0.16, 0.5], [0.13, 0.62, 0.13], -40, 86),
+    part("cylinder", "log", [0.5, 0.14, 0.5], [0.11, 0.56, 0.11], 95, 84),
+    part("flame", "log", [0.5, 0.46, 0.5], [0.46, 0.64, 0.46]),
   ],
 });
 add(
@@ -895,9 +899,179 @@ add("rule", "warm bread", "Fresh bread cheers whoever eats it.", {
   do: [{ say: "Warm bread. The day looks brighter." }],
 });
 
+// ---------------------------------------------------------------- Floatsee & Sanctuary (v4)
+// Appended after M12 so saved worlds keep every older Catalog id unchanged.
+
+material(
+  "fawn fur",
+  "item",
+  "#d9baa0",
+  "fleece",
+  0.3,
+  0.3,
+  true,
+  "Soft tan fur of island bunnies.",
+);
+material("inner ear", "item", "#e8b2ad", "plain", 0.3, 0.2, false, "Pale rosy ear lining.");
+material(
+  "turnip",
+  "item",
+  "#e65c92",
+  "plain",
+  0.8,
+  0.6,
+  false,
+  "A plump rosy garden turnip; bunnies love them.",
+);
+material(
+  "turnip seeds",
+  "item",
+  "#c6a36b",
+  "plain",
+  0.7,
+  1,
+  true,
+  "Plant them on farmland for colorful root bulbs.",
+);
+material(
+  "turnip gold",
+  "item",
+  "#f4aa3d",
+  "plain",
+  0.8,
+  0.6,
+  false,
+  "A sun-kissed golden turnip bulb.",
+);
+material("parchment", "item", "#f3ebd4", "plain", 0.4, 0.3, true, "Cream paper for notice pins.");
+material("iron", "item", "#6b7380", "tiles", 7.8, 7, false, "Forged metal for tools and pins.");
+material(
+  "floatsee glaze",
+  "item",
+  "#9fd8c2",
+  "tiles",
+  1.4,
+  3,
+  false,
+  "Smooth painted ceramic glaze of a Floatsee.",
+);
+
+const bunnyLegs = legs("fawn fur", 0.11, 0.13, 0.11, 0.11, 0.08);
+add("design", "bunny", "A boxy-plush hopping bunny. It loves turnips and wheat.", {
+  parts: [
+    part("box", "fawn fur", [0.5, 0.24, 0.5], [0.34, 0.28, 0.4], 0, 0, "body"),
+    part("sphere", "wool", [0.5, 0.26, 0.27], [0.13, 0.13, 0.13], 0, 0, "tail"),
+    // Head with tall upright rounded ears, rosy inner ears, and shiny bead eyes.
+    part("box", "fawn fur", [0.5, 0.33, 0.72], [0.3, 0.26, 0.26], 0, 0, "head"),
+    part("cylinder", "fawn fur", [0.42, 0.57, 0.7], [0.09, 0.26, 0.07], 0, -6, "head"),
+    part("cylinder", "fawn fur", [0.58, 0.57, 0.7], [0.09, 0.26, 0.07], 0, 6, "head"),
+    part("cylinder", "inner ear", [0.42, 0.56, 0.73], [0.05, 0.2, 0.03], 0, -6, "head"),
+    part("cylinder", "inner ear", [0.58, 0.56, 0.73], [0.05, 0.2, 0.03], 0, 6, "head"),
+    part("sphere", "ink", [0.42, 0.34, 0.85], [0.036, 0.044, 0.03], 0, 0, "head"),
+    part("sphere", "ink", [0.58, 0.34, 0.85], [0.036, 0.044, 0.03], 0, 0, "head"),
+    part("sphere", "snout", [0.5, 0.3, 0.86], [0.045, 0.032, 0.03], 0, 0, "head"),
+    ...bunnyLegs.parts,
+  ],
+  joints: {
+    head: [0.5, 0.32, 0.66],
+    tail: [0.5, 0.26, 0.32],
+    ...bunnyLegs.joints,
+  },
+});
+
+add("design", "turnip crop", "Plump rosy and golden turnips with bright leafy tops on farmland.", {
+  mark: "T",
+  habitat: { on: ["farmland"] },
+  parts: [
+    // Four plump root bulbs nested in the tilled soil, each topped with lush green leaves.
+    ...[
+      { x: 0.28, z: 0.3, mat: "turnip", s: 0.26 },
+      { x: 0.72, z: 0.32, mat: "turnip gold", s: 0.27 },
+      { x: 0.32, z: 0.72, mat: "turnip gold", s: 0.26 },
+      { x: 0.7, z: 0.7, mat: "turnip", s: 0.25 },
+    ].flatMap(({ x, z, mat, s }) => [
+      part("sphere", mat, [x, s * 0.42, z], [s, s * 0.88, s]),
+      part("sphere", "leaves", [x - 0.06, s * 1.05, z], [0.13, 0.2, 0.08], 20, -22),
+      part("sphere", "leaves", [x + 0.06, s * 1.05, z], [0.13, 0.2, 0.08], -20, 22),
+      part("sphere", "stem", [x, s * 1.12, z + 0.05], [0.11, 0.22, 0.08], 0, 14),
+    ]),
+  ],
+});
+
+add("design", "notice board", "A rustic wooden signboard with pinned parchment wishes.", {
+  anchored: true,
+  parts: [
+    part("box", "planks", [0.5, 0.72, 0.5], [0.18, 1.44, 0.16]),
+    part("box", "planks", [0.5, 1.04, 0.56], [1.14, 0.22, 0.09]),
+    part("box", "planks", [0.5, 0.8, 0.56], [1.12, 0.21, 0.09]),
+    part("box", "planks", [0.5, 0.56, 0.56], [1.14, 0.21, 0.09]),
+    part("box", "parchment", [0.24, 0.76, 0.62], [0.3, 0.36, 0.025], 0, -4),
+    part("sphere", "yellow petals", [0.24, 0.91, 0.64], [0.05, 0.05, 0.04]),
+    part("box", "parchment", [0.76, 0.86, 0.62], [0.28, 0.32, 0.025], 0, 5),
+    part("sphere", "comb", [0.76, 0.99, 0.64], [0.05, 0.05, 0.04]),
+    part("sphere", "leaves", [0.38, 0.06, 0.5], [0.14, 0.12, 0.14]),
+    part("sphere", "leaves", [0.62, 0.05, 0.52], [0.12, 0.1, 0.12]),
+  ],
+});
+
+add("design", "workbench", "A sturdy wooden crafting bench with a rack of miniature tools.", {
+  anchored: true,
+  parts: [
+    // Table top and four chunky timber legs.
+    part("box", "planks", [0.5, 0.58, 0.5], [1.26, 0.1, 0.66]),
+    part("box", "planks", [0.04, 0.28, 0.24], [0.12, 0.56, 0.12]),
+    part("box", "planks", [0.96, 0.28, 0.24], [0.12, 0.56, 0.12]),
+    part("box", "planks", [0.04, 0.28, 0.76], [0.12, 0.56, 0.12]),
+    part("box", "planks", [0.96, 0.28, 0.76], [0.12, 0.56, 0.12]),
+    part("box", "planks", [0.5, 0.18, 0.5], [0.92, 0.07, 0.08]),
+    // Backboard tool rack with hanging mallet, wrenches, saw, and spool.
+    part("box", "planks", [0.5, 0.86, 0.2], [1.2, 0.44, 0.07]),
+    part("cylinder", "bark", [0.2, 0.86, 0.26], [0.045, 0.26, 0.045]),
+    part("box", "iron", [0.2, 0.97, 0.26], [0.16, 0.09, 0.09]),
+    part("cylinder", "iron", [0.46, 0.86, 0.26], [0.04, 0.24, 0.04]),
+    part("cylinder", "iron", [0.66, 0.88, 0.26], [0.035, 0.2, 0.035]),
+    part("box", "iron", [0.24, 0.65, 0.52], [0.32, 0.02, 0.14], 15),
+    part("box", "red cloth", [0.1, 0.66, 0.54], [0.12, 0.05, 0.1], 15),
+    part("cylinder", "bark", [0.58, 0.65, 0.58], [0.04, 0.24, 0.04], -30, 90),
+    part("box", "iron", [0.68, 0.66, 0.52], [0.14, 0.08, 0.08], -30),
+    part("cylinder", "floatsee glaze", [0.88, 0.67, 0.54], [0.14, 0.09, 0.14]),
+  ],
+});
+
+add(
+  "design",
+  "floatsee",
+  "A customizable Floatsee: floating ceramic head over a bell cloak with graphic tee.",
+  {
+    parts: [
+      part("cylinder", "floatsee glaze", [0.38, 0.12, 0.5], [0.16, 0.24, 0.16], 0, 0, "left leg"),
+      part("cylinder", "floatsee glaze", [0.62, 0.12, 0.5], [0.16, 0.24, 0.16], 0, 0, "right leg"),
+      part("cylinder", "floatsee glaze", [0.5, 0.62, 0.5], [0.62, 0.84, 0.62], 0, 0, "body"),
+      part("sphere", "floatsee glaze", [0.16, 0.72, 0.5], [0.18, 0.36, 0.18], 0, 0, "left arm"),
+      part("sphere", "floatsee glaze", [0.84, 0.72, 0.5], [0.18, 0.36, 0.18], 0, 0, "right arm"),
+      part("sphere", "floatsee glaze", [0.5, 1.44, 0.5], [0.56, 0.56, 0.56], 0, 0, "head"),
+    ],
+    joints: {
+      "left leg": [0.38, 0.24, 0.5],
+      "right leg": [0.62, 0.24, 0.5],
+      body: [0.5, 0.24, 0.5],
+      "left arm": [0.22, 0.88, 0.5],
+      "right arm": [0.78, 0.88, 0.5],
+      head: [0.5, 1.18, 0.5],
+    },
+  },
+);
+
+rel("turnip seeds", "grows_into", "turnip crop", 1, 14);
+rel("turnip crop", "drops", "turnip", 2);
+rel("turnip crop", "drops", "turnip seeds", 2);
+rel("turnip", "is_food_for", "bunny");
+rel("wheat", "is_food_for", "bunny");
+
 // Food: how much one fills a villager's hunger (a full belly is 1).
 const FOOD: Record<string, number> = {
   wheat: 0.1,
+  turnip: 0.2,
   berries: 0.1,
   egg: 0.15,
   milk: 0.15,

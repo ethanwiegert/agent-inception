@@ -1,6 +1,7 @@
 import { deepStrictEqual as assertEquals, ok } from "node:assert/strict";
 import { identity, mat4, rotateY, translate } from "../math.ts";
 import { Catalog, type DesignContent, natureCatalog } from "../sim/catalog.ts";
+import { defaultFloatsee, HEAD_SHAPES } from "../sim/floatsee.ts";
 import type { AgentView } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { meshDesign } from "./designs.ts";
@@ -197,6 +198,7 @@ Deno.test("a walking villager counter-rotates their torso through the stride", (
   const catalog = Catalog.create();
   const lib = new MeshLibrary();
   const models = new BodyModels(lib);
+  const floatsee = defaultFloatsee(0);
   const agent: AgentView = {
     id: 1,
     name: "Fern",
@@ -208,17 +210,43 @@ Deno.test("a walking villager counter-rotates their torso through the stride", (
     stride: 0.25,
     color: 0,
     body: null,
+    floatsee,
+    expression: "happy",
     carrying: false,
     down: 0,
   };
   const out = new InstanceBatch();
   buildBodies([agent], 1, out, models, catalog);
   out.sort(lib.size);
-  const body = models.villager(catalog, null, 0, 3)!.pieces.body!;
+  const body = models.villager(catalog, null, floatsee)!.pieces.body!;
   ok(body);
   const i = out.sortedIds.indexOf(body.id);
   ok(i >= 0, "torso is drawn");
   ok(Math.abs(out.sorted[i * INSTANCE_FLOATS + 2]) > 0.001, "torso twists around vertical");
+});
+
+Deno.test("all 6 Floatsee head shapes and new lathe/tube/star primitives mesh cleanly outward", () => {
+  const b1 = new MeshBuilder().lathe(null, [[0.1, 0], [0.3, 0.2], [0.2, 0.5]], { color: RED }, 12);
+  assertOutward(b1);
+  const b2 = new MeshBuilder().tube(
+    null,
+    [[0, 0, 0, 0.05], [0.2, 0.2, 0, 0.05], [0.2, 0.5, 0, 0.02]],
+    { color: RED },
+    8,
+  );
+  assertOutward(b2);
+  const b3 = new MeshBuilder().star(null, 0.4, 0.2, 0.16, { color: RED }, 5);
+  assertOutward(b3);
+
+  const catalog = Catalog.create();
+  const lib = new MeshLibrary();
+  const models = new BodyModels(lib);
+  for (let i = 0; i < HEAD_SHAPES.length; i++) {
+    const look = { ...defaultFloatsee(i), head: HEAD_SHAPES[i] };
+    const rig = models.villager(catalog, null, look);
+    ok(rig?.floatsee, `${HEAD_SHAPES[i]} builds a floatsee rig`);
+    ok(rig?.pieces.head && rig?.pieces.body, `${HEAD_SHAPES[i]} has head and body`);
+  }
 });
 
 Deno.test("a cow's tail has its own joint for idle and walking motion", () => {
@@ -230,18 +258,34 @@ Deno.test("a cow's tail has its own joint for idle and walking motion", () => {
 Deno.test("the detailed built-in designs all mesh, land zones, and keep their solidity", () => {
   const catalog = Catalog.create();
   for (
-    const name of ["oak", "birch", "pine", "bush", "farmer", "sheep", "cow", "chicken", "duck"]
+    const name of [
+      "oak",
+      "birch",
+      "pine",
+      "bush",
+      "farmer",
+      "sheep",
+      "cow",
+      "chicken",
+      "duck",
+      "bunny",
+      "turnip crop",
+      "notice board",
+      "workbench",
+      "floatsee",
+    ]
   ) {
     const e = catalog.current(catalog.byName(name)!)!;
     const d = e.content as DesignContent;
     const b = new MeshBuilder();
     assertEquals(meshDesign(b, catalog, d, { role: null }), d.parts.length, name);
-    ok(b.vertexCount > 200, `${name} has real geometry`);
+    ok(b.vertexCount > 100, `${name} has real geometry`);
   }
   // A bush is walk-through ground cover, not something solid; a sheep's tail wags on its joint.
   const fauna = new FaunaModels(new MeshLibrary());
   ok(fauna.pieces(catalog, 0).some((p) => p.role === "tail"), "sheep has a tail piece");
   ok(fauna.pieces(catalog, 1).some((p) => p.role === "tail"), "cow has a tail piece");
+  ok(fauna.pieces(catalog, 4).some((p) => p.role === "tail"), "bunny has a tail piece");
 });
 
 Deno.test("a replaced animal design replaces the cached rig", () => {

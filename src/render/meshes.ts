@@ -250,6 +250,183 @@ export class MeshBuilder {
     return this.cylinder(m, radius, 0, height, style, o);
   }
 
+  /**
+   * Surface of revolution around Y from a [radius, y] profile. Walking up the profile faces
+   * outward; looping over a rim and down inside faces inward (hollow collars, teacups).
+   */
+  lathe(
+    m: Mat4 | null,
+    profile: readonly (readonly [number, number])[],
+    style: Style,
+    segments = 24,
+  ) {
+    if (profile.length < 2) return this;
+    const seg = Math.max(6, segments);
+    let y0 = Infinity, y1 = -Infinity;
+    for (const [, y] of profile) {
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    const part = this.part(m, style, y0, y1);
+    const nProf = profile.length;
+    // Smooth outward normal per profile ring from its tangent (dr, dy) → outward (dy, -dr).
+    const nr: number[] = [], ny: number[] = [];
+    for (let j = 0; j < nProf; j++) {
+      const p0 = profile[Math.max(0, j - 1)];
+      const p1 = profile[Math.min(nProf - 1, j + 1)];
+      const dr = p1[0] - p0[0], dy = p1[1] - p0[1];
+      const len = Math.hypot(dr, dy) || 1;
+      nr.push(dy / len);
+      ny.push(-dr / len);
+    }
+    const base = this.vertexCount;
+    for (let j = 0; j < nProf; j++) {
+      const [r, y] = profile[j];
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        part.vertex(ca * r, y, sa * r, ca * nr[j], ny[j], sa * nr[j]);
+      }
+    }
+    const stride = seg + 1;
+    for (let j = 0; j < nProf - 1; j++) {
+      for (let i = 0; i < seg; i++) {
+        const q = base + j * stride + i;
+        this.quad(q, q + stride, q + stride + 1, q + 1);
+      }
+    }
+    return this;
+  }
+
+  /** Swept smooth tube along a 3D spine of [x, y, z, radius] points (horns, teacup handles). */
+  tube(
+    m: Mat4 | null,
+    spine: readonly (readonly [number, number, number, number])[],
+    style: Style,
+    segments = 10,
+  ) {
+    if (spine.length < 2) return this;
+    const seg = Math.max(5, segments);
+    let y0 = Infinity, y1 = -Infinity;
+    for (const [, y] of spine) {
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    const part = this.part(m, style, y0, y1);
+    const base = this.vertexCount;
+    let prevRight: [number, number, number] | null = null;
+    for (let j = 0; j < spine.length; j++) {
+      const p0 = spine[Math.max(0, j - 1)];
+      const p1 = spine[Math.min(spine.length - 1, j + 1)];
+      const tx = p1[0] - p0[0], ty = p1[1] - p0[1], tz = p1[2] - p0[2];
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      const fx = tx / tl, fy = ty / tl, fz = tz / tl;
+      let rx: number, ry: number, rz: number;
+      if (!prevRight) {
+        const ux = Math.abs(fy) < 0.9 ? 0 : 1, uy = Math.abs(fy) < 0.9 ? 1 : 0, uz = 0;
+        rx = uy * fz - uz * fy;
+        ry = uz * fx - ux * fz;
+        rz = ux * fy - uy * fx;
+      } else {
+        // Parallel-transport previous right vector onto the plane perpendicular to tangent.
+        const dot = prevRight[0] * fx + prevRight[1] * fy + prevRight[2] * fz;
+        rx = prevRight[0] - fx * dot;
+        ry = prevRight[1] - fy * dot;
+        rz = prevRight[2] - fz * dot;
+      }
+      const rl = Math.hypot(rx, ry, rz) || 1;
+      rx /= rl, ry /= rl, rz /= rl;
+      prevRight = [rx, ry, rz];
+      const bx = fy * rz - fz * ry;
+      const by = fz * rx - fx * rz;
+      const bz = fx * ry - fy * rx;
+      const [cx, cy, cz, r] = spine[j];
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const nx = rx * ca + bx * sa;
+        const ny = ry * ca + by * sa;
+        const nz = rz * ca + bz * sa;
+        part.vertex(cx + nx * r, cy + ny * r, cz + nz * r, nx, ny, nz);
+      }
+    }
+    const stride = seg + 1;
+    for (let j = 0; j < spine.length - 1; j++) {
+      for (let i = 0; i < seg; i++) {
+        const q = base + j * stride + i;
+        this.quad(q, q + 1, q + stride + 1, q + stride);
+      }
+    }
+    return this;
+  }
+
+  /** Puffy pillowed 3D star facing +Z/-Z with smooth rounded bevels (Floatsee star head). */
+  star(
+    m: Mat4 | null,
+    outerR: number,
+    innerR: number,
+    halfDepth: number,
+    style: Style,
+    points = 5,
+  ) {
+    const segs = points * 8; // smooth rounded tips and valleys
+    const radiusAt = (ang: number) => {
+      // Smooth rounded star curve: blend cosine harmonics so tips and valleys are soft & plump.
+      const k = Math.cos(points * (ang - Math.PI / 2));
+      const t = 0.5 + 0.5 * k;
+      const soft = Math.pow(t, 1.35);
+      return innerR + (outerR - innerR) * soft;
+    };
+    const part = this.part(m, style, -outerR, outerR);
+    // Rings from front apex (+Z) to equator (Z=0) to back apex (-Z).
+    const rings = [0.0, 0.35, 0.72, 0.94, 1.0, 0.94, 0.72, 0.35, 0.0];
+    const zVals = [1.0, 0.95, 0.78, 0.38, 0.0, -0.38, -0.78, -0.95, -1.0];
+    const stride = segs + 1;
+    const pts: number[][] = [];
+    for (let r = 0; r < rings.length; r++) {
+      const s = rings[r], z = zVals[r] * halfDepth;
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        const rad = radiusAt(a) * s;
+        pts.push([Math.cos(a) * rad, Math.sin(a) * rad, z]);
+      }
+    }
+    const tris: number[] = [];
+    for (let r = 0; r < rings.length - 1; r++) {
+      for (let i = 0; i < segs; i++) {
+        const a = r * stride + i;
+        const b = a + 1;
+        const c = a + stride + 1;
+        const d = a + stride;
+        tris.push(a, d, c, a, c, b);
+      }
+    }
+    // Smooth averaged vertex normals across the whole puffy star.
+    const acc = new Float64Array(pts.length * 3);
+    for (let t = 0; t < tris.length; t += 3) {
+      const n = faceNormal(pts[tris[t]], pts[tris[t + 1]], pts[tris[t + 2]]);
+      for (let k = 0; k < 3; k++) {
+        for (let c = 0; c < 3; c++) acc[tris[t + k] * 3 + c] += n[c];
+      }
+    }
+    // Stitch seam normals between i=0 and i=segs.
+    for (let r = 0; r < rings.length; r++) {
+      const a = r * stride, b = r * stride + segs;
+      for (let c = 0; c < 3; c++) {
+        const sum = acc[a * 3 + c] + acc[b * 3 + c];
+        acc[a * 3 + c] = sum;
+        acc[b * 3 + c] = sum;
+      }
+    }
+    const base = this.vertexCount;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      part.vertex(p[0], p[1], p[2], acc[i * 3], acc[i * 3 + 1], acc[i * 3 + 2]);
+    }
+    for (const i of tris) this.indices.push(base + i);
+    return this;
+  }
+
   /** Append another mesh, e.g. a shared part. */
   merge(other: MeshBuilder) {
     const base = this.vertexCount;

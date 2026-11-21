@@ -87,8 +87,12 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
       let s = textureLoad(surface, c, 0);
       let n = textureLoad(surface, clamp(c + outward, vec2i(0), vec2i(textureDimensions(surface)) - 1), 0);
       if (i32(s.r) - i32(n.r) <= 1 && u32(floor(world.y)) == s.r) { return green * 0.9; }
-      let fringe = step(0.78 + 0.1 * hash21(floor(world.xz * 4.0 + world.y)), fract(world.y));
-      return mix(vec3f(0.2, 0.11, 0.055) * dirtTone(uv), green, fringe);
+      let painterly = frame.lookParams.y;
+      let wave = valueNoise(vec2f(uv.x * 3.4, floor(world.y) * 2.1));
+      let cutoff = mix(0.78 + 0.1 * hash21(floor(world.xz * 4.0 + world.y)), 0.64 + 0.18 * wave, painterly);
+      let fringe = smoothstep(cutoff - 0.04 * painterly, cutoff + 0.02, fract(world.y));
+      let earth = mix(vec3f(0.2, 0.11, 0.055), vec3f(0.24, 0.19, 0.13), painterly * 0.55) * dirtTone(uv);
+      return mix(earth, green * (1.0 + 0.14 * painterly), fringe);
     }
     case ${P.dirt}u: { return base * dirtTone(uv); }
     case ${P.farmland}u: {
@@ -300,18 +304,28 @@ fn wetness(world: vec3f) -> f32 {
   }
 
   // Cliff faces: strata bands and darker seams on tall stone and dirt sides, moss where the
-  // field map says the face is shaded and grass is near. No block-grid lines.
+  // field map says the face is shaded and grass is near.
+  let painterly = frame.lookParams.y;
   if (in.face != 2u && natural(block)) {
     let col = hash21(floor(in.world.xz));
     let strata = 0.9 + 0.1 * sin(in.world.y * 2.3 + col * 9.0) +
       0.08 * valueNoise(vec2f(in.world.y * 1.4, col * 5.0));
     let seam = smoothstep(0.85, 0.98, sin(in.world.y * 1.9 + col * 6.0));
     color *= strata * (1.0 - 0.28 * seam);
-    let moss = smoothstep(0.6, 0.25, field.x) * smoothstep(0.6, 0.3, field.y) *
-      smoothstep(0.4, 0.7, valueNoise(in.world.xz * 2.6 + in.world.y));
-    color = mix(color, vec3f(0.10, 0.22, 0.07) * dirtTone(faceUV(in.world, in.face)) *
-      (frame.skyZenith.rgb * frame.sunColor.w * 0.5 + frame.groundAmbient.rgb * 0.3 +
-        keyLight(in.world, n2) * frame.sunColor.rgb * frame.sunDir.w), moss * 0.7);
+    let mossBase = smoothstep(0.6 + 0.25 * painterly, 0.25, field.x) *
+      smoothstep(0.6 + 0.2 * painterly, 0.3, field.y);
+    let moss = mossBase * smoothstep(0.4 - 0.1 * painterly, 0.7, valueNoise(in.world.xz * 2.6 + in.world.y));
+    color = mix(color, vec3f(0.11, 0.24, 0.065) * dirtTone(faceUV(in.world, in.face)) *
+      (frame.skyZenith.rgb * frame.sunColor.w * 0.55 + frame.groundAmbient.rgb * 0.35 +
+        keyLight(in.world, n2) * frame.sunColor.rgb * frame.sunDir.w), moss * mix(0.7, 0.88, painterly));
+  }
+  // Miniature tactile bevel on non-natural built blocks and cliff steps (subtle carved edge shade).
+  if (painterly > 0.01 && (!natural(block) || in.face != 2u)) {
+    let fuv = fract(faceUV(in.world, in.face));
+    let edge = min(min(fuv.x, 1.0 - fuv.x), min(fuv.y, 1.0 - fuv.y));
+    let bevel = smoothstep(0.0, 0.08, edge);
+    let topEdge = smoothstep(0.86, 0.96, fuv.y) * select(0.0, 1.0, in.face != 2u && in.face != 3u);
+    color *= mix(1.0, 0.86 + 0.14 * bevel + topEdge * 0.08, painterly * 0.85);
   }
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.

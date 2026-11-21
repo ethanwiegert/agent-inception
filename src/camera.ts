@@ -8,14 +8,16 @@ const DAMP = 10;
 const css = `
 .ai-cam{position:fixed;right:calc(12px + env(safe-area-inset-right));
   bottom:calc(12px + env(safe-area-inset-bottom));display:flex;gap:6px;align-items:center;
-  font:600 13px/1 ui-sans-serif,system-ui;user-select:none;-webkit-user-select:none}
-.ai-cam button{width:32px;height:32px;border-radius:999px;border:1px solid rgba(255,255,255,.18);
-  background:rgba(10,14,18,.55);color:#fff;cursor:pointer;font:inherit;padding:0;
+  font:600 13px/1 ui-sans-serif,system-ui;user-select:none;-webkit-user-select:none;z-index:5}
+.ai-cam button{width:34px;height:34px;border-radius:10px;border:1px solid rgba(255,246,228,.28);
+  background:rgba(24,22,30,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  color:#faf4e8;cursor:pointer;font:inherit;padding:0;
+  box-shadow:0 2px 10px rgba(0,0,0,.22);transition:background .15s,border-color .15s;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation}
-@media (hover:hover){.ai-cam button:hover{background:rgba(10,14,18,.8)}}
+@media (hover:hover){.ai-cam button:hover{background:rgba(36,33,46,.78);border-color:rgba(255,244,218,.52)}}
 @media (pointer:coarse){.ai-cam{gap:8px}.ai-cam button{width:42px;height:42px;font-size:16px}}
-.ai-cam button.on{border-color:#9fd36b;background:rgba(20,40,16,.8)}
-.ai-cam .needle{display:inline-block;transition:none;color:#e58b7a}
+.ai-cam button.on{border-color:#b8df90;background:rgba(36,58,36,.78)}
+.ai-cam .needle{display:inline-block;transition:none;color:#f09c8a}
 `;
 
 /**

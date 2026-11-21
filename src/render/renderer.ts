@@ -11,6 +11,7 @@ import type { AgentView, AnimalView, BodyPose } from "../simclient.ts";
 import { BodyModels, buildBodies } from "./body.ts";
 import { CropRenderer } from "./crops.ts";
 import { AmbientOcclusion, type AoTargets } from "./ao.ts";
+import { FloatseeDecals } from "./decals.ts";
 import { DepthDown } from "./depthdown.ts";
 import { FieldMap } from "./fieldmap.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels, type FishModel } from "./fauna.ts";
@@ -143,6 +144,7 @@ export class Renderer {
   private models: ModelRenderer;
   private bodyModels: BodyModels;
   private bodies = new ModelBatch(new InstanceBatch());
+  private decals: FloatseeDecals;
   private floraModels: FloraModels;
   private faunaModels: FaunaModels;
   private fishModels: FishModel[];
@@ -280,6 +282,7 @@ export class Renderer {
     this.faunaModels = new FaunaModels(this.library);
     this.fishModels = defineFishModels(this.library);
     this.models = new ModelRenderer(device, this.layouts, this.library);
+    this.decals = new FloatseeDecals(device, this.layouts);
     this.crops = new CropRenderer(device, this.layouts);
     this.particles = new ParticleRenderer(device, this.layouts);
     this.life = new LifeRenderer(device, this.surface, this.layouts);
@@ -302,6 +305,7 @@ export class Renderer {
     this.water.destroy();
     this.lightField.destroy();
     this.models.destroy();
+    this.decals.destroy();
     this.bodies.destroy();
     this.flora.destroy();
     this.groundCover.destroy();
@@ -332,12 +336,14 @@ export class Renderer {
     this.cropLooks.update(scene.crops, scene.cropsVersion, scene.catalog);
     this.crops.update(this.cropLooks.blades, this.cropLooks.version);
     this.bodies.instances.clear();
+    this.decals.clear();
     buildBodies(
       scene.agents,
       time,
       this.bodies.instances,
       this.bodyModels,
       scene.catalog,
+      this.decals,
     );
     buildAnimals(scene.animals, time, this.bodies.instances, this.faunaModels, scene.catalog);
     buildFish(scene.schools, this.world, time, this.bodies.instances, this.fishModels);
@@ -345,6 +351,7 @@ export class Renderer {
       buildObjects(scene.objects, scene.bodies, this.bodies.instances, this.floraModels);
     }
     this.models.upload(this.bodies);
+    this.decals.upload();
     this.updateFlora(scene, time);
     this.particles.update(
       scene.objects,
@@ -486,7 +493,10 @@ export class Renderer {
       });
       main.setBindGroup(0, this.frameBindGroup);
       if (!skip.has("terrain")) this.terrain.draw(main, this.planes);
-      if (!skip.has("bodies")) this.models.draw(main, this.bodies);
+      if (!skip.has("bodies")) {
+        this.models.draw(main, this.bodies);
+        this.decals.draw(main);
+      }
       if (!skip.has("props")) {
         this.models.draw(main, this.flora);
         this.models.draw(main, this.groundCover);
@@ -520,7 +530,10 @@ export class Renderer {
       });
       opaque.setBindGroup(0, this.frameBindGroup);
       if (!skip.has("terrain")) this.terrain.draw(opaque, this.planes);
-      if (!skip.has("bodies")) this.models.draw(opaque, this.bodies);
+      if (!skip.has("bodies")) {
+        this.models.draw(opaque, this.bodies);
+        this.decals.draw(opaque);
+      }
       if (!skip.has("props")) {
         this.models.draw(opaque, this.flora);
         this.models.draw(opaque, this.groundCover);
