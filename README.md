@@ -15,11 +15,12 @@ on. As agents get better, the world gets richer.
 
 <p align="center">
   <a href="docs/media/demo.mp4">
-    <img src="docs/media/demo.webp" width="720" alt="Three villagers, Fern, Bramble and Juniper, harvest golden wheat in a meadow; the camera rises over the island as the sun sets">
+    <img src="docs/media/demo.webp" width="720" alt="Six customized Floatsee villagers gather beside a spinning wooden windmill and campfire; Pip launches a wooden hand cart that sends Bramble tumbling with an angry glowing expression before sunset lanterns light up the twilight village">
   </a>
   <br>
-  <sub>Fern, Bramble and Juniper bring in the wheat on seed 7, then dusk falls on the island.
-  Rendered in-game; <a href="docs/media/demo.mp4">MP4</a>.</sub>
+  <sub>Pip fires a custom Catalog physics rule that sends a wooden hand cart straight into Bramble
+  beside Ember's spinning windmill, then dusk lanterns light up the village. Rendered in-game;
+  <a href="docs/media/demo.mp4">MP4</a>.</sub>
 </p>
 
 > per-world agent links, world slots and versioned saves. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -46,7 +47,8 @@ on. As agents get better, the world gets richer.
   from camp to hamlet to village, unlocking Parts and Materials. One switch turns it into a Sandbox
   with everything open.
 - **Spectators get a say.** Pin Wishes on the Notice Board (suggestions, never orders), steer the
-  time, weather and look, and listen to synthesized positional sound.
+  time of day and playback speed, and listen to synthesized positional sound as weather shifts each
+  day.
 - **Behavior as data.** Rules are validated JSON trees (trigger → conditions → effects) running
   under a step budget. Agents ship no code.
 - **Custom and fast.** Zero runtime dependencies: our own WebGPU renderer, deterministic sim,
@@ -213,9 +215,9 @@ SID=$(curl -si $M $H -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":
 curl -s $M $H -H "mcp-session-id: $SID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"join","arguments":{"name":"Fern"}}}'
 ```
 
-Watching: click a name tag to follow a villager. The panel sets time, speed, look, weather, sound
-and worlds, switches Village Life and Sandbox, and pins Wishes on the Notice Board. URL params work
-too, e.g. `?seed=7&time=0.62&look=storybook` (a new seed starts a new world in a free slot).
+Watching: click a name tag to follow a villager. The panel sets time, speed, sound and worlds,
+switches Village Life and Sandbox, and pins Wishes on the Notice Board. URL params work too, e.g.
+`?seed=7&time=0.62` (a new seed starts a new world in a free slot).
 
 ## How it works
 

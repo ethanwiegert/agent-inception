@@ -95,18 +95,17 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
       if (i32(s.r) - i32(n.r) <= 1 && u32(floor(world.y)) == s.r) { return green * 0.92; }
       let wave = valueNoise(vec2f(uv.x * 3.2, floor(world.y) * 2.1)) * 0.65 +
         valueNoise(vec2f(uv.x * 7.5 + 3.1, floor(world.y) * 1.3)) * 0.35;
-      let cutoff = mix(0.78 + 0.1 * hash21(floor(world.xz * 4.0 + world.y)), 0.58 + 0.22 * wave, painterly);
-      let fringe = smoothstep(cutoff - 0.045 * painterly, cutoff + 0.02, fract(world.y));
+      let cutoff = mix(0.78 + 0.1 * hash21(floor(world.xz * 4.0 + world.y)), 0.66 + 0.16 * wave, painterly);
+      let fringe = smoothstep(cutoff - 0.05 * painterly, cutoff + 0.02, fract(world.y));
       // Hand-carved mossy stone blocks & warm terracotta earth underneath the moss cap (mockup 01/02/06).
       let row = floor(uv.y * 2.0);
       let bu = uv.x * 1.5 + row * 0.45;
-      let seam = max(smoothstep(0.08, 0.0, abs(fract(uv.y * 2.0) - 0.5) * 2.0), 0.0);
-      let vSeam = smoothstep(0.07, 0.0, fract(bu));
-      let hSeam = smoothstep(0.09, 0.0, fract(uv.y * 2.0));
-      let mortar = max(hSeam, vSeam) * (1.0 - seam * 0.3);
-      let stoneTone = 0.82 + 0.24 * hash21(vec2f(floor(bu), row));
-      let carvedStone = vec3f(0.28, 0.24, 0.18) * stoneTone * dirtTone(uv) * (1.0 - 0.36 * mortar);
-      let earth = mix(vec3f(0.2, 0.11, 0.055) * dirtTone(uv), carvedStone, painterly * 0.82);
+      let vSeam = smoothstep(0.06, 0.0, fract(bu));
+      let hSeam = smoothstep(0.08, 0.0, fract(uv.y * 2.0));
+      let mortar = max(hSeam, vSeam);
+      let stoneTone = 0.86 + 0.2 * hash21(vec2f(floor(bu), row));
+      let carvedStone = vec3f(0.32, 0.27, 0.2) * stoneTone * dirtTone(uv) * (1.0 - 0.28 * mortar);
+      let earth = mix(vec3f(0.2, 0.11, 0.055) * dirtTone(uv), carvedStone, painterly * 0.85);
       // Soft dark moss shadow lip directly beneath the scalloped overhang.
       let lipShadow = smoothstep(cutoff - 0.14, cutoff - 0.02, fract(world.y)) * (1.0 - fringe) * painterly;
       let mossCap = mix(green * 0.92, meadowColor(frame.grassTip.rgb, world.xz) * 0.95, smoothstep(cutoff, 1.0, fract(world.y)) * 0.55);
