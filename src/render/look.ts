@@ -31,12 +31,12 @@ export const LOOKS: Record<string, Look> = {
   miniature: {
     name: "Miniature",
     // Hard-set painterly miniature look: 5A sunlit botanical day -> 06 golden dusk -> 5B glowing twilight.
-    grassBase: [0.072, 0.148, 0.044],
-    grassTip: [0.22, 0.34, 0.082],
-    bladeHeight: 0.25,
-    bladeWidth: 0.095,
+    grassBase: [0.046, 0.126, 0.053],
+    grassTip: [0.177, 0.31, 0.098],
+    bladeHeight: 0.32,
+    bladeWidth: 0.063,
     bladesPerBlock: 56,
-    flowerChance: 0.048,
+    flowerChance: 0.014,
     aoStrength: 0.92,
     edgeDarken: 0.11,
     saturation: 1.04,

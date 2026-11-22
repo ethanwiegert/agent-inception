@@ -146,7 +146,8 @@ function meshPart(
   const k = isLeaves ? 0.84 + hash2(index, 7, 31) * 0.32 : 1;
   const base = override ?? materialRgb(mat.color);
   const bend = top ? Math.max(0, Math.min(1, 1 - mat.hardness / 4)) : 0;
-  const lo = Math.max(0, (p.at[1] - sy / 2) / top), hi = Math.min(1, (p.at[1] + sy / 2) / top);
+  const lo = top ? Math.max(0, (p.at[1] - sy / 2) / top) : 0;
+  const hi = top ? Math.min(1, (p.at[1] + sy / 2) / top) : 1;
   const mid = (lo + hi) * 0.5;
   const leafR = isLeaves ? 0.78 + mid * 0.46 : 1;
   const leafG = isLeaves ? 0.88 + mid * 0.3 : 1;
@@ -158,6 +159,7 @@ function meshPart(
     // A crown gradient: darker toward the trunk and underside, lighter outside and on top.
     ao: lumpy ? 0.5 : rocky ? 0.3 : 0.25,
     jitter: isLeaves ? 0.1 : mat.pattern === "log" ? 0.08 : lumpy ? 0.06 : rocky ? 0.08 : 0,
+    pattern: mat.pattern,
     grain: gr.grain,
     grainScale: gr.scale,
     // Per-Material roughness guess (no Catalog field): patterned stuff keeps its matte or slight

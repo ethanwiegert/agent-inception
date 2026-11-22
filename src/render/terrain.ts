@@ -2,12 +2,13 @@ import { type BlockRegistry, MAX_BLOCKS, Pattern } from "../sim/blocks.ts";
 import { CHUNK, World } from "../sim/world.ts";
 import { aabbVisible } from "../math.ts";
 import { frameWgsl, lightingWgsl } from "./frame.ts";
+import { materialWgsl } from "./materials.ts";
 import { meshChunk } from "./mesher.ts";
 import { grassWeightWgsl, type SurfaceTexture } from "./surface.ts";
 import type { Layouts } from "./renderer.ts";
 
 const P = Pattern;
-const shader = frameWgsl + lightingWgsl + grassWeightWgsl + /* wgsl */ `
+const shader = frameWgsl + lightingWgsl + materialWgsl + grassWeightWgsl + /* wgsl */ `
 @group(1) @binding(0) var<storage, read> chunkOrigins: array<vec4f>;
 /** Per block id: linear rgb, pattern index + glow (its fraction, 0-0.99). */
 @group(1) @binding(1) var<storage, read> blockInfo: array<vec4f, ${MAX_BLOCKS}>;
@@ -75,17 +76,13 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
       let shoreLush = smoothstep(0.64, 0.52, fieldAt(world.xz).y);
       green = mix(green, green * vec3f(0.82, 1.07, 0.9), shoreLush * 0.7);
       if (face == 2u) {
-        // Velvety painterly moss mottling (warm sunlit olive-gold pockets + cool sage patches).
-        let blotch = valueNoise(world.xz * 0.65 + 11.3);
-        let micro = valueNoise(world.xz * 3.8 + 4.7);
-        let warmMoss = meadowColor(frame.grassTip.rgb, world.xz) * 0.84;
-        let velvety = mix(green * (0.9 + 0.16 * micro), warmMoss, smoothstep(0.38, 0.78, blotch) * 0.52);
-        let nearCol = mix(green, velvety, painterly);
-        // Past the blades' reach the ground stands in for them: fade from shaded roots to the
-        // canopy's color so the edge of the grass doesn't show as a darker band on far hills.
-        let far = smoothstep(frame.grass.w * 0.55, frame.grass.w, distance(world.xz, frame.grassCenter.xy));
-        let canopy = mix(nearCol, meadowColor(frame.grassTip.rgb, world.xz) * 0.84, 0.5);
-        return mix(nearCol, canopy, far);
+        // Broad swaths of growth persist at island scale while the mipmapped turf below
+        // resolves individual brushstrokes between the blades.
+        let growth = valueNoise(world.xz * 0.28 + 11.3);
+        let flow = valueNoise(world.xz * vec2f(0.32, 0.77) + growth * 1.8);
+        let tip = meadowColor(frame.grassTip.rgb, world.xz);
+        return mix(green * (0.83 + 0.16 * flow), tip * vec3f(0.9, 0.95, 0.86),
+          0.14 + 0.5 * smoothstep(0.26, 0.78, growth * 0.7 + flow * 0.3));
       }
       // Side faces: thick scalloped mossy overhang draping over hand-carved diorama stone & warm earth!
       let outward = vec2i(faceNormalXZ(face));
@@ -222,26 +219,6 @@ fn patternRough(pattern: u32) -> f32 {
   }
 }
 
-/** Perturb the face normal by the screen-space gradient of the pattern's height field (classic
- * derivative bump mapping), fading out before the relief would shimmer at a distance. */
-fn bumpNormal(n: vec3f, world: vec3f, h: f32) -> vec3f {
-  // Derivatives must all run in uniform control flow, so every dpdx/dpdy comes first.
-  let dpx = dpdx(world);
-  let dpy = dpdy(world);
-  let dhx = dpdx(h);
-  let dhy = dpdy(h);
-  let foot = max(length(dpx), length(dpy));
-  let fade = 1.0 - smoothstep(0.2, 0.9, foot);
-  let t0 = dpx - n * dot(n, dpx);
-  let tl = max(length(t0), 1e-4);
-  let t = t0 / tl;
-  let b = cross(n, t);
-  let hx = dhx / tl;
-  let hy = dhy / max(length(dpy), 1e-4);
-  let bumped = normalize(n - (t * hx + b * hy) * 0.4 * fade);
-  return select(bumped, n, fade <= 0.0 || length(t0) < 1e-5);
-}
-
 /**
  * Natural ground tops blend across material edges along organic boundaries rather than block
  * steps: grass by the same edge the grass blades use, so meadow and beach meet in curves; other
@@ -310,7 +287,11 @@ fn wetness(world: vec3f) -> f32 {
     (1.0 - pusherShade(in.world.xz) * 0.4);
   let pattern = u32(info.w);
   let h = patternHeight(pattern, in.world, in.face);
-  let n2 = bumpNormal(n, in.world, h);
+  let uv = faceUV(in.world, in.face) * 0.92;
+  let grain = textureSample(grainTiles, grainSampler, uv, pattern).r;
+  albedo *= 1.0 + (grain - 0.5) * vec3f(0.96, 0.82, 0.66);
+  let footprint = max(length(dpdx(in.world)), length(dpdy(in.world)));
+  let n2 = reliefNormal(n, in.world, (h - 0.5) * 0.16 * (1.0 - smoothstep(0.2, 0.9, footprint)) + grain * 0.018);
   var color = shade(albedo, n2, in.world, ao, 0.0) +
     selfLit(albedo * fract(info.w) * EMISSIVE * mix(1.0, 1.8, frame.extra.x));
 

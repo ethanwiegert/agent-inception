@@ -13,6 +13,7 @@ import { CropRenderer } from "./crops.ts";
 import { AmbientOcclusion, type AoTargets } from "./ao.ts";
 import { FloatseeDecals } from "./decals.ts";
 import { DepthDown } from "./depthdown.ts";
+import { createMaterialTexture } from "./materials.ts";
 import { FieldMap } from "./fieldmap.ts";
 import { buildAnimals, buildFish, defineFishModels, FaunaModels, type FishModel } from "./fauna.ts";
 import { anyGrowing, buildObjects, buildProps, CropLooks, FloraModels } from "./flora.ts";
@@ -133,6 +134,7 @@ export class Renderer {
   private terrain: TerrainRenderer;
   private grass: GrassRenderer;
   private surface: SurfaceTexture;
+  private materialTexture: GPUTexture;
   private fieldmap: FieldMap;
   private water: WaterRenderer;
   private planes = new Float32Array(24);
@@ -189,6 +191,12 @@ export class Renderer {
           // The field map: sky occlusion and shore distance per world column (fieldmap.ts).
           { binding: 5, visibility: VF, texture: { sampleType: "float" } },
           { binding: 6, visibility: VF, sampler: { type: "filtering" } },
+          {
+            binding: 7,
+            visibility: GPUShaderStage.FRAGMENT,
+            texture: { viewDimension: "2d-array" },
+          },
+          { binding: 8, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
         ],
       }),
       shadowFrame: device.createBindGroupLayout({
@@ -243,6 +251,7 @@ export class Renderer {
     });
     this.lightField = new LightTexture(device, world);
     this.fieldmap = new FieldMap(device, world);
+    this.materialTexture = createMaterialTexture(device);
     this.frameBindGroup = device.createBindGroup({
       layout: this.layouts.frame,
       entries: [
@@ -253,6 +262,17 @@ export class Renderer {
         { binding: 4, resource: this.lightField.sampler },
         { binding: 5, resource: this.fieldmap.view },
         { binding: 6, resource: this.fieldmap.sampler },
+        { binding: 7, resource: this.materialTexture.createView({ dimension: "2d-array" }) },
+        {
+          binding: 8,
+          resource: device.createSampler({
+            addressModeU: "repeat",
+            addressModeV: "repeat",
+            magFilter: "linear",
+            minFilter: "linear",
+            mipmapFilter: "linear",
+          }),
+        },
       ],
     });
     this.plainFrameBindGroup = device.createBindGroup({
@@ -300,6 +320,7 @@ export class Renderer {
     this.shot?.buffer.destroy();
     this.surface.destroy();
     this.fieldmap.destroy();
+    this.materialTexture.destroy();
     this.terrain.destroy();
     this.grass.destroy();
     this.water.destroy();
@@ -378,32 +399,31 @@ export class Renderer {
     this.updateLight(camera.target, camera.distance);
     frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
 
-    // Carry the meadow to the wider lens's edges instead of exposing a bare-ground band.
-    // The baseline radius covered the old 0.55 rad FOV; scale its reach, not its near density.
-    const fovReach = Math.tan(camera.fovY * 0.5) / Math.tan(0.55 * 0.5);
-    const radius = Math.round(Math.min(72, Math.max(20, camera.distance * 0.85 * fovReach)));
-    fd[F.grass + 3] = radius;
-    fd[F.wind + 3] = fovReach;
     const density = Math.min(1, Math.max(0.05, this.grassDensity));
     const bladesPerBlock = Math.max(1, Math.round(look.bladesPerBlock * density));
     fd[F.grass + 1] *= Math.sqrt(look.bladesPerBlock / bladesPerBlock);
     fd[F.grass + 2] = bladesPerBlock;
-    fd[F.grassCenter] = Math.floor(camera.target[0]);
-    fd[F.grassCenter + 1] = Math.floor(camera.target[2]);
+    fd[F.grassCenter] = Math.floor(camera.eye[0]);
+    fd[F.grassCenter + 1] = Math.floor(camera.eye[2]);
     fd[F.grassCenter + 2] = camera.worldSize[0];
     fd[F.grassCenter + 3] = camera.worldSize[1];
     fd[F.depthParams] = 0.5; // camera near (camera.ts perspective)
     fd[F.depthParams + 1] = 4000; // camera far
     fd[F.depthParams + 2] = 1 / targets.width;
     fd[F.depthParams + 3] = 1 / targets.height;
+    const blades = GrassRenderer.candidates(
+      fd,
+      camera.worldSize[0],
+      camera.worldSize[1],
+      bladesPerBlock,
+    );
+    this.stats.grassBlades = blades;
     this.fillPushers(fd, scene, camera.target);
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
     // The far shadow pass reads lightViewProj too: give it a copy carrying the wide matrix.
     this.farFrameData.set(fd);
     this.farFrameData.copyWithin(F.lightViewProj, F.lightViewProj1, F.lightViewProj1 + 16);
     device.queue.writeBuffer(this.farFrameBuffer, 0, this.farFrameData);
-    const blades = GrassRenderer.instanceCount(radius, bladesPerBlock, fovReach);
-    this.stats.grassBlades = blades;
 
     const encoder = device.createCommandEncoder();
     // The GPU timer's start stamp goes on the frame's first pass, whatever it turns out to be

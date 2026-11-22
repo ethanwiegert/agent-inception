@@ -35,6 +35,8 @@ struct Out {
   @location(0) world: vec3f,
   @location(1) color: vec3f,
   @location(2) t: f32,
+  @location(3) across: f32,
+  @location(4) ripe: f32,
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
@@ -92,11 +94,17 @@ struct Out {
   out.world = p;
   out.color = color * mix(1.0, field.x, 0.7) * (1.0 - press * 0.2);
   out.t = t;
+  out.ripe = ripe;
+  out.across = sideSign * 2.0;
   return out;
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let c = shade(in.color, vec3f(0.0, 1.0, 0.0), in.world, 1.0, 0.5);
+  // Alternating kernels inside each ripe ear; the green stalk has a lighter central rib.
+  let kernels = sin(in.t * 84.0 + in.across * 3.8) * 0.14 * in.ripe * smoothstep(0.6, 0.8, in.t);
+  let detail = 1.0 - smoothstep(0.25, 0.95, fwidth(in.across));
+  let rib = 0.16 * (1.0 - smoothstep(0.05, 0.38, abs(in.across)));
+  let c = shade(in.color * (1.0 + (rib + kernels) * detail), vec3f(0.0, 1.0, 0.0), in.world, 1.0, 0.5);
   return vec4f(fog(c, in.world), 1.0);
 }
 `;

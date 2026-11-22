@@ -198,7 +198,13 @@ function buildPictureFrame(
   const base = () => rotateX(translate(identity(m), 0, 0.36, z), tiltX);
   const border = 0.032;
   const depth = 0.036;
-  const wood = { color: FRAME_WOOD, rough: 0.72, grain: 0.14, grainScale: [12, 6, 12] as const };
+  const wood = {
+    pattern: "planks" as const,
+    color: FRAME_WOOD,
+    rough: 0.72,
+    grain: 0.14,
+    grainScale: [12, 6, 12] as const,
+  };
   const trim = { color: mixRgb(FRAME_GOLD, accent, 0.2), rough: 0.45 };
   const back = { color: [0.22, 0.15, 0.1] as Rgb, rough: 0.85 };
 
@@ -254,7 +260,10 @@ export class BodyModels {
     const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
     this.cube = lib.define("cube", (b) => b.box(null, [1, 1, 1], { color: WHITE }));
     this.hoe = lib.define("tool.hoe", (b) => {
-      b.cylinder(rotateX(at(0, -0.34, -0.05), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD }, {
+      b.cylinder(rotateX(at(0, -0.34, -0.05), Math.PI / 2), 0.03, 0.03, 0.78, {
+        pattern: "log",
+        color: WOOD,
+      }, {
         segments: 12,
       });
       b.box(at(0, -0.44, 0.71), [0.2, 0.22, 0.04], { color: IRON }, 0.01);
@@ -266,7 +275,7 @@ export class BodyModels {
         0.022,
         0.01,
         1.6,
-        { color: WOOD, sway: [0, 0.3] },
+        { pattern: "log", color: WOOD, sway: [0, 0.3] },
         { segments: 10 },
       );
       b.cylinder(rotateX(at(0, -1.28, 1.28), -1.845), 0.004, 0.004, 1.3, {
@@ -277,7 +286,10 @@ export class BodyModels {
       }, { detail: 1 });
     });
     this.hammer = lib.define("tool.hammer", (b) => {
-      b.cylinder(rotateX(at(0, -0.34, -0.05), Math.PI / 2), 0.03, 0.03, 0.78, { color: WOOD }, {
+      b.cylinder(rotateX(at(0, -0.34, -0.05), Math.PI / 2), 0.03, 0.03, 0.78, {
+        pattern: "log",
+        color: WOOD,
+      }, {
         segments: 12,
       });
       b.box(at(0, -0.34, 0.69), [0.16, 0.16, 0.12], { color: IRON }, 0.02);
@@ -328,8 +340,9 @@ export class BodyModels {
     const footColor = mixRgb(primary, accent, 0.55);
 
     const cloakStyle = {
+      pattern: "woven" as const,
       color: primary,
-      rough: 0.46,
+      rough: 0.84,
       grain: 0.08,
       grainScale: [6, 6, 6] as const,
       ao: 0.24,
