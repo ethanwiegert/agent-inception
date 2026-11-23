@@ -17,17 +17,22 @@ import {
 import { Fire, type FireSave } from "./fire.ts";
 import { type School, schoolFits, spawnSchools, stepSchools } from "./fish.ts";
 import { daylight, LightField, lightSources } from "./light.ts";
-import { perlin2 } from "./noise.ts";
 import { Objects, type WorldObject } from "./objects.ts";
 import { levelAt, standY, step as stepTo } from "./path.ts";
 import { foldPieces, type Mover, Physics, quatMul, yawQuat as yawQuatOf } from "./physics.ts";
 import { type PropDiff, Props } from "./props.ts";
-import { Rng } from "./rng.ts";
+import { hash2, Rng } from "./rng.ts";
 import { type RuleCtx, type RuleEvent, Rules, type RuleStat } from "./rules.ts";
 import { Signals } from "./signals.ts";
 import { TICK_HZ, TICKS_PER_DAY } from "./time.ts";
 import { Village, type VillageSave } from "./village.ts";
 import { Board, type BoardSave } from "./board.ts";
+import {
+  defaultFloatsee,
+  type Expression,
+  type FloatseeAppearance,
+  sanitizeFloatsee,
+} from "./floatsee.ts";
 import { SAVE_VERSION, worldName } from "./save.ts";
 import { Block, World } from "./world.ts";
 import { generateWorld } from "./worldgen.ts";
@@ -85,8 +90,16 @@ export interface Agent {
   stride: number;
   inventory: Record<string, number>;
   journal: string[];
-  /** The Design this villager looks like; null means the default farmer, in their own tints. */
+  /** The Design this villager looks like; null means their customizable Floatsee body. */
   body: number | null;
+  /** Custom Floatsee look: head shape, color scheme, front/back graphic tee, custom expressions. */
+  floatsee: FloatseeAppearance;
+  /** Active expression (happy, sad, angry, excited), set manually or by gameplay reactions. */
+  expression: Expression;
+  /** Default ambient expression chosen on join (falls back to "happy"). */
+  baseExpression?: Expression;
+  /** Tick when the temporary expression override expires back to ambient/needs mood. */
+  expressionUntil?: number;
   /** Last tick this villager called a tool; villagers active within a game day vote. */
   lastActive: number;
   /** Ticks of recent Catalog entries this villager added (rate limit). */
@@ -227,6 +240,7 @@ export class Sim {
   weatherOverride: { clouds: number; until: number } | null = null;
   agentsVersion = 0;
   readonly rng: Rng;
+  private readonly extraAnimalRng: Rng;
   /** Light from lamps, flames, fire and glowing blocks (daylight is worked out on its own). */
   readonly light: LightField;
   /** Block indices of glowing blocks (only villagers' blocks glow, so they're all edits). */
@@ -254,6 +268,7 @@ export class Sim {
     this.animals = spawnAnimals(this.world, seed);
     this.schools = spawnSchools(this.world, seed);
     this.rng = new Rng(seed ^ 0x5eed);
+    this.extraAnimalRng = new Rng(seed ^ 0x62756e79);
     this.light = new LightField(this.world);
   }
 
@@ -271,8 +286,8 @@ export class Sim {
   }
 
   /**
-   * Cloud cover 0-1: slow natural drift over the days unless a spectator holds the weather, or an
-   * agent's Rule set it for a while.
+   * Cloud cover 0-1: random per game day (deterministically from world seed + day) with a soft
+   * transition at each new day, unless a Rule temporarily overrides it.
    */
   clouds(): number {
     if (this.spectatorClouds !== null) return this.spectatorClouds;
@@ -280,7 +295,23 @@ export class Sim {
       return this.weatherOverride.clouds;
     }
     const days = (this.tick + this.dayOffset) / TICKS_PER_DAY;
-    return Math.min(1, Math.max(0, 0.35 + perlin2(days * 1.7, 0.5, this.seed + 3) * 0.9));
+    const dayIdx = Math.floor(days);
+    const frac = days - dayIdx;
+    const forDay = (d: number) => {
+      // Weighted daily weather bands: crisp clear, light sun-clouds, partly cloudy, cloudy, overcast.
+      const r = hash2(d, this.seed, 9137);
+      if (r < 0.28) return 0.05 + (r / 0.28) * 0.1;
+      if (r < 0.56) return 0.18 + ((r - 0.28) / 0.28) * 0.16;
+      if (r < 0.78) return 0.38 + ((r - 0.56) / 0.22) * 0.2;
+      if (r < 0.92) return 0.64 + ((r - 0.78) / 0.14) * 0.18;
+      return 0.85 + ((r - 0.92) / 0.08) * 0.13;
+    };
+    const today = forDay(dayIdx);
+    if (frac >= 0.08) return today;
+    const prev = forDay(dayIdx - 1);
+    const t = frac / 0.08;
+    const blend = t * t * (3 - 2 * t);
+    return prev + (today - prev) * blend;
   }
 
   /** A spectator holds the sky at `clouds` (0-1), or lets the weather drift again (null). */
@@ -347,6 +378,8 @@ export class Sim {
       inventory: this.starterKit(),
       journal: [],
       body: null,
+      floatsee: defaultFloatsee(this.agents.length),
+      expression: "happy",
       lastActive: this.tick,
       authored: [],
       notes: [],
@@ -427,6 +460,7 @@ export class Sim {
     const kit = inventoryOf({});
     const kitList: [string, number][] = [
       ["wheat seeds", 16],
+      ["turnip seeds", 8],
       ["oak sapling", 1],
       ["birch sapling", 1],
       ["pine sapling", 1],
@@ -436,6 +470,28 @@ export class Sim {
       if (name) kit[name] = (kit[name] ?? 0) + n;
     }
     return kit;
+  }
+
+  /** Set a Floatsee's temporary expression for `ticks` ticks (0 clears the temporary override). */
+  setExpression(agent: Agent, expression: Expression, ticks: number) {
+    agent.expression = expression;
+    agent.expressionUntil = ticks > 0 ? this.tick + ticks : undefined;
+  }
+
+  /** Current mood shown on a Floatsee's face: explicit/recent reaction, knockdown, needs, or base. */
+  effectiveExpression(agent: Agent): Expression {
+    if (agent.expressionUntil !== undefined && this.tick < agent.expressionUntil) {
+      return agent.expression;
+    }
+    if (
+      agent.anim === Anim.Fall || (agent.downUntil !== undefined && this.tick < agent.downUntil)
+    ) {
+      return "angry";
+    }
+    if (this.village.life && (agent.fed < 0.3 || agent.rested < 0.3)) {
+      return "sad";
+    }
+    return agent.baseExpression ?? "happy";
   }
 
   /** Materials that are food for each species (`is_food_for` its Design), per Catalog version. */
@@ -466,6 +522,13 @@ export class Sim {
 
   /** A villager did something Rules can listen for, at block (x, y, z). */
   fire(event: RuleEvent, agent: Agent | null, x: number, y: number, z: number, what: string) {
+    if (agent) {
+      if (event === "harvested" || event === "caught" || event === "built" || event === "ate") {
+        this.setExpression(agent, "excited", TICK_HZ * 12);
+      } else if (event === "slept") {
+        this.setExpression(agent, "happy", TICK_HZ * 10);
+      }
+    }
     const ctx: RuleCtx = { agent, x, y, z, what };
     this.rules.fire(event, ctx);
     this.village.onEvent(event, agent, what);
@@ -729,6 +792,7 @@ export class Sim {
     agent.graceUntil = this.tick + DOWN_TICKS + GRACE_TICKS;
     agent.knock = [h.nx, h.nz];
     agent.anim = Anim.Fall;
+    this.setExpression(agent, "angry", TICK_HZ * 15);
     const held = this.carried(agent);
     if (held) this.release(agent, held);
     const by = o.mover
@@ -754,7 +818,15 @@ export class Sim {
       });
     });
     const t = this.timeOfDay();
-    stepAnimals(this.animals, this.world, this.rng, f, t < 0.2 || t > 0.86, TICK_HZ);
+    stepAnimals(
+      this.animals,
+      this.world,
+      this.rng,
+      f,
+      t < 0.2 || t > 0.86,
+      TICK_HZ,
+      this.extraAnimalRng,
+    );
   }
 
   /** Spread arrivals around the world center on flat grass. */
@@ -852,6 +924,8 @@ export class Sim {
         ...agent,
         inventory: inventoryOf(agent.inventory),
         body: agent.body ?? null,
+        floatsee: sanitizeFloatsee(agent.floatsee, agent.color ?? sim.agents.length),
+        expression: agent.expression ?? "happy",
         lastActive: agent.lastActive ?? 0,
         authored: agent.authored ?? [],
         fed: agent.fed ?? 1,

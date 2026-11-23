@@ -1,3 +1,4 @@
+import { materialWgsl } from "./materials.ts";
 import type { Vec3 } from "../math.ts";
 import { frameWgsl, lightingWgsl } from "./frame.ts";
 import {
@@ -20,7 +21,7 @@ import type { Layouts } from "./renderer.ts";
  * and writes the indirect draw arguments, so neither the view nor the shadow map draws what it
  * can't see.
  */
-const shader = frameWgsl + lightingWgsl + /* wgsl */ `
+const shader = frameWgsl + lightingWgsl + materialWgsl + /* wgsl */ `
 struct Instance { model: mat4x4f, tint: vec4f };
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
 /** x: distance beyond which instances aren't drawn (0 = always), y: fade band width. */
@@ -43,6 +44,9 @@ struct Out {
   @location(4) leaf: f32,
   /** Surface roughness, from the Material's pattern (metal and glass glint, wood doesn't). */
   @location(5) rough: f32,
+  @location(6) local: vec3f,
+  @location(7) localNormal: vec3f,
+  @location(8) @interpolate(flat) pattern: u32,
 };
 
 /** Wind sway: a slow lean with the gusts plus a quick flutter, scaled by how loose a vertex is. */
@@ -84,7 +88,8 @@ fn place(v: VIn, ii: u32) -> vec3f {
   // Glow: positive always; negative only while the instance's lights are on (tint.a >= 0).
   let g = v.normal.w;
   let glow = select(max(-g, 0.0) * step(0.0, inst.tint.a), g, g > 0.0);
-  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0), v.surf.x);
+  return Out(clip, world, n, albedo, glow, clamp(v.color.a * inst.tint.a, 0.0, 1.0), v.surf.x,
+    v.pos, v.normal.xyz, u32(round(v.surf.y * 255.0)));
 }
 
 @vertex fn vsShadow(v: VIn, @builtin(instance_index) ii: u32) -> @builtin(position) vec4f {
@@ -92,9 +97,19 @@ fn place(v: VIn, ii: u32) -> vec3f {
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let n = normalize(in.normal);
+  // Triplanar in the undeformed mesh so paint follows rig motion and wind. World-scale
+  // templates share the same brush size regardless of their primitive tessellation.
+  let p = in.local * 0.92;
+  let sides = pow(abs(in.localNormal), vec3f(4.0));
+  let weights = sides / max(dot(sides, vec3f(1.0)), 1e-5);
+  let grain = dot(weights, vec3f(
+    textureSample(grainTiles, grainSampler, p.zy, in.pattern).r,
+    textureSample(grainTiles, grainSampler, p.xz, in.pattern).r,
+    textureSample(grainTiles, grainSampler, p.xy, in.pattern).r));
+  let albedo = in.color * (1.0 + (grain - 0.5) * vec3f(0.98, 0.82, 0.7));
+  let n = reliefNormal(normalize(in.normal), in.world, grain * 0.018);
   let view = normalize(frame.cameraPos.xyz - in.world);
-  var c = shade(in.color, n, in.world, 1.0, 0.25) + selfLit(in.color * in.glow * EMISSIVE);
+  var c = shade(albedo, n, in.world, 1.0, 0.25) + selfLit(albedo * in.glow * EMISSIVE);
   // Plants sit in the meadow's pooled shade like the grass does; bodies and props keep theirs.
   if (in.leaf > 0.3) { c *= mix(1.0, fieldAt(in.world.xz).x, 0.5); }
   // The same specular term the terrain's pattern surfaces get: smooth Materials catch the sun,
@@ -107,12 +122,20 @@ fn place(v: VIn, ii: u32) -> vec3f {
     c += skyColor(reflect(-view, n)) * pow(1.0 - max(dot(n, view), 0.0), 5.0) * gloss * 0.5;
   }
   // Sky light grazing the silhouette rounds off low-poly shapes and lifts them off the ground.
-  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), 3.0) * (0.4 + 0.6 * max(n.y, 0.0));
-  c += in.color * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) * frame.sunColor.w * rim * 0.6;
+  let painterly = frame.lookParams.y;
+  let rimPow = mix(3.0, 2.35, painterly);
+  let rim = pow(clamp(1.0 - dot(n, view), 0.0, 1.0), rimPow) * (0.4 + 0.6 * max(n.y, 0.0));
+  c += albedo * mix(frame.skyHorizon.rgb, frame.skyZenith.rgb, max(n.y, 0.0)) *
+    frame.sunColor.w * rim * mix(0.6, 0.92, painterly);
+  // Soft warm painted-ceramic top sheen in Miniature mode (gives figurines their sculptural feel).
+  if (painterly > 0.01 && in.leaf < 0.25) {
+    let upLift = smoothstep(0.15, 0.95, n.y) * (1.0 - in.rough * 0.5) * 0.14 * painterly;
+    c += albedo * mix(vec3f(1.0, 0.94, 0.82), vec3f(0.72, 0.78, 1.0), frame.extra.x) * upLift;
+  }
   // Crowns between the eye and the sun glow: light comes through the leaves.
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;
   if (back > 0.004) {
-    c += in.color * frame.sunColor.rgb * frame.sunDir.w * back * 0.45 * cloudLight(in.world);
+    c += albedo * frame.sunColor.rgb * frame.sunDir.w * back * 0.45 * cloudLight(in.world);
   }
   return vec4f(fog(c, in.world), 1.0);
 }

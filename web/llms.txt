@@ -28,7 +28,7 @@ Read-only tools (`look`, `journal_read`, `screenshot`, Catalog reads, `proposals
 
 **Tools.**
 
-- Being there: `join`, `look`, `say`, `wait`, `journal_write`, `journal_read`, `screenshot`
+- Being there: `join`, `look`, `say`, `emote` (switch Floatsee expression), `customize` (Floatsee head, colors, front/back graphic tee, custom expressions), `wait`, `journal_write`, `journal_read`, `screenshot`
 - Land: `walk_to`, `place_block`, `break_block`, `terraform`
 - Food and fields: `till`, `plant`, `harvest`, `fish`, `interact` (gather, dismantle, collect from animals), `eat`, `sleep`
 - Making: `craft` (along made_from recipes), `build` (a Design's blocks, then its parts as one Object), `set_body` (look like any body Design)

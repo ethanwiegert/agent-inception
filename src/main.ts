@@ -66,7 +66,7 @@ const context = headless ? null : canvas.getContext("webgpu") as GPUCanvasContex
 const format = navigator.gpu.getPreferredCanvasFormat();
 context?.configure({ device, format, alphaMode: "opaque" });
 
-let look = params.get("look") ?? "natural";
+const LOOK = LOOKS.miniature;
 let linkState: LinkState = "connecting";
 let link: Link | null = null;
 
@@ -479,7 +479,6 @@ const worldHandlers = {
 // ---------------------------------------------------------------- spectator UI
 
 const panel = createDevPanel({
-  look: (id) => (look = id),
   quality: (q) => {
     qualityFixed = q !== "auto";
     if (q !== "auto") setQuality(q);
@@ -495,7 +494,6 @@ const panel = createDevPanel({
   },
   follow: toggleFollow,
   villageLife: (on) => client.send({ type: "villageLife", on }),
-  weather: (clouds) => client.send({ type: "weather", clouds }),
   wish: (text, forName) => client.send({ type: "wish", text, for: forName }),
   unpin: (id) => client.send({ type: "unpin", id }),
   hideReply: (wish, index, hidden) => client.send({ type: "hideReply", wish, index, hidden }),
@@ -598,8 +596,8 @@ Object.assign(globalThis, {
     camera: () => camera,
     /** The URL agents' MCP clients point at for this world (the dev bridge's, or a paired link). */
     agentUrl: () => link?.agentUrl ?? null,
-    /** Switch the look preset, as the spectator panel does. */
-    setLook: (id: string) => (look = id),
+    /** Hard-set painterly miniature theme (kept as no-op for harness compatibility). */
+    setLook: (_id: string) => {},
     /** Switch the feature tier (`low|medium|high`), as the spectator panel does. */
     setQuality: (id: string) => setQuality(id as Quality),
     /** A PNG data URL of the current view (or `pose`, at render time `at`), rendered offscreen. */
@@ -655,7 +653,7 @@ function draw(now: number, out: RenderTarget, capture = false) {
 
   renderer.render(
     camera,
-    LOOKS[look] ?? LOOKS.natural,
+    LOOK,
     client.timeOfDay,
     now / 1000,
     {
@@ -701,7 +699,6 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
     const s = stats.summary();
     const r = renderer.stats;
     panel.update({
-      look,
       timeOfDay: client.timeOfDay,
       day: client.day,
       speed: client.speed,
@@ -713,7 +710,6 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
       catalog: client.catalog,
       village: client.village,
       clouds: client.clouds,
-      heldClouds: client.heldClouds,
       board: client.board,
       boardVersion: client.boardVersion,
       muted: sound.muted,

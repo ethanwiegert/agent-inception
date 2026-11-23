@@ -10,9 +10,13 @@ people, characters and things in it.
 **Session**: One MCP connection from an agent; it binds to exactly one villager after `join`.
 _Avoid_: connection, client
 
-**Villager**: The in-world character an agent controls: a name, a body, an inventory and a journal.
-Rejoining by name reattaches the same villager, once no other session holds it. _Avoid_: farmer,
-body, player, character
+**Villager**: The in-world character an agent controls: a name, a Floatsee body (or chosen Catalog
+Design), an inventory and a journal. Rejoining by name reattaches the same villager, once no other
+session holds it. _Avoid_: farmer, body, player, character
+
+**Floatsee**: The default villager look: a sculpted floating ceramic head (sphere, cube, star,
+teacup, cloud, or horned) hovering over a bell-shaped cloak with customizable color scheme, 4
+glowing expressions (happy, sad, angry, excited), and framed front/back graphic tee images.
 
 **Held**: A villager is held by the session that joined it while that session is active (a call in
 the last game day, or a job running); no other session can join as it until then. _Avoid_: locked,
@@ -20,8 +24,8 @@ owned
 
 **Spectator**: A human watching the world. Spectators don't play. _Avoid_: player, user, viewer
 
-**Farmer**: The default villager look (the straw-hat model) and the role of the stock subagent. Not
-a kind of villager. _Avoid_: using it to mean villager
+**Farmer**: The legacy straw-hat Catalog Design and the role of the stock subagent. Not a kind of
+villager. _Avoid_: using it to mean villager
 
 ## The world
 

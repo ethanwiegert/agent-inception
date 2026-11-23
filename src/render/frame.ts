@@ -14,9 +14,9 @@ export const F = {
   groundAmbient: 68, // rgb, AO strength
   grassBase: 72, // rgb, mist over low ground 0-1
   grassTip: 76, // rgb, flower chance
-  grass: 80, // blade height, blade width, blades per block, radius (blocks)
+  grass: 80, // blade height, blade width, blades per block, detail radius (blocks)
   grassCenter: 84, // center x, center z, world size x, world size z
-  wind: 88, // dir x, dir z, strength, grass radius / old-FOV grass radius
+  wind: 88, // dir x, dir z, strength, world grass sampling stride
   grade: 92, // saturation, contrast, warmth, vignette
   extra: 96, // star visibility, 1 - moonlit grading, sea level, 1 if anything casts lamplight
   sunPos: 100, // xyz toward the sun, visibility

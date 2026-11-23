@@ -138,28 +138,28 @@ function meshPart(
   low: boolean,
 ) {
   const [sx, sy, sz] = p.size;
-  const lumpy = mat.pattern === "leaves" || mat.pattern === "fleece";
+  const isLeaves = mat.pattern === "leaves";
+  const lumpy = isLeaves || mat.pattern === "fleece";
   const rocky = mat.pattern === "stone" || mat.pattern === "cobble";
-  // Clumps of leaves vary a little in shade from part to part.
-  const k = mat.pattern === "leaves" ? 0.78 + hash2(index, 7, 31) * 0.44 : 1;
+  // Clumps of leaves vary in shade and shift warmly toward sunlit chartreuse-gold near crown tops
+  // and cool deep sage-teal underneath (matching the painterly miniature mockups).
+  const k = isLeaves ? 0.84 + hash2(index, 7, 31) * 0.32 : 1;
   const base = override ?? materialRgb(mat.color);
   const bend = top ? Math.max(0, Math.min(1, 1 - mat.hardness / 4)) : 0;
-  const lo = Math.max(0, (p.at[1] - sy / 2) / top), hi = Math.min(1, (p.at[1] + sy / 2) / top);
+  const lo = top ? Math.max(0, (p.at[1] - sy / 2) / top) : 0;
+  const hi = top ? Math.min(1, (p.at[1] + sy / 2) / top) : 1;
+  const mid = (lo + hi) * 0.5;
+  const leafR = isLeaves ? 0.78 + mid * 0.46 : 1;
+  const leafG = isLeaves ? 0.88 + mid * 0.3 : 1;
+  const leafB = isLeaves ? 0.98 - mid * 0.14 : 1;
   const gr = GRAIN[mat.pattern] ?? GRAIN.plain;
   const style: Style = {
-    color: [base[0] * k, base[1] * k, base[2] * k],
+    color: [base[0] * k * leafR, base[1] * k * leafG, base[2] * k * leafB],
     sway: [lo * bend, hi * bend],
     // A crown gradient: darker toward the trunk and underside, lighter outside and on top.
     ao: lumpy ? 0.5 : rocky ? 0.3 : 0.25,
-    jitter: mat.pattern === "leaves"
-      ? 0.12
-      : mat.pattern === "log"
-      ? 0.08
-      : lumpy
-      ? 0.06
-      : rocky
-      ? 0.08
-      : 0,
+    jitter: isLeaves ? 0.1 : mat.pattern === "log" ? 0.08 : lumpy ? 0.06 : rocky ? 0.08 : 0,
+    pattern: mat.pattern,
     grain: gr.grain,
     grainScale: gr.scale,
     // Per-Material roughness guess (no Catalog field): patterned stuff keeps its matte or slight
@@ -179,15 +179,18 @@ function meshPart(
   const big = Math.max(sx, sy, sz);
   const detail = big < 0.08 ? 0 : big < 0.2 ? 1 : big < 0.7 ? 2 : 3;
   switch (shape) {
-    case "box":
-      b.box(m, p.size, style, low ? 0 : Math.min(0.16, 0.4 * Math.min(sx, sy, sz)));
+    case "box": {
+      const bevelMax = isLeaves ? 0.24 : rocky ? 0.14 : 0.16;
+      const bevelFrac = isLeaves ? 0.42 : 0.4;
+      b.box(m, p.size, style, low ? 0 : Math.min(bevelMax, bevelFrac * Math.min(sx, sy, sz)));
       break;
+    }
     case "sphere":
       // A lower-detail icosphere's directions are a prefix of the full one's, so a low sphere's
       // vertices are a subset of the full sphere's and the silhouettes stay lined up.
       b.sphere(m, [sx / 2, sy / 2, sz / 2], style, {
         detail: low ? Math.max(0, detail - 2) : detail,
-        noise: mat.pattern === "leaves" ? 0.3 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.3 : 0,
+        noise: isLeaves ? 0.24 : mat.pattern === "fleece" ? 0.15 : rocky ? 0.28 : 0,
         seed: index * 13 + 5,
         flat: rocky,
       });

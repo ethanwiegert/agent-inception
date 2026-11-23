@@ -23,13 +23,16 @@ interface Gait {
   swims?: boolean;
   /** Pecks hard and fast when grazing (chickens). */
   pecks?: boolean;
+  /** Hops cheerfully while moving (bunnies). */
+  hops?: boolean;
 }
 
 const GAITS: Record<string, Gait> = {
-  sheep: { gait: 5, sleepDrop: 0.25 },
-  cow: { gait: 3.5, sleepDrop: 0.4 },
-  chicken: { gait: 12, sleepDrop: 0.12, pecks: true },
+  sheep: { gait: 5, sleepDrop: 0.2 },
+  cow: { gait: 3.5, sleepDrop: 0.34 },
+  chicken: { gait: 12, sleepDrop: 0.08, pecks: true },
   duck: { gait: 0, sleepDrop: 0.03, swims: true },
+  bunny: { gait: 7.5, sleepDrop: 0.08, hops: true },
 };
 
 /** Legs that swing forward while their partners swing back. */
@@ -107,11 +110,16 @@ export function buildAnimals(
     const asleep = a.anim === AnimalAnim.Sleep;
     const grazing = a.anim === AnimalAnim.Graze;
     const swing = Math.sin(a.stride * rig.gait);
-    let bob = walking ? Math.abs(Math.cos(a.stride * rig.gait)) * 0.03 : Math.sin(t * 1.6) * 0.006;
+    let bob = walking
+      ? (rig.hops
+        ? Math.abs(Math.sin(a.stride * 4.2)) * 0.16
+        : Math.abs(Math.cos(a.stride * rig.gait)) * 0.03)
+      : Math.sin(t * 1.6) * 0.006;
     if (rig.swims) bob = Math.sin(t * 2.1) * 0.015;
     identity(root);
     translate(root, a.x, a.y + bob - (asleep ? rig.sleepDrop : 0), a.z);
     rotateY(root, a.yaw);
+    if (rig.hops && walking) rotateX(root, -Math.cos(a.stride * 4.2) * 0.16);
     // Ducks dabble: tip forward with the tail up.
     if (rig.swims && grazing) rotateX(root, 0.5 + Math.sin(t * 3) * 0.2);
 
@@ -159,27 +167,44 @@ export function buildAnimals(
 const place = mat4();
 const at = (x: number, y: number, z: number) => translate(identity(place), x, y, z);
 
-const FISH_LOOKS: Record<string, { length: number; back: Rgb; belly: Rgb; fin: Rgb }> = {
+const FISH_LOOKS: Record<
+  string,
+  { length: number; back: Rgb; belly: Rgb; fin: Rgb; patch?: Rgb }
+> = {
+  // River fish styled after the vibrant miniature koi / goldfish in the mockups.
   minnow: {
-    length: 0.14,
-    back: [0.12, 0.14, 0.08],
-    belly: [0.55, 0.55, 0.5],
-    fin: [0.2, 0.2, 0.15],
+    length: 0.26,
+    back: [0.95, 0.32, 0.06],
+    belly: [0.98, 0.96, 0.92],
+    fin: [0.98, 0.52, 0.15],
+    patch: [0.92, 0.18, 0.04],
   },
   trout: {
-    length: 0.38,
-    back: [0.12, 0.13, 0.06],
-    belly: [0.6, 0.4, 0.35],
-    fin: [0.18, 0.15, 0.08],
+    length: 0.44,
+    back: [0.96, 0.94, 0.88],
+    belly: [0.98, 0.96, 0.92],
+    fin: [0.96, 0.58, 0.22],
+    patch: [0.92, 0.28, 0.05],
   },
-  perch: { length: 0.26, back: [0.2, 0.25, 0.04], belly: [0.6, 0.5, 0.2], fin: [0.5, 0.15, 0.05] },
+  perch: {
+    length: 0.36,
+    back: [0.98, 0.45, 0.08],
+    belly: [0.98, 0.92, 0.82],
+    fin: [0.95, 0.35, 0.06],
+    patch: [0.98, 0.94, 0.88],
+  },
   mackerel: {
-    length: 0.34,
-    back: [0.03, 0.12, 0.15],
-    belly: [0.65, 0.68, 0.7],
-    fin: [0.05, 0.1, 0.12],
+    length: 0.36,
+    back: [0.06, 0.22, 0.32],
+    belly: [0.78, 0.84, 0.88],
+    fin: [0.1, 0.28, 0.36],
   },
-  cod: { length: 0.5, back: [0.2, 0.16, 0.1], belly: [0.55, 0.52, 0.45], fin: [0.2, 0.17, 0.12] },
+  cod: {
+    length: 0.52,
+    back: [0.24, 0.2, 0.14],
+    belly: [0.68, 0.64, 0.56],
+    fin: [0.28, 0.23, 0.16],
+  },
 };
 
 export interface FishModel {
@@ -194,42 +219,66 @@ export function defineFishModels(lib: MeshLibrary): FishModel[] {
   return FISH.map((def) => {
     const look = FISH_LOOKS[def.name];
     const l = look.length;
-    const tailAt = -0.42 * l;
+    const tailAt = -0.4 * l;
     const body = lib.define(`fish.${def.name}.body`, (b) => {
-      // Dark back over a pale belly and a dorsal fin; nose toward +z.
-      b.sphere(at(0, 0.02 * l, 0), [0.16 * l, 0.17 * l, 0.5 * l], { color: look.back }, {
-        detail: 2,
-      });
-      b.sphere(at(0, -0.05 * l, 0.02 * l), [0.14 * l, 0.12 * l, 0.42 * l], { color: look.belly }, {
-        detail: 2,
-      });
-      b.box(at(0, 0.18 * l, 0), [0.02 * l, 0.12 * l, 0.3 * l], { color: look.fin });
-      // Pectoral fins tucked at the gills, and a pale chin so the head reads at a glance.
-      b.box(rotateY(at(-0.16 * l, -0.02 * l, 0.18 * l), 0.6), [0.02 * l, 0.08 * l, 0.14 * l], {
+      // Plump rounded koi/fish body with pale belly, colorful koi saddle patches, and bead eyes.
+      b.sphere(at(0, 0.02 * l, 0), [0.21 * l, 0.2 * l, 0.48 * l], {
+        color: look.belly,
+        rough: 0.35,
+      }, { detail: 2 });
+      b.sphere(at(0, 0.07 * l, 0.08 * l), [0.17 * l, 0.15 * l, 0.32 * l], {
+        color: look.back,
+        rough: 0.35,
+      }, { detail: 2 });
+      if (look.patch) {
+        b.sphere(at(0, 0.08 * l, -0.14 * l), [0.14 * l, 0.12 * l, 0.18 * l], {
+          color: look.patch,
+          rough: 0.35,
+        }, { detail: 1 });
+        b.sphere(at(0, 0.06 * l, 0.28 * l), [0.12 * l, 0.1 * l, 0.14 * l], {
+          color: look.patch,
+          rough: 0.35,
+        }, { detail: 1 });
+      }
+      b.box(at(0, 0.22 * l, -0.02 * l), [0.025 * l, 0.13 * l, 0.28 * l], {
         color: look.fin,
-      });
-      b.box(rotateY(at(0.16 * l, -0.02 * l, 0.18 * l), -0.6), [0.02 * l, 0.08 * l, 0.14 * l], {
+        rough: 0.4,
+      }, 0.008 * l);
+      // Flowing pectoral fins and cute dark bead eyes.
+      b.box(rotateY(at(-0.2 * l, -0.03 * l, 0.14 * l), 0.7), [0.02 * l, 0.1 * l, 0.18 * l], {
         color: look.fin,
-      });
-      b.sphere(at(0, -0.02 * l, 0.34 * l), [0.07 * l, 0.08 * l, 0.1 * l], { color: look.belly }, {
-        detail: 1,
-      });
+        rough: 0.4,
+      }, 0.006 * l);
+      b.box(rotateY(at(0.2 * l, -0.03 * l, 0.14 * l), -0.7), [0.02 * l, 0.1 * l, 0.18 * l], {
+        color: look.fin,
+        rough: 0.4,
+      }, 0.006 * l);
+      b.sphere(at(-0.14 * l, 0.05 * l, 0.32 * l), [0.035 * l, 0.035 * l, 0.035 * l], {
+        color: [0.04, 0.04, 0.06],
+        rough: 0.2,
+      }, { detail: 1 });
+      b.sphere(at(0.14 * l, 0.05 * l, 0.32 * l), [0.035 * l, 0.035 * l, 0.035 * l], {
+        color: [0.04, 0.04, 0.06],
+        rough: 0.2,
+      }, { detail: 1 });
     });
     const tail = lib.define(`fish.${def.name}.tail`, (b) => {
-      // A forked tail: two small fins angled off the hinge, not one slab.
-      b.box(rotateY(at(-0.06 * l, 0, -0.14 * l), Math.PI / 4 + 0.35), [
-        0.03 * l,
-        0.26 * l,
-        0.22 * l,
-      ], {
-        color: look.fin,
-      });
+      // Flowing fan tail with two rounded lobes.
+      b.box(
+        rotateY(at(-0.06 * l, 0, -0.14 * l), Math.PI / 4 + 0.35),
+        [
+          0.03 * l,
+          0.26 * l,
+          0.22 * l,
+        ],
+        { color: look.fin, rough: 0.4 },
+        0.008 * l,
+      );
       b.box(
         rotateY(at(0.06 * l, 0, -0.14 * l), Math.PI / 4 - 0.35),
         [0.03 * l, 0.26 * l, 0.22 * l],
-        {
-          color: look.fin,
-        },
+        { color: look.fin, rough: 0.4 },
+        0.008 * l,
       );
     });
     return { body, tail, tailAt };

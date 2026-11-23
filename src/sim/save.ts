@@ -4,11 +4,12 @@
  * knows is refused rather than guessed at (and never overwritten). Exported world files are the
  * same data, so they migrate the same way.
  */
+import { defaultFloatsee } from "./floatsee.ts";
 import { hash32 } from "./rng.ts";
 import type { SaveData } from "./sim.ts";
 
 /** The version `Sim.save` writes. Bump it with a migration below whenever the format changes. */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 /** The oldest save that can still be brought forward. Older ones start their island afresh. */
 export const OLDEST_SAVE = 2;
 /** What an exported world file says it is. */
@@ -26,6 +27,18 @@ type Raw = Record<string, unknown>;
 const MIGRATIONS: Record<number, (save: Raw) => Raw> = {
   // 2 → 3 (M14): worlds have a name, shown in world slots and on exported files.
   2: (save) => ({ ...save, version: 3, name: worldName(Number(save.seed)) }),
+  // 3 → 4: villagers become customizable Floatsees with head, colors, graphic tee and expressions.
+  3: (save) => ({
+    ...save,
+    version: 4,
+    agents: Array.isArray(save.agents)
+      ? (save.agents as Raw[]).map((a, i) => ({
+        ...a,
+        floatsee: a.floatsee ?? defaultFloatsee(typeof a.color === "number" ? a.color : i),
+        expression: a.expression ?? "happy",
+      }))
+      : save.agents,
+  }),
 };
 
 /** Bring a save (from IndexedDB or a world file) up to SAVE_VERSION, or say why it can't be. */

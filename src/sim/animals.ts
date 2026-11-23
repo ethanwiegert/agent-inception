@@ -71,6 +71,17 @@ export const SPECIES: SpeciesDef[] = [
     herds: 3,
     herdSize: 3,
   },
+  {
+    name: "bunny",
+    mark: "r",
+    habitat: "land",
+    speed: 1.45,
+    roam: 5,
+    shy: 2.8,
+    productEvery: 0,
+    herds: 3,
+    herdSize: 3,
+  },
 ];
 
 export const AnimalAnim = { Idle: 0, Walk: 1, Graze: 2, Sleep: 3 } as const;
@@ -207,6 +218,7 @@ export function stepAnimals(
   farmers: Farmer[],
   night: boolean,
   tickHz: number,
+  extraRng?: Rng,
 ) {
   // Herd centers, so members drift back together.
   const sums = new Map<number, [number, number, number]>();
@@ -216,6 +228,7 @@ export function stepAnimals(
     sums.set(a.herd, s);
   }
   for (const a of animals) {
+    const arng = a.species >= 4 && extraRng ? extraRng : rng;
     const def = SPECIES[a.species];
     let near: Farmer | null = null, nearD = Infinity, lure: Farmer | null = null, lureD = Infinity;
     for (const f of farmers) {
@@ -249,9 +262,9 @@ export function stepAnimals(
           a.mode = Mode.Sleep;
           break;
         }
-        if (rng.next() < 0.45) {
+        if (arng.next() < 0.45) {
           a.mode = Mode.Graze;
-          a.timer = 60 + Math.floor(rng.next() * 160);
+          a.timer = 60 + Math.floor(arng.next() * 160);
         } else {
           // Wander somewhere near the herd (or yourself, if the herd is far).
           const s = sums.get(a.herd)!;
@@ -259,8 +272,8 @@ export function stepAnimals(
           const away = Math.hypot(hx - a.x, hz - a.z) > def.roam;
           const ox = away ? hx : a.x, oz = away ? hz : a.z;
           const r = def.roam * 0.6;
-          a.tx = ox + (rng.next() * 2 - 1) * r;
-          a.tz = oz + (rng.next() * 2 - 1) * r;
+          a.tx = ox + (arng.next() * 2 - 1) * r;
+          a.tz = oz + (arng.next() * 2 - 1) * r;
           a.mode = Mode.Walk;
         }
         break;
@@ -270,7 +283,7 @@ export function stepAnimals(
         const speed = (def.speed / tickHz) * (a.mode === Mode.Flee ? 2 : 1);
         if (d < 0.15 || (a.mode === Mode.Follow && d < 1.6)) {
           a.mode = Mode.Idle;
-          a.timer = 20 + Math.floor(rng.next() * 60);
+          a.timer = 20 + Math.floor(arng.next() * 60);
           break;
         }
         const s = Math.min(speed, d);
@@ -278,7 +291,7 @@ export function stepAnimals(
         const tx = Math.floor(nx), tz = Math.floor(nz);
         if ((tx !== Math.floor(a.x) || tz !== Math.floor(a.z)) && !canEnter(world, a, tx, tz)) {
           a.mode = Mode.Idle;
-          a.timer = 10 + Math.floor(rng.next() * 30);
+          a.timer = 10 + Math.floor(arng.next() * 30);
           break;
         }
         a.x = nx, a.z = nz;

@@ -4,6 +4,8 @@ import type { AgentView } from "./simclient.ts";
 interface Tag {
   root: HTMLDivElement;
   name: HTMLDivElement;
+  swatch: HTMLSpanElement;
+  label: HTMLSpanElement;
   bubble: HTMLDivElement;
   until: number;
 }
@@ -11,24 +13,29 @@ interface Tag {
 const css = `
 .ai-tag{position:fixed;left:0;top:0;pointer-events:none;display:flex;flex-direction:column;
   align-items:center;gap:4px;transform-origin:50% 100%;will-change:transform}
-.ai-name{font:600 11px/1 ui-sans-serif,system-ui;color:#fff;background:rgba(10,14,18,.55);
-  padding:3px 7px;border-radius:999px;white-space:nowrap;pointer-events:auto;cursor:pointer;
-  border:1px solid transparent;transition:background .15s,border-color .15s;
-  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
-@media (hover:hover){.ai-name:hover{background:rgba(10,14,18,.8)}}
-.ai-name.followed{border-color:#9fd36b;background:rgba(20,40,16,.8)}
-.ai-bubble{max-width:min(220px,60vw);font:13px/1.35 ui-sans-serif,system-ui;color:#1a1d21;background:#fdfbf4;
-  padding:7px 10px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.25);opacity:0;
+.ai-name{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 ui-sans-serif,system-ui;
+  color:#faf4e8;background:rgba(24,22,30,.58);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  padding:4px 9px;border-radius:999px;white-space:nowrap;pointer-events:auto;cursor:pointer;
+  border:1px solid rgba(255,244,218,.22);box-shadow:0 2px 8px rgba(0,0,0,.22);
+  transition:background .15s,border-color .15s;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation}
+.ai-swatch{width:7px;height:7px;border-radius:50%;border:1px solid rgba(255,255,255,.55);flex:none}
+@media (hover:hover){.ai-name:hover{background:rgba(30,28,38,.82);border-color:rgba(255,238,196,.5)}}
+.ai-name.followed{border-color:#b8df90;background:rgba(32,52,32,.82)}
+.ai-bubble{max-width:min(220px,60vw);font:13px/1.35 ui-sans-serif,system-ui;color:#2c241d;
+  background:rgba(253,248,236,.95);padding:7px 11px;border-radius:14px;
+  border:1px solid rgba(182,148,104,.35);box-shadow:0 4px 14px rgba(16,12,8,.25);opacity:0;
   transition:opacity .3s;text-align:center}
 .ai-feed{position:fixed;left:calc(12px + env(safe-area-inset-left));
   bottom:calc(12px + env(safe-area-inset-bottom));width:min(360px,calc(100vw - 24px));
   max-height:40vh;overflow:hidden;
   display:flex;flex-direction:column-reverse;gap:3px;font:12px/1.4 ui-monospace,monospace;
   pointer-events:none;mask-image:linear-gradient(to top,#000 70%,transparent)}
-.ai-feed div{background:rgba(10,14,18,.6);color:#d8dee9;padding:3px 8px;border-radius:6px}
-.ai-feed b{color:#9fd36b;font-weight:600}
-.ai-feed .err{color:#e58b7a}
-.ai-feed i{color:#8a94a3;font-style:normal}
+.ai-feed div{background:rgba(24,22,30,.58);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  border:1px solid rgba(255,244,218,.1);color:#ece5d8;padding:4px 9px;border-radius:8px}
+.ai-feed b{color:#b8df90;font-weight:600}
+.ai-feed .err{color:#f09c8a}
+.ai-feed i{color:#a89f94;font-style:normal}
 /* Fingers: name tags big enough to tap. */
 @media (pointer:coarse){.ai-name{font-size:12px;padding:7px 11px}}
 /* Narrow screens: the feed sits above the camera buttons, shorter, in smaller type. */
@@ -37,7 +44,7 @@ const css = `
 `;
 
 /** Name tags float this far above a villager's feet. */
-export const TAG_HEIGHT = 2.3;
+export const TAG_HEIGHT = 2.15;
 const at: [number, number] = [0, 0];
 
 /**
@@ -119,6 +126,8 @@ export class Overlay {
       seen.add(a.id);
       let tag = this.tags.get(a.id);
       if (!tag) tag = this.createTag(a);
+      tag.swatch.style.background = a.floatsee.colors.primary;
+      tag.label.textContent = a.name;
       tag.name.classList.toggle("followed", a.id === followed);
       if (!project(viewProj, a.x, a.y + TAG_HEIGHT, a.z, width, height, at)) {
         tag.root.style.display = "none";
@@ -146,12 +155,17 @@ export class Overlay {
     bubble.className = "ai-bubble";
     const name = document.createElement("div");
     name.className = "ai-name";
-    name.textContent = a.name;
+    const swatch = document.createElement("span");
+    swatch.className = "ai-swatch";
+    swatch.style.background = a.floatsee.colors.primary;
+    const label = document.createElement("span");
+    label.textContent = a.name;
+    name.append(swatch, label);
     name.title = `Follow ${a.name}`;
     name.onclick = () => this.onSelect(a.id);
     root.append(bubble, name);
     document.body.append(root);
-    const tag = { root, name, bubble, until: 0 };
+    const tag = { root, name, swatch, label, bubble, until: 0 };
     this.tags.set(a.id, tag);
     return tag;
   }

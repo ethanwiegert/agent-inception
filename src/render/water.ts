@@ -160,8 +160,9 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
   let light = keyLightFast(world);
   let ambient = frame.skyZenith.rgb * frame.sunColor.w * 0.9 + frame.groundAmbient.rgb * 0.3;
   let lit = ambient + frame.sunColor.rgb * frame.sunDir.w * max(frame.sunDir.y, 0.0) * light * 0.6;
-  let shallow = vec3f(0.035, 0.13, 0.11);
-  let deep = vec3f(0.006, 0.03, 0.045);
+  let painterly = frame.lookParams.y;
+  let shallow = mix(vec3f(0.035, 0.13, 0.11), vec3f(0.045, 0.175, 0.165), painterly);
+  let deep = mix(vec3f(0.006, 0.03, 0.045), vec3f(0.01, 0.048, 0.078), painterly);
   var body = mix(shallow, deep, smoothstep(0.0, 3.0, depth)) * lit;
 
   var alpha: f32;
@@ -229,12 +230,12 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
 
   let r = reflect(-view, n);
   var color = base;
-  // Sun glitter: a wide path at low sun, a tight sparkle overhead; the moon leaves a path too.
+  // Sun glitter: a wide path at low sun, a tight sparkle overhead; Miniature adds golden water glints.
   let sunD = max(dot(r, frame.sunDir.xyz), 0.0);
-  let glitter = mix(240.0, 60.0, smoothstep(0.3, 0.0, frame.sunDir.y));
-  let spec = pow(sunD, glitter) * 30.0 + pow(sunD, 60.0) * 0.4;
+  let glitter = mix(240.0, 52.0, smoothstep(0.32, 0.0, frame.sunDir.y));
+  let spec = pow(sunD, glitter) * (30.0 + 18.0 * painterly) + pow(sunD, 50.0) * (0.4 + 0.35 * painterly);
   color += frame.sunColor.rgb * frame.sunDir.w * spec * light;
-  color += vec3f(0.55, 0.65, 1.0) * frame.moonDir.w * pow(max(dot(r, frame.moonDir.xyz), 0.0), 500.0) * 8.0 * light;
+  color += vec3f(0.55, 0.65, 1.0) * frame.moonDir.w * pow(max(dot(r, frame.moonDir.xyz), 0.0), 420.0) * (8.0 + 6.0 * painterly) * light;
 
   // Foam where the water thins out against the shore. In the scene variant the soft intersection
   // also softens where anything opaque meets the surface.

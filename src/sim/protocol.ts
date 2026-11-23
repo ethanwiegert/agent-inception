@@ -1,5 +1,6 @@
 import type { Wish } from "./board.ts";
 import type { CatalogSave, Entry, Proposal } from "./catalog.ts";
+import type { FloatseeAppearance } from "./floatsee.ts";
 import type { WorldObject } from "./objects.ts";
 import type { PropDiff } from "./props.ts";
 import type { CallResult, SimEvent } from "./sim.ts";
@@ -8,9 +9,10 @@ import type { WorldData } from "./world.ts";
 
 /**
  * Floats per agent in `TickMessage.agents`: id, x, y, z, yaw, anim, stride, color, whether they
- * carry something overhead (1), and ticks left lying down after being knocked over.
+ * carry something overhead (1), ticks left lying down after being knocked over, and expression
+ * index (0 happy, 1 sad, 2 angry, 3 excited).
  */
-export const AGENT_STRIDE = 10;
+export const AGENT_STRIDE = 11;
 /** Floats per Object in `TickMessage.bodies`: id, then its origin x, y, z and turn as a quaternion. */
 export const BODY_STRIDE = 8;
 /** Floats per animal in `TickMessage.animals`: id, species, x, y, z, yaw, anim, stride, flags. */
@@ -35,8 +37,10 @@ export const FIRE_KINDS = ["block", "plant", "crop", "object"] as const;
 
 export interface AgentProfile {
   name: string;
-  /** The Design they look like; null for the default farmer. */
+  /** The Design they look like; null for their customizable Floatsee body. */
   body: number | null;
+  /** Custom Floatsee appearance (head shape, colors, graphic tee images, expressions). */
+  floatsee: FloatseeAppearance;
 }
 
 /** Catalog changes since the last tick message. The Catalog is append-only, so new entries suffice. */

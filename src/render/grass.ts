@@ -1,19 +1,21 @@
-import { frameWgsl, lightingWgsl } from "./frame.ts";
+import { F, frameWgsl, lightingWgsl } from "./frame.ts";
 import { grassWeightWgsl, slopeDropWgsl, type SurfaceTexture } from "./surface.ts";
 import type { Layouts } from "./renderer.ts";
 
 /** Blades the compact buffer can hold (32 bytes each). */
 const MAX_BLADES = 900_000;
 const WORKGROUP = 64;
+const DETAIL_RADIUS = 32;
+const CANOPY_BUDGET = 600_000;
 
 /**
  * GPU-generated grass in two steps:
- *  1. A compute pass walks a grid of candidate blades around the camera (hash-placed,
+ *  1. A compute pass walks a sparse world grid and a dense grid around the eye (hash-placed,
  *     `bladesPerBlock` per column), culls them against the surface texture, the organic
- *     grass edge, distance and the frustum, and writes survivors to a compact buffer with
+ *     grass edge and the frustum, and writes survivors to a compact buffer with
  *     their color, wind bend and shadowing already worked out.
  *  2. An indirect draw renders exactly the survivors; the vertex shader just builds the
- *     7-vertex strip, so per-blade work happens once instead of once per vertex.
+ *     8-vertex strip, so per-blade work happens once instead of once per vertex.
  */
 const common = frameWgsl + lightingWgsl + slopeDropWgsl + grassWeightWgsl + /* wgsl */ `
 const GRASS = 1u;
@@ -25,8 +27,8 @@ struct Blade {
   heightWidth: u32,   // pack2x16float(height, width)
   facingLight: u32,   // pack2x16unorm(facing / 2π, key light)
   bend: u32,          // pack2x16float(bend x, bend z) at the tip
-  base: u32,          // pack4x8unorm(root color * 4); alpha = how hard a gust presses the blade
-  tip: u32,           // pack4x8unorm(tip color * 4); alpha = flower kind (0 = none)
+  base: u32,          // pack4x8unorm(sqrt(root color)); alpha = how hard a gust presses the blade
+  tip: u32,           // pack4x8unorm(sqrt(tip color)); alpha = flower kind (0 = none)
 };
 `;
 
@@ -50,37 +52,36 @@ fn rand(seed: ptr<function, u32>) -> f32 {
 @compute @workgroup_size(${WORKGROUP}) fn cull(@builtin(global_invocation_id) gid: vec3u) {
   let bladesPerBlock = u32(frame.grass.z);
   let radius = i32(frame.grass.w);
-  let innerRadius = min(radius, i32(f32(radius) / max(frame.wind.w, 1.0)));
-  let outerBlades = min(bladesPerBlock, max(1u, u32(f32(bladesPerBlock) * 0.125 + 0.5)));
-  let innerBlades = bladesPerBlock - outerBlades;
-  let outerSide = u32(radius * 2);
-  let innerSide = u32(innerRadius * 2);
-  let outerCount = outerSide * outerSide * outerBlades;
-  let innerCount = innerSide * innerSide * innerBlades;
+  let canopy = max(1u, (bladesPerBlock + 4u) / 8u);
+  let detail = bladesPerBlock - canopy;
+  let stride = u32(frame.wind.w);
+  let extent = vec2u(frame.grassCenter.zw);
+  let grid = (extent + stride - 1u) / stride;
+  let canopyCount = grid.x * grid.y * canopy;
+  let side = u32(radius * 2);
   let ii = gid.x;
-  if (ii >= outerCount + innerCount) { return; }
-  let centerX = i32(frame.grassCenter.x);
-  let centerZ = i32(frame.grassCenter.y);
-  var outer = true;
-  var k = 0u;
-  var cx = 0;
-  var cz = 0;
-  if (ii < outerCount) {
-    // The sparse canopy covers the whole wider grid, the central square included: there it adds
-    // the first outerBlades blades, and the inner grid below supplies the rest, so the near field
-    // keeps the original bladesPerBlock density rather than a thinner version.
-    let cell = ii / outerBlades;
-    k = ii % outerBlades;
-    cx = i32(cell % outerSide) - radius + centerX;
-    cz = i32(cell / outerSide) - radius + centerZ;
+  if (ii >= canopyCount + side * side * detail) { return; }
+
+  var k: u32;
+  var cell: vec2i;
+  if (ii < canopyCount) {
+    let tile = ii / canopy;
+    k = ii % canopy;
+    var col = vec2u(tile % grid.x, tile / grid.x) * stride;
+    if (stride > 1u) {
+      // Larger worlds sample a stable column inside each tile, including partial edge tiles.
+      let pick = pcg(ii);
+      col += vec2u(pick, pcg(pick)) % min(vec2u(stride), extent - col);
+    }
+    cell = vec2i(col);
   } else {
-    let j = ii - outerCount;
-    let cell = j / innerBlades;
-    k = j % innerBlades + outerBlades;
-    cx = i32(cell % innerSide) - innerRadius + centerX;
-    cz = i32(cell / innerSide) - innerRadius + centerZ;
-    outer = false;
+    let j = ii - canopyCount;
+    let tile = j / detail;
+    k = canopy + j % detail;
+    cell = vec2i(vec2u(tile % side, tile / side)) - radius + vec2i(frame.grassCenter.xy);
   }
+  let cx = cell.x;
+  let cz = cell.y;
   if (cx < 0 || cz < 0 || f32(cx) >= frame.grassCenter.z || f32(cz) >= frame.grassCenter.w) { return; }
 
   let s = textureLoad(surface, vec2i(cx, cz), 0);
@@ -93,21 +94,20 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   let clip = frame.viewProj * vec4f(f32(cx) + 0.5, f32(s.r) + 1.0, f32(cz) + 0.5, 1.0);
   if (clip.w <= 0.0 || any(abs(clip.xy) > vec2f(clip.w * 1.1 + 2.0))) { return; }
 
-  var seed = pcg((u32(cx) * 73856093u) ^ (u32(cz) * 19349663u) ^ (k * 83492791u));
-  let fx = rand(&seed);
-  let fz = rand(&seed);
+  let cellSeed = (u32(cx) * 73856093u) ^ (u32(cz) * 19349663u);
+  var seed = pcg(cellSeed ^ (k * 83492791u));
+  // Three or four leaves share a crown. The first few crowns also represent this tile far away.
+  let crowns = (bladesPerBlock + 3u) / 4u;
+  var tuft = pcg((cellSeed ^ ((k % crowns) * 2654435761u)) + 47u);
+  let fx = 0.08 + 0.84 * rand(&tuft) + (rand(&seed) - 0.5) * 0.14;
+  let fz = 0.08 + 0.84 * rand(&tuft) + (rand(&seed) - 0.5) * 0.14;
   let base = vec3f(f32(cx) + fx, f32(s.r) + 1.0 - slopeDrop(s.b & 15u, fx, fz), f32(cz) + fz);
-
-  // Keep the old lens's density profile; only the newly visible outer band uses wider, fewer
-  // blades. This expands coverage without multiplying the number of drawn blades near the view.
-  let d = distance(base.xz, frame.grassCenter.xy);
-  let r = f32(radius);
-  let densityRadius = f32(innerRadius);
-  let innerKeep = mix(1.0, 0.3, smoothstep(densityRadius * 0.35, densityRadius, d));
-  let keep = select(innerKeep, f32(outerBlades) / f32(bladesPerBlock), outer);
-  if (!outer && f32(k) >= f32(bladesPerBlock) * innerKeep) { return; }
-  if (!isGrassy(s, base.xz)) { return; }
-  let fade = 1.0 - smoothstep(r * 0.75, r, d);
+  let d = distance(base, frame.cameraPos.xyz);
+  let far = smoothstep(8.0, f32(radius) - 1.0, d);
+  // Stagger the handoff one blade at a time. The canopy slots never fade to zero.
+  let count = mix(f32(bladesPerBlock), f32(canopy), far);
+  let growth = clamp(count - f32(k), 0.0, 1.0);
+  if (growth <= 0.0 || !isGrassy(s, base.xz)) { return; }
 
   // Clumping at the 2-4 block scale: tufts grow taller and richer together, thin patches stay
   // short and pale, and some blades never sprout in the bare spots.
@@ -120,21 +120,21 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   let lean = rand(&seed);
   let tone = rand(&seed);
   // Flowers come in drifts, not a uniform chance.
-  let flower = rand(&seed) < frame.grassTip.w * smoothstep(0.42, 0.62, valueNoise(base.xz * 0.11 + 40.0)) * 1.7;
+  let flower = rand(&seed) < frame.grassTip.w * (1.0 - far * 0.8) * smoothstep(0.42, 0.62, valueNoise(base.xz * 0.11 + 40.0)) * 1.7;
   let flowerKind = rand(&seed);
   // Drier patches grow taller blades with pale seed heads (tip kind 3).
   let seedHead = !flower && rand(&seed) < dry * 0.04;
   let tipKind = select(min(u32(flowerKind * 3.0), 2u), 3u, seedHead);
   let hasTip = flower || seedHead;
 
-  var h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * (0.75 + 0.55 * clump) * fade *
-    select(1.0, 1.25, flower) * select(1.0, 1.3, seedHead);
-  let w = frame.grass.y / sqrt(keep);
+  var h = frame.grass.x * (0.55 + 0.9 * heightRand * heightRand) * (0.75 + 0.55 * clump) * growth *
+    select(1.0, 1.25, flower) * select(1.0, 1.3, seedHead) * mix(1.0, 1.16, far);
+  let w = frame.grass.y * mix(1.0, 2.15, far) * (0.74 + 0.48 * tone);
   let facing = vec2f(cos(angle * 6.2831853), sin(angle * 6.2831853));
   let time = frame.cameraPos.w;
   let gust = valueNoise(base.xz * 0.06 - frame.wind.xy * time * 0.8);
   let sway = sin(time * 2.1 + dot(base.xz, frame.wind.xy) * 0.6 + lean * 6.0) * 0.25;
-  var bend = facing * (0.1 + 0.35 * lean) * h + frame.wind.xy * frame.wind.z * (gust * 0.9 + sway * 0.4) * h;
+  var bend = facing * (0.24 + 0.56 * lean) * h + frame.wind.xy * frame.wind.z * (gust * 0.9 + sway * 0.4) * h;
 
   // The field map: crowns pool shade, villagers press a parting through the blades.
   let field = fieldAt(base.xz);
@@ -159,6 +159,7 @@ fn rand(seed: ptr<function, u32>) -> f32 {
   root = mix(root, root * lushTint, shoreLush * 0.7) * occ * (1.0 - press * 0.25) *
     (0.85 + 0.3 * clump);
   tip = mix(tip, tip * lushTint, shoreLush * 0.7) * occ * (0.85 + 0.3 * clump);
+  tip *= mix(vec3f(0.78, 0.99, 1.12), vec3f(1.22, 1.02, 0.77), dry);
   let light = keyLightFast(base + vec3f(0.0, h * 0.5, 0.0)) * occ;
 
   let idx = atomicAdd(&args.instanceCount, 1u);
@@ -168,8 +169,8 @@ fn rand(seed: ptr<function, u32>) -> f32 {
     pack2x16float(vec2f(h, w)),
     pack2x16unorm(vec2f(angle, light)),
     pack2x16float(bend),
-    pack4x8unorm(vec4f(root * 4.0, smoothstep(0.5, 0.9, gust) * min(frame.wind.z, 1.0) * fade)),
-    pack4x8unorm(vec4f(tip * 4.0, select(0.0, 0.25 + 0.75 * (f32(tipKind) + 0.5) / 4.0, hasTip))));
+    pack4x8unorm(vec4f(sqrt(root), smoothstep(0.5, 0.9, gust) * min(frame.wind.z, 1.0))),
+    pack4x8unorm(vec4f(sqrt(tip), select(0.0, 0.25 + 0.75 * (f32(tipKind) + 0.5) / 4.0, hasTip))));
 }
 `;
 
@@ -186,6 +187,8 @@ struct Out {
   @location(5) lamp: vec3f,
   /** How hard a gust presses the blade flat: drives the sheen across the laid-over side. */
   @location(6) press: f32,
+  @location(7) across: f32,
+  @location(8) @interpolate(flat) flower: u32,
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
@@ -207,35 +210,65 @@ struct Out {
   let t = f32(level) / f32(SEGMENTS);
   let sideSign = select(-0.5, 0.5, (vi & 1u) == 1u);
   let curve = t * t;
-  var p = b.pos + right * sideSign * hw.y * (1.0 - t) + vec3f(0.0, hw.x * t, 0.0) + bend * curve;
-  p.y -= length(bend) * curve * 0.3;
-
+  let painterly = frame.lookParams.y;
   let rootc = unpack4x8unorm(b.base);
-  let root = rootc.rgb * 0.25;
+  let root = rootc.rgb * rootc.rgb;
   let tipc = unpack4x8unorm(b.tip);
-  var color = mix(root, tipc.rgb * 0.25, smoothstep(0.0, 1.0, t));
+  let isFlower = tipc.a > 0.0 && tipc.a < 0.85;
+  // Plumper rounded botanical blade profile in Miniature mode (with slightly fuller wildflower tips).
+  let taper = mix(1.0 - t, pow(max(1.0 - t, 0.0), 0.58), painterly);
+  let widthBoost = select(1.0, 0.32, isFlower);
+  var p = b.pos + right * sideSign * hw.y * taper * widthBoost + vec3f(0.0, hw.x * t, 0.0) + bend * curve;
+  p.y -= length(bend) * curve * 0.25;
+
+  var color = mix(root, tipc.rgb * tipc.rgb, smoothstep(0.0, 1.0, t));
   // Blades a gust lays over show their pale sides: waves of light roll across the meadow.
-  color = mix(color, color * 1.35 + vec3f(0.035, 0.04, 0.012), rootc.a * t);
-  if (tipc.a > 0.0 && level >= 2u) {
-    let petals = array<vec3f, 4>(vec3f(0.9, 0.85, 0.7), vec3f(0.95, 0.65, 0.08), vec3f(0.45, 0.25, 0.75), vec3f(0.42, 0.38, 0.2));
-    color = petals[min(u32((tipc.a - 0.25) / 0.75 * 4.0), 3u)];
+  color = mix(color, color * 1.28 + vec3f(0.03, 0.036, 0.01), rootc.a * t);
+  let flower = u32(clamp((tipc.a - 0.25) / 0.75 * 4.0, 0.0, 3.0)) + 1u;
+  out.flower = select(0u, flower, isFlower);
+  if (isFlower && level >= 2u) {
+    // Use the final two pairs of vertices for the nodding flower head. The lower pairs
+    // still form the stalk; both follow the same wind and trampling as the surrounding grass.
+    let radius = hw.x * 0.16;
+    let axis = facing * 0.78 + vec3f(0.0, 0.62, 0.0);
+    p = b.pos + vec3f(0.0, hw.x - length(bend) * 0.25, 0.0) + bend +
+      radius * (right * sideSign * 2.0 + axis * select(-1.0, 1.0, level == 3u));
+  } else if (tipc.a > 0.85 && level >= 2u) {
+    color = mix(color, vec3f(0.42, 0.36, 0.16), 0.6);
   }
   out.pos = frame.viewProj * vec4f(p, 1.0);
   out.world = p;
-  // The normals fan across the blade's width so each blade shows a lit and a shaded side.
-  out.normal = normalize(vec3f(0.0, 0.75, 0.0) + facing * 0.45 + right * sideSign * 0.8);
+  // Soften side-to-side normal contrast in Miniature mode so grass reads as velvety moss tufts.
+  let fan = mix(0.8, 0.36, painterly);
+  out.normal = normalize(vec3f(0.0, mix(0.75, 0.92, painterly), 0.0) + facing * 0.32 + right * sideSign * fan);
   out.t = t;
+  out.across = select(sideSign * 2.0, 0.0, level == SEGMENTS && !isFlower);
   out.light = fl.y;
   out.lamp = lampLight(p, vec3f(0.0, 1.0, 0.0));
   out.press = rootc.a * t;
-  // Dense grass shades its own roots.
-  out.color = color * mix(1.0, mix(0.35, 1.0, t), frame.groundAmbient.w);
+  // Blend roots gently into the mossy terrain so tufts never look like dark spiky cutouts.
+  let rootDark = mix(0.35, 0.68, painterly);
+  out.color = color * mix(1.0, mix(rootDark, 1.0, t), frame.groundAmbient.w);
   return out;
 }
 
 @fragment fn fs(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
   let n = select(in.normal * vec3f(-1.0, 1.0, -1.0), in.normal, front);
-  var c = shadeWith(in.color, n, in.light, 1.0, 0.5) + in.color * in.lamp;
+  // A folded leaf has a lit midrib and a cooler half in shade. Filter the line at subpixel widths.
+  let line = 1.0 - smoothstep(0.06, 0.28, abs(in.across));
+  let resolved = 1.0 - smoothstep(0.24, 0.9, fwidth(in.across));
+  let fold = (line * 0.24 - in.across * 0.13) * resolved * smoothstep(0.06, 0.35, in.t);
+  var albedo = in.color * (1.0 + fold);
+  if (in.flower > 0u && in.t >= 2.0 / 3.0) {
+    let uv = vec2f(in.across, in.t * 6.0 - 5.0);
+    let r = length(uv);
+    let lobes = cos(5.0 * atan2(uv.y, uv.x));
+    if (r > 0.72 + 0.24 * lobes) { discard; }
+    let petals = array<vec3f, 3>(vec3f(0.88, 0.83, 0.65), vec3f(0.9, 0.56, 0.08), vec3f(0.8, 0.33, 0.49));
+    albedo = mix(vec3f(0.64, 0.32, 0.04), petals[in.flower - 1u] * (0.82 + 0.18 * r),
+      smoothstep(0.18, 0.32, r));
+  }
+  var c = shadeWith(albedo, n, in.light, 1.0, 0.5) + albedo * in.lamp;
   // Light through the blade tips when looking toward the sun.
   let view = normalize(frame.cameraPos.xyz - in.world);
   let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0);
@@ -266,7 +299,7 @@ export class GrassRenderer {
       size: 16,
       usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(this.args, 0, new Uint32Array([7, 0, 0, 0]));
+    device.queue.writeBuffer(this.args, 0, new Uint32Array([8, 0, 0, 0]));
 
     const C = GPUShaderStage.COMPUTE;
     const cullLayout = device.createBindGroupLayout({
@@ -316,11 +349,15 @@ export class GrassRenderer {
     });
   }
 
-  /** Candidate blades: a sparse full grid plus the extra blades in the original inner grid. */
-  static instanceCount(radius: number, bladesPerBlock: number, fovReach = 1) {
-    const innerRadius = Math.min(radius, Math.floor(radius / fovReach));
-    const outer = Math.min(bladesPerBlock, Math.max(1, Math.round(bladesPerBlock * 0.125)));
-    return (radius * 2) ** 2 * outer + (innerRadius * 2) ** 2 * (bladesPerBlock - outer);
+  /** Write the two GPU grid dimensions and bound the dispatch even for large imported worlds. */
+  static candidates(frame: Float32Array, width: number, depth: number, bladesPerBlock: number) {
+    const canopy = Math.max(1, Math.round(bladesPerBlock / 8));
+    let stride = Math.max(1, Math.ceil(Math.sqrt(width * depth * canopy / CANOPY_BUDGET)));
+    while (Math.ceil(width / stride) * Math.ceil(depth / stride) * canopy > CANOPY_BUDGET) stride++;
+    frame[F.wind + 3] = stride;
+    frame[F.grass + 3] = DETAIL_RADIUS;
+    return Math.ceil(width / stride) * Math.ceil(depth / stride) * canopy +
+      (DETAIL_RADIUS * 2) ** 2 * (bladesPerBlock - canopy);
   }
 
   /**

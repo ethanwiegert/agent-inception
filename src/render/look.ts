@@ -19,6 +19,8 @@ export interface Look {
   vignette: number;
   /** Split-tone strength after the tonemap: cool shade, warm light (0 keeps colors true). */
   splitTone?: number;
+  /** Painterly miniature styling (0 off, 1 on): mossy bevels, ceramic sheen, twilight fireflies. */
+  painterly?: number;
   fogDensity: number;
   wind: number;
   /** How much of the light above white spills around it (the sun, glints, lamps, fire). */
@@ -26,6 +28,27 @@ export interface Look {
 }
 
 export const LOOKS: Record<string, Look> = {
+  miniature: {
+    name: "Miniature",
+    // Hard-set painterly miniature look: 5A sunlit botanical day -> 06 golden dusk -> 5B glowing twilight.
+    grassBase: [0.046, 0.126, 0.053],
+    grassTip: [0.177, 0.31, 0.098],
+    bladeHeight: 0.32,
+    bladeWidth: 0.063,
+    bladesPerBlock: 56,
+    flowerChance: 0.014,
+    aoStrength: 0.92,
+    edgeDarken: 0.11,
+    saturation: 1.04,
+    contrast: 1.05,
+    warmth: 0.52,
+    vignette: 0.26,
+    splitTone: 0.36,
+    painterly: 1,
+    fogDensity: 0.0024,
+    wind: 0.72,
+    bloom: 0.25,
+  },
   natural: {
     name: "Natural",
     // Tuned under the PBR Neutral tonemap, which keeps more chroma than the old filmic curve.
@@ -116,10 +139,13 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 const SKY = {
   nightZenith: [0.008, 0.016, 0.045] as Rgb,
   nightHorizon: [0.025, 0.04, 0.085] as Rgb,
-  duskZenith: [0.12, 0.14, 0.32] as Rgb,
-  duskHorizon: [0.95, 0.42, 0.18] as Rgb,
+  velvetNightZenith: [0.015, 0.017, 0.078] as Rgb,
+  velvetNightHorizon: [0.042, 0.04, 0.132] as Rgb,
+  duskZenith: [0.12, 0.13, 0.34] as Rgb,
+  duskHorizon: [0.96, 0.44, 0.18] as Rgb,
   dayZenith: [0.08, 0.22, 0.6] as Rgb,
   dayHorizon: [0.36, 0.53, 0.8] as Rgb,
+  sanctuaryHorizon: [0.46, 0.58, 0.72] as Rgb,
 };
 
 /** Moon phases cycle over this many game days. */
@@ -148,6 +174,7 @@ export function applyLook(
   day = 1,
   weather: Weather = { clouds: 0.35 },
 ) {
+  const painterly = look.painterly ?? 0;
   const sunAngle = (timeOfDay - 0.25) * Math.PI * 2;
   const sun = arc(sunAngle);
   const elev = sun[1];
@@ -168,20 +195,24 @@ export function applyLook(
   // The key light is the sun by day and the moon (by its phase) at night.
   const isSun = elev > 0 || moon[1] <= 0;
   const keyDir: Rgb = isSun ? (elev > 0 ? sun : [0, 1, 0]) : moon;
-  const sunColor = mixRgb([1.0, 0.45, 0.2], [1.0, 0.93, 0.82], smoothstep(0.0, 0.45, elev));
-  const keyColor = isSun ? sunColor : ([0.3, 0.42, 1.0] as Rgb);
+  const noonSun = mixRgb([1.0, 0.94, 0.83], [1.0, 0.91, 0.74], painterly);
+  const sunColor = mixRgb([1.0, 0.48, 0.22], noonSun, smoothstep(0.0, 0.45, elev));
+  const keyColor = isSun ? sunColor : mixRgb([0.3, 0.42, 1.0], [0.38, 0.44, 1.0], painterly);
   // The moon key runs stronger and cooler than a flat night fill so moon shadows actually read;
   // its strength follows the phase — a full moon lights the island, a new moon is starlight.
   const keyIntensity = isSun
     ? 2.3 * smoothstep(0.0, 0.12, elev) * mix(1, 0.55, overcast)
-    : (0.2 + 0.65 * illuminated) * smoothstep(0.0, 0.12, moon[1]);
+    : (0.2 + 0.58 * illuminated) * smoothstep(0.0, 0.12, moon[1]);
 
-  let zenith = mixRgb(SKY.nightZenith, SKY.dayZenith, day01);
-  let horizon = mixRgb(SKY.nightHorizon, SKY.dayHorizon, day01);
-  // Eyes adjust as the light goes; the dusk horizon is laid in dimmer by as much, or the
-  // exposure would wash its orange out to a pale pink.
-  // Eyes adjust less under a thin moon: a new moon is genuinely dark, a full one readable.
-  const exposure = mix(mix(1.7, 3.2, illuminated), 1.0, day01);
+  const nightZ = mixRgb(SKY.nightZenith, SKY.velvetNightZenith, painterly);
+  const nightH = mixRgb(SKY.nightHorizon, SKY.velvetNightHorizon, painterly);
+  const dayH = mixRgb(SKY.dayHorizon, SKY.sanctuaryHorizon, painterly * 0.45);
+  let zenith = mixRgb(nightZ, SKY.dayZenith, day01);
+  let horizon = mixRgb(nightH, dayH, day01);
+  // Eyes adjust as the light goes; in Miniature mode keep twilight deeper indigo so glowing
+  // lanterns, campfires, fireflies, and Floatsee faces pop with dramatic terrarium contrast.
+  const nightExp = mix(mix(1.7, 3.2, illuminated), mix(1.25, 1.85, illuminated), painterly);
+  const exposure = mix(nightExp, 1.0, day01);
   const keep = (1 - twilight * 0.3) * (1 - twilight * 0.75);
   const dusk = twilight * 0.75 / exposure;
   zenith = mixRgb(zenith, SKY.duskZenith, twilight * 0.6);
@@ -204,12 +235,19 @@ export function applyLook(
   // At night the ambient floor drops with the moon's phase, so the cool key has contrast to work
   // against instead of a flat blue wash.
   out[F.sunColor + 3] = mix(1.0, 1.15, day01) * mix(1, 1.3, overcast) *
-    mix(1.0, mix(0.4, 0.8, illuminated), night);
+    mix(1.0, mix(0.42, 0.72, illuminated), night);
   out.set(zenith, F.skyZenith);
   out[F.skyZenith + 3] = exposure;
   out.set(horizon, F.skyHorizon);
   out[F.skyHorizon + 3] = look.fogDensity;
-  out.set(mixRgb([0.01, 0.012, 0.02], [0.38, 0.32, 0.18], day01), F.groundAmbient);
+  out.set(
+    mixRgb(
+      mixRgb([0.01, 0.012, 0.02], [0.022, 0.02, 0.052], painterly),
+      mixRgb([0.38, 0.32, 0.18], [0.46, 0.37, 0.21], painterly),
+      day01,
+    ),
+    F.groundAmbient,
+  );
   out[F.groundAmbient + 3] = look.aoStrength;
   out.set(look.grassBase, F.grassBase);
   // Mist pools over low ground around sunrise and sunset, and a little under heavy cloud.
@@ -223,7 +261,8 @@ export function applyLook(
   out[F.wind] = 0.8;
   out[F.wind + 1] = 0.6;
   out[F.wind + 2] = look.wind * mix(1, 1.6, overcast);
-  out[F.grade] = look.saturation * mix(1, 0.45, night); // colors fade in moonlight
+  // In Miniature, preserve richer lantern/jewel chroma at night while still cooling shadow fill.
+  out[F.grade] = look.saturation * mix(1, mix(0.45, 0.72, painterly), night);
   out[F.grade + 1] = look.contrast;
   out[F.grade + 2] = look.warmth;
   out[F.grade + 3] = look.vignette;
@@ -236,5 +275,8 @@ export function applyLook(
   out[F.weather] = overcast;
   out[F.weather + 1] = 1;
   out[F.lookParams] = look.splitTone ?? 0;
+  out[F.lookParams + 1] = painterly;
+  out[F.lookParams + 2] = twilight * painterly;
+  out[F.lookParams + 3] = look.edgeDarken;
   out[F.weather + 3] = look.bloom;
 }

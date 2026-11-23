@@ -1,5 +1,4 @@
 import type { LinkState } from "./agentlink.ts";
-import { LOOKS } from "./render/look.ts";
 import { type SlotInfo, SLOTS } from "./sim/protocol.ts";
 import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
@@ -7,7 +6,6 @@ import type { VillageStatus } from "./sim/village.ts";
 import { pref, setPref } from "./prefs.ts";
 
 export interface DevHandlers {
-  look: (id: string) => void;
   time: (t: number) => void;
   speed: (s: number) => void;
   /** World slots: open one, start a new world, delete, export or import a world file. */
@@ -25,8 +23,6 @@ export interface DevHandlers {
   follow: (agentId: number | null) => void;
   /** Village Life on, or the world a Sandbox. */
   villageLife: (on: boolean) => void;
-  /** Hold the sky at this cloud cover, or let the weather drift (null). */
-  weather: (clouds: number | null) => void;
   /** Pin a Wish on the Notice Board, for anyone (null) or one villager by name. */
   wish: (text: string, forName: string | null) => void;
   unpin: (id: number) => void;
@@ -38,7 +34,6 @@ export interface DevHandlers {
 }
 
 export interface DevStatus {
-  look: string;
   timeOfDay: number;
   day: number;
   speed: number;
@@ -50,7 +45,6 @@ export interface DevStatus {
   catalog: Catalog;
   village: VillageStatus | null;
   clouds: number;
-  heldClouds: number | null;
   board: Wish[];
   boardVersion: number;
   muted: boolean;
@@ -61,12 +55,16 @@ export interface DevStatus {
 }
 
 const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
-const WEATHER: [string, number | null][] = [
-  ["natural", null],
-  ["clear", 0.05],
-  ["cloudy", 0.5],
-  ["overcast", 0.92],
-];
+const skyLabel = (clouds: number) =>
+  clouds < 0.16
+    ? "clear sky"
+    : clouds < 0.36
+    ? "light clouds"
+    : clouds < 0.62
+    ? "partly cloudy"
+    : clouds < 0.84
+    ? "cloudy"
+    : "overcast";
 const LINK_DOT: Record<LinkState, string> = {
   connecting: "",
   connected: "on",
@@ -86,39 +84,54 @@ const SMALL = "(max-width: 640px), (max-height: 500px)";
 
 const css = `
 .ai-panel{position:fixed;z-index:5;top:calc(12px + env(safe-area-inset-top));
-  right:calc(12px + env(safe-area-inset-right));width:250px;box-sizing:border-box;
-  display:flex;flex-direction:column;background:rgba(10,14,18,.72);backdrop-filter:blur(6px);
-  -webkit-backdrop-filter:blur(6px);border-radius:10px;font:12px/1.5 ui-monospace,monospace;
-  color:#d8dee9;user-select:none;-webkit-user-select:none;
-  /* Clear of the camera buttons at the bottom; the body scrolls when the board grows. */
-  max-height:calc(100vh - 96px);max-height:calc(100dvh - 96px)}
+  right:calc(12px + env(safe-area-inset-right));width:254px;box-sizing:border-box;
+  display:flex;flex-direction:column;background:rgba(24,22,30,.66);backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,244,218,.18);border-radius:14px;
+  font:12px/1.5 ui-monospace,monospace;color:#f2ebe0;user-select:none;-webkit-user-select:none;
+  box-shadow:0 8px 28px rgba(10,8,16,.3);
+  /* Clear of the camera and quick dock buttons at the bottom. */
+  max-height:calc(100vh - 142px);max-height:calc(100dvh - 142px)}
 .ai-panel.closed{width:auto;max-width:calc(100vw - 120px)}
-.ai-panel-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;margin:0;
+.ai-panel-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:34px;margin:0;
   padding:4px 10px 4px 14px;border:0;background:none;color:inherit;font:inherit;cursor:pointer;
-  text-align:left;border-radius:10px;-webkit-tap-highlight-color:transparent}
+  text-align:left;border-radius:14px;-webkit-tap-highlight-color:transparent}
 .ai-panel-bar .sum{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  opacity:.75}
-.ai-panel-bar .dot{width:7px;height:7px;border-radius:50%;background:#c9a13b;flex:none}
-.ai-panel-bar .dot.on{background:#7cc36b}
-.ai-panel-bar .dot.off{background:#c9604a}
+  opacity:.82}
+.ai-panel-bar .dot{width:7px;height:7px;border-radius:50%;background:#e4b956;flex:none}
+.ai-panel-bar .dot.on{background:#9ad88c}
+.ai-panel-bar .dot.off{background:#e07b67}
 .ai-panel-bar .chev{flex:none;opacity:.75;transition:transform .15s}
 .ai-panel.closed .chev{transform:rotate(-90deg)}
-.ai-panel-bar:focus-visible{outline:2px solid #9fd36b;outline-offset:-2px}
+.ai-panel-bar:focus-visible{outline:2px solid #b8df90;outline-offset:-2px}
 .ai-panel-body{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;overflow:auto;
   padding:2px 14px 12px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .ai-panel.closed .ai-panel-body{display:none}
-.ai-panel-body button{margin:2px 4px 0 0;padding:2px 8px;border-radius:6px;border:1px solid #445;
-  background:#1a2029;color:inherit;font:inherit;cursor:pointer;
-  -webkit-tap-highlight-color:transparent}
-.ai-panel-body button.on,.ai-panel-body button.accent{border-color:#9fd36b}
+.ai-panel-body button{margin:2px 4px 0 0;padding:3px 8px;border-radius:8px;
+  border:1px solid rgba(255,244,218,.18);background:rgba(38,35,48,.75);color:inherit;font:inherit;
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ai-panel-body button.on,.ai-panel-body button.accent{border-color:#b8df90;
+  background:rgba(56,82,56,.62)}
 .ai-panel-body button.small{padding:0 6px;margin:0}
-.ai-panel-body .head{opacity:.6}
+.ai-panel-body .head{opacity:.66;color:#dfd4c2}
 .ai-panel-body input:not([type]),.ai-panel-body select{width:100%;box-sizing:border-box;
-  margin-top:4px;padding:3px 6px;border-radius:6px;border:1px solid #445;background:#0e1319;
-  color:inherit;font:inherit}
+  margin-top:4px;padding:4px 7px;border-radius:8px;border:1px solid rgba(255,244,218,.2);
+  background:rgba(16,15,22,.78);color:inherit;font:inherit}
 .ai-panel-body select{width:auto;max-width:130px}
-.ai-panel-body input[type=range]{width:100%;margin:4px 0}
-@media (hover:hover){.ai-panel-body button:hover,.ai-panel-bar:hover{background:#232b36}}
+.ai-panel-body input[type=range]{width:100%;margin:4px 0;accent-color:#b8df90}
+@media (hover:hover){.ai-panel-body button:hover,.ai-panel-bar:hover{background:rgba(56,52,70,.72)}}
+/* Frosted-glass bottom-right mood dock (weather, time-of-day, village life — mockup 06). */
+.ai-dock{position:fixed;z-index:5;right:calc(12px + env(safe-area-inset-right));
+  bottom:calc(54px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center}
+.ai-dock button{width:38px;height:38px;border-radius:11px;border:1px solid rgba(255,246,228,.36);
+  background:rgba(28,26,38,.44);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:#faf4e8;display:grid;place-items:center;cursor:pointer;padding:0;
+  box-shadow:0 4px 14px rgba(10,10,18,.24);transition:background .15s,border-color .15s,transform .12s;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.ai-dock button svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.ai-dock button.on{border-color:rgba(184,223,144,.82);background:rgba(44,68,48,.58)}
+@media (hover:hover){.ai-dock button:hover{background:rgba(46,43,60,.68);
+  border-color:rgba(255,244,218,.68);transform:translateY(-1px)}}
 /* Fingers: bigger targets, and 16px fields so phones don't zoom in on focus. */
 @media (pointer:coarse){
   .ai-panel{font-size:13px}
@@ -127,12 +140,34 @@ const css = `
   .ai-panel-body button.small{min-width:36px;min-height:32px;padding:0 8px}
   .ai-panel-body input:not([type]),.ai-panel-body select{font-size:16px;min-height:38px}
   .ai-panel-body input[type=range]{height:32px}
+  .ai-dock{bottom:calc(62px + env(safe-area-inset-bottom))}
+  .ai-dock button{width:42px;height:42px}
 }
 @media (max-width:640px){
   .ai-panel:not(.closed){left:calc(8px + env(safe-area-inset-left));
     right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));
-    width:auto;max-height:72vh;max-height:72dvh;background:rgba(10,14,18,.86)}
+    width:auto;max-height:72vh;max-height:72dvh;background:rgba(22,20,28,.88)}
 }`;
+
+const MOOD_TIMES: [string, number][] = [
+  ["Sunlit morning", 0.36],
+  ["High noon", 0.5],
+  ["Golden dusk", 0.73],
+  ["Twilight lanterns", 0.85],
+];
+
+function svgIcon(paths: string[]): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
 
 /** Spectator/dev controls. Plain DOM, rebuilt only when its inputs change. */
 export function createDevPanel(on: DevHandlers) {
@@ -161,6 +196,31 @@ export function createDevPanel(on: DevHandlers) {
   bar.setAttribute("aria-controls", body.id);
   panel.append(bar, body);
   document.body.append(panel);
+
+  // Minimal frosted-glass bottom-right quick bar (time-of-day mood, village life heart).
+  const dock = document.createElement("div");
+  dock.className = "ai-dock";
+  let curTimeIdx = 0;
+  let curLife = true;
+  const timeQuick = document.createElement("button");
+  timeQuick.type = "button";
+  timeQuick.title = "Cycle time of day (Morning / Noon / Golden Dusk / Twilight)";
+  timeQuick.append(svgIcon(["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 7v5l3.5 2"]));
+  timeQuick.onclick = () => {
+    curTimeIdx = (curTimeIdx + 1) % MOOD_TIMES.length;
+    on.time(MOOD_TIMES[curTimeIdx][1]);
+  };
+  const heartQuick = document.createElement("button");
+  heartQuick.type = "button";
+  heartQuick.title = "Toggle Village Life / Sandbox";
+  heartQuick.append(
+    svgIcon([
+      "M12 20s-7.5-4.7-7.5-10.2A4.3 4.3 0 0 1 12 6.8a4.3 4.3 0 0 1 7.5 3C19.5 15.3 12 20 12 20Z",
+    ]),
+  );
+  heartQuick.onclick = () => on.villageLife(!curLife);
+  dock.append(timeQuick, heartQuick);
+  document.body.append(dock);
 
   // Open on a laptop, tucked away on a phone, unless the spectator chose otherwise here before.
   const small = matchMedia(SMALL);
@@ -209,13 +269,6 @@ export function createDevPanel(on: DevHandlers) {
   };
   const mark = (b: HTMLButtonElement, active: boolean) => b.classList.toggle("on", active);
 
-  const looks = section("look");
-  const lookButtons = Object.entries(LOOKS).map(([id, l]) => {
-    const b = button(l.name, () => on.look(id));
-    looks.body.append(b);
-    return [id, b] as const;
-  });
-
   const quality = section("quality");
   const QUALITY_BUTTONS = ["auto", "low", "medium", "high"] as const;
   const qualityButtons = QUALITY_BUTTONS.map((id) => button(id, () => on.quality(id)));
@@ -236,10 +289,9 @@ export function createDevPanel(on: DevHandlers) {
   time.body.append(slider, ...speedButtons);
 
   const world = section("world");
-  const weatherButtons = WEATHER.map(([label, c]) => button(label, () => on.weather(c)));
   let muted = false;
   const soundButton = button("", () => on.sound(!muted));
-  world.body.append(...weatherButtons, soundButton);
+  world.body.append(soundButton);
 
   // World slots: three worlds per browser, each with its own seed, save and agent link.
   const worlds = section("worlds");
@@ -363,7 +415,6 @@ export function createDevPanel(on: DevHandlers) {
     },
     /** Refresh readouts; call a few times a second, not every frame. */
     update(s: DevStatus) {
-      lookButtons.forEach(([id, b]) => mark(b, id === s.look));
       qualityButtons.forEach((b, i) => {
         const id = QUALITY_BUTTONS[i];
         mark(b, id === "auto" ? s.qualityAuto : id === s.quality && !s.qualityAuto);
@@ -376,8 +427,8 @@ export function createDevPanel(on: DevHandlers) {
         String(Math.floor(minutes / 60)).padStart(2, "0")
       }:${String(minutes % 60).padStart(2, "0")}`;
       worlds.head.textContent = `worlds · seed ${s.seed}`;
-      weatherButtons.forEach((b, i) => mark(b, WEATHER[i][1] === s.heldClouds));
-      weatherButtons[0].title = `clouds ${Math.round(s.clouds * 100)}%`;
+      world.head.textContent = `world · ${skyLabel(s.clouds)}`;
+      world.head.title = `today's sky (${Math.round(s.clouds * 100)}% clouds, random per day)`;
       muted = s.muted;
       soundButton.textContent = muted ? "sound off" : "sound on";
       mark(soundButton, !muted);
@@ -445,15 +496,17 @@ export function createDevPanel(on: DevHandlers) {
         String(minutes % 60).padStart(2, "0")
       }`;
       const n = s.agents.length;
-      summary.textContent = `day ${s.day} ${clock} · ${n} villager${n === 1 ? "" : "s"}`;
+      summary.textContent = `day ${s.day} ${clock} · ${n} floatsee${n === 1 ? "" : "s"}`;
       dot.className = `dot ${LINK_DOT[s.link]}`;
       bar.setAttribute("aria-label", `${summary.textContent}, ${LINK_TEXT[s.link]}: panel`);
 
       const v = s.village;
       if (v) {
         life = v.life;
+        curLife = life;
         mark(lifeButton, life);
         mark(sandboxButton, !life);
+        mark(heartQuick, life);
         village.head.textContent = life
           ? `village · a ${v.level}, ${v.points}${v.next === null ? "" : `/${v.next}`} points`
           : "village · sandbox: no needs, all unlocked";
