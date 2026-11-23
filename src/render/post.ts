@@ -124,21 +124,24 @@ fn toSrgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
 }
 
-/** One scene pixel plus its glow, exposed, tonemapped, graded and in sRGB (before the vignette). */
-fn display(p: vec2i, glow: vec3f) -> vec3f {
-  let size = vec2i(textureDimensions(scene));
+/** One exposed, AO-applied, tonemapped pixel before sRGB and grading (cheap enough for CAS taps). */
+fn toneAt(p: vec2i, size: vec2i, ao: f32, glow: vec3f) -> vec4f {
   var raw = textureLoad(scene, clamp(p, vec2i(0), size - 1), 0).rgb;
   // Ambient occlusion: it eats the ambient term, not sunlight, so its strength fades on the
   // brightest pixels (sunlit surfaces, glints, lamps).
-  let ao = textureSampleLevel(aoMap, bloomSampler, (vec2f(p) + 0.5) / vec2f(size), 0.0).r;
   let aoK = 0.75 * (1.0 - smoothstep(0.5, 1.4, max(raw.r, max(raw.g, raw.b))));
   raw *= mix(1.0, ao, aoK);
-  raw = (raw + glow) * frame.skyZenith.w;
-  var c = toSrgb(neutral(raw * GAIN));
+  let exposed = (raw + glow) * frame.skyZenith.w;
+  return vec4f(neutral(exposed * GAIN), max(exposed.r, max(exposed.g, exposed.b)));
+}
+
+/** Final sRGB + color grading on the sharpened tonemapped pixel. */
+fn gradeDisplay(tonemapped: vec3f, peak: f32) -> vec3f {
+  var c = toSrgb(clamp(tonemapped, vec3f(0.0), vec3f(1.0)));
   let g = frame.grade;
   // Moonlit grading (washed-out colors, a blue cast) is for things lit only by the moon; what a
   // lamp or a fire lights is bright enough to keep its color, as eyes see it.
-  let lit = max(frame.extra.y, smoothstep(0.12, 0.55, max(raw.r, max(raw.g, raw.b))));
+  let lit = max(frame.extra.y, smoothstep(0.12, 0.55, peak));
   let day = 1.0 - 0.55 * (1.0 - frame.extra.y);
   let saturation = mix(g.x, g.x / day, lit * 0.7);
   let luma = dot(c, vec3f(0.2126, 0.7152, 0.0722));
@@ -159,25 +162,35 @@ fn display(p: vec2i, glow: vec3f) -> vec3f {
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let size = vec2f(textureDimensions(scene));
+  let isize = vec2i(size);
   let p = vec2i(pos.xy);
-  // The glow is smooth: one sample serves the pixel and the neighbours the sharpening reads.
-  let glow = textureSampleLevel(bloom, bloomSampler, pos.xy / size, 0.0).rgb *
-    (frame.weather.w / ${BLOOM_LEVELS}.0);
-  var c = display(p, glow);
-  if (SHARPEN > 0.0) {
+  let uv01 = pos.xy / size;
+  // Glow and AO are smooth half/quarter-res buffers: one sample serves the center and neighbours.
+  let glow = select(
+    vec3f(0.0),
+    textureSampleLevel(bloom, bloomSampler, uv01, 0.0).rgb * (frame.weather.w / ${BLOOM_LEVELS}.0),
+    frame.weather.w > 0.0,
+  );
+  let ao = textureSampleLevel(aoMap, bloomSampler, uv01, 0.0).r;
+  let center = toneAt(p, isize, ao, glow);
+  var t = center.rgb;
+  if (SHARPEN > 0.0 && frame.qualityParams.x >= 0.5) {
     // Lift each pixel away from its neighbours in proportion to how much local contrast
     // headroom it has, so edges crisp up without halos and flat areas stay smooth.
-    let n = display(p + vec2i(0, -1), glow);
-    let s = display(p + vec2i(0, 1), glow);
-    let e = display(p + vec2i(1, 0), glow);
-    let w = display(p + vec2i(-1, 0), glow);
+    let c = sqrt(max(t, vec3f(0.0)));
+    let n = sqrt(max(toneAt(p + vec2i(0, -1), isize, ao, glow).rgb, vec3f(0.0)));
+    let s = sqrt(max(toneAt(p + vec2i(0, 1), isize, ao, glow).rgb, vec3f(0.0)));
+    let e = sqrt(max(toneAt(p + vec2i(1, 0), isize, ao, glow).rgb, vec3f(0.0)));
+    let w = sqrt(max(toneAt(p + vec2i(-1, 0), isize, ao, glow).rgb, vec3f(0.0)));
     let lo = min(c, min(min(n, s), min(e, w)));
     let hi = max(c, max(max(n, s), max(e, w)));
     let amp = sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3f(1e-4)), vec3f(0.0), vec3f(1.0)));
     let k = -amp * mix(0.125, 0.2, SHARPEN);
-    c = clamp((c + (n + s + e + w) * k) / (1.0 + 4.0 * k), vec3f(0.0), vec3f(1.0));
+    let sharp = clamp((c + (n + s + e + w) * k) / (1.0 + 4.0 * k), vec3f(0.0), vec3f(1.0));
+    t = sharp * sharp;
   }
-  let uv = pos.xy / size - 0.5;
+  var c = gradeDisplay(t, center.a);
+  let uv = uv01 - 0.5;
   c *= 1.0 - frame.grade.w * dot(uv, uv) * 1.6;
 
   let noise = fract(sin(dot(pos.xy, vec2f(12.9898, 78.233))) * 43758.5453);

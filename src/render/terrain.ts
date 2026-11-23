@@ -65,7 +65,7 @@ fn dirtTone(uv: vec2f) -> f32 {
   return (0.85 + 0.3 * valueNoise(uv * 4.0)) * (0.9 + 0.2 * valueNoise(uv * 13.0));
 }
 
-fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
+fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32, field: vec2f) -> vec3f {
   let uv = faceUV(world, face);
   let top = face == 2u || face == 3u;
   switch pattern {
@@ -73,7 +73,7 @@ fn patternAlbedo(pattern: u32, base: vec3f, world: vec3f, face: u32) -> vec3f {
       let painterly = frame.lookParams.y;
       var green = meadowColor(frame.grassBase.rgb, world.xz) * mix(0.85, 0.96, painterly);
       // Lusher close to the waterline; the field map's shore distance fades it inland.
-      let shoreLush = smoothstep(0.64, 0.52, fieldAt(world.xz).y);
+      let shoreLush = smoothstep(0.64, 0.52, field.y);
       green = mix(green, green * vec3f(0.82, 1.07, 0.9), shoreLush * 0.7);
       if (face == 2u) {
         // Broad swaths of growth persist at island scale while the mipmapped turf below
@@ -225,9 +225,7 @@ fn patternRough(pattern: u32) -> f32 {
  * ground (sand, gravel, clay, dirt) by reading the column under a noise-wobbled position, so
  * riverbed patches are blobs, not squares. Only neighbours within a block of height blend.
  */
-fn groundMaterial(block: u32, world: vec3f) -> u32 {
-  let c = vec2i(floor(world.xz));
-  let s = textureLoad(surface, c, 0);
+fn groundMaterial(block: u32, world: vec3f, c: vec2i, s: vec4u) -> u32 {
   if (s.g != block || !natural(block)) { return block; }
   let grassy = isGrassy(s, world.xz);
   if (grassy) { return 1u; }
@@ -254,56 +252,63 @@ fn groundMaterial(block: u32, world: vec3f) -> u32 {
 
 /** How wet the ground at world is (0-1): the field map's shore distance, with a noise
  * wobble so the band wiggles at any angle. g is 0.5 at the waterline and rises inland. */
-fn wetness(world: vec3f) -> f32 {
-  let g = fieldAt(world.xz).y + (valueNoise(world.xz * 2.1) - 0.5) * 0.05;
+fn wetnessFrom(world: vec3f, shore: f32) -> f32 {
+  let g = shore + (valueNoise(world.xz * 2.1) - 0.5) * 0.05;
   return smoothstep(0.64, 0.53, g);
 }
 
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  let block = select(in.block, groundMaterial(in.block, in.world), in.face == 2u);
+  let colCell = vec2i(floor(in.world.xz));
+  let s = textureLoad(surface, colCell, 0);
+  let field = fieldAt(in.world.xz);
+  let block = select(in.block, groundMaterial(in.block, in.world, colCell, s), in.face == 2u);
   let info = blockInfo[block];
   let n = normalize(in.normal);
   let cell = floor(in.world - n * 0.5);
   let jitter = 0.95 + 0.1 * hash21(cell.xz + cell.y * 17.0);
-  var albedo = patternAlbedo(u32(info.w), info.rgb, in.world, in.face) * jitter;
-  let s = textureLoad(surface, vec2i(floor(in.world.xz)), 0);
+  let pattern = u32(info.w);
+  var albedo = patternAlbedo(pattern, info.rgb, in.world, in.face, field) * jitter;
   let depth = f32(s.a) - 0.12 - in.world.y;
+  var wet = 0.0;
+  if (in.face == 2u && field.y < 0.7) { wet = wetnessFrom(in.world, field.y); }
   // Bare ground at the waterline is wet: darker and richer, along a wobbling edge. Under the
   // water the absorption below takes over.
-  if (in.face == 2u && block != 1u && natural(block) && (s.a == 0u || depth < 0.3)) {
+  if (in.face == 2u && block != 1u && natural(block) && wet > 0.0 && (s.a == 0u || depth < 0.3)) {
     let above = 1.0 - smoothstep(0.0, 0.3, select(depth, 0.0, s.a == 0u));
-    albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wetness(in.world) * above);
+    albedo *= mix(vec3f(1.0), vec3f(0.6, 0.64, 0.7), wet * above);
   }
   // The meadow floor takes the blades' clump and occlusion terms, so thin or sparse grass never
   // exposes a flat green sheet underneath.
   if (in.face == 2u && block == 1u) {
-    albedo *= 0.85 + 0.3 * valueNoise(in.world.xz * 0.3);
+    albedo *= (0.85 + 0.3 * valueNoise(in.world.xz * 0.3)) * mix(1.0, field.x, 0.5);
   }
   // The field map: ambient falls off under crowns and at the foot of cliffs and walls, and
   // villagers/animals sit in a soft contact blob.
-  let field = fieldAt(in.world.xz);
-  if (in.face == 2u && block == 1u) { albedo *= mix(1.0, field.x, 0.5); }
   let ao = mix(1.0, in.ao, frame.groundAmbient.w) * mix(1.0, field.x, 0.8) *
     (1.0 - pusherShade(in.world.xz) * 0.4);
-  let pattern = u32(info.w);
   let h = patternHeight(pattern, in.world, in.face);
   let uv = faceUV(in.world, in.face) * 0.92;
   let grain = textureSample(grainTiles, grainSampler, uv, pattern).r;
   albedo *= 1.0 + (grain - 0.5) * vec3f(0.96, 0.82, 0.66);
   let footprint = max(length(dpdx(in.world)), length(dpdy(in.world)));
   let n2 = reliefNormal(n, in.world, (h - 0.5) * 0.16 * (1.0 - smoothstep(0.2, 0.9, footprint)) + grain * 0.018);
-  var color = shade(albedo, n2, in.world, ao, 0.0) +
+  let underWater = s.a > 0u && depth > 0.0;
+  let needLight = frame.sunDir.w > 0.001 && (dot(n2, frame.sunDir.xyz) > 0.0 || underWater || (in.face != 2u && natural(block)));
+  var light = 0.0;
+  if (needLight) { light = keyLight(in.world, n2); }
+  var color = shadeWith(albedo, n2, light, ao, 0.0) +
+    albedo * (lampLight(in.world, n2) + groundBounce(n2)) * ao +
     selfLit(albedo * fract(info.w) * EMISSIVE * mix(1.0, 1.8, frame.extra.x));
 
   // One specular lobe for the key light and a Fresnel-weighted sky sheen for smooth or wet
   // surfaces: stone and tiles get a soft sheen, the wet band goes glossy.
   let view = normalize(frame.cameraPos.xyz - in.world);
   var rough = patternRough(pattern);
-  if (in.face == 2u) { rough = mix(rough, 0.2, wetness(in.world)); }
+  if (in.face == 2u) { rough = mix(rough, 0.2, wet); }
   let gloss = 1.0 - rough;
   if (gloss > 0.03) {
     let hdir = normalize(view + frame.sunDir.xyz);
-    color += frame.sunColor.rgb * frame.sunDir.w * keyLight(in.world, n2) *
+    color += frame.sunColor.rgb * frame.sunDir.w * light *
       pow(max(dot(n2, hdir), 0.0), mix(10.0, 200.0, gloss * gloss)) * gloss * gloss * 0.55;
     color += skyColor(reflect(-view, n2)) * pow(1.0 - max(dot(n2, view), 0.0), 5.0) * gloss * 0.6;
   }
@@ -322,7 +327,7 @@ fn wetness(world: vec3f) -> f32 {
     let moss = mossBase * smoothstep(0.4 - 0.1 * painterly, 0.7, valueNoise(in.world.xz * 2.6 + in.world.y));
     color = mix(color, vec3f(0.11, 0.24, 0.065) * dirtTone(faceUV(in.world, in.face)) *
       (frame.skyZenith.rgb * frame.sunColor.w * 0.55 + frame.groundAmbient.rgb * 0.35 +
-        keyLight(in.world, n2) * frame.sunColor.rgb * frame.sunDir.w), moss * mix(0.7, 0.88, painterly));
+        light * frame.sunColor.rgb * frame.sunDir.w), moss * mix(0.7, 0.88, painterly));
   }
   // Miniature tactile bevel on non-natural built blocks and cliff steps (subtle carved edge shade).
   if (painterly > 0.01 && (!natural(block) || in.face != 2u)) {
@@ -334,13 +339,13 @@ fn wetness(world: vec3f) -> f32 {
   }
 
   // Under water: light is absorbed with depth (red first) and dances in caustics.
-  if (s.a > 0u && depth > 0.0) {
+  if (underWater) {
     let t = frame.cameraPos.w;
     let q = in.world.xz * 1.3;
     let c1 = valueNoise(q + vec2f(t * 0.35, t * 0.2));
     let c2 = valueNoise(q * 1.7 - vec2f(t * 0.25, -t * 0.3));
     let caustic = pow(1.0 - abs(c1 - c2), 6.0) * smoothstep(0.0, 0.6, depth) * exp(-depth * 0.5);
-    color += albedo * frame.sunColor.rgb * frame.sunDir.w * caustic * 0.5 * keyLight(in.world, n);
+    color += albedo * frame.sunColor.rgb * frame.sunDir.w * caustic * 0.5 * light;
     color *= exp(-depth * vec3f(0.85, 0.36, 0.26));
   }
   return vec4f(fog(color, in.world), 1.0);

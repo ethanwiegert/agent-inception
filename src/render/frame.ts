@@ -29,7 +29,9 @@ export const F = {
   lightViewProj1: 180,
   /** Per-look post options: split-tone strength (0 keeps colors true). */
   lookParams: 196,
-  size: 116 + 16 * 4 + 16 + 4,
+  /** Quality knobs: x tier (0 low, 1 medium, 2 high), y wide shadow on (0/1), z/w reserved. */
+  qualityParams: 200,
+  size: 116 + 16 * 4 + 16 + 8,
 } as const;
 
 export const frameWgsl = /* wgsl */ `
@@ -57,6 +59,7 @@ struct Frame {
   pushers: array<vec4f, 16>,
   lightViewProj1: mat4x4f,
   lookParams: vec4f,
+  qualityParams: vec4f,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 `;
@@ -192,7 +195,7 @@ fn pusherShade(xz: vec2f) -> f32 {
   var dark = 0.0;
   for (var i = 0; i < 16; i++) {
     let p = frame.pushers[i];
-    if (p.w <= 0.0) { continue; }
+    if (p.w <= 0.0) { break; }
     let d = distance(xz, p.xz) / p.w;
     dark += max(0.0, 1.0 - d * d);
   }
@@ -223,16 +226,16 @@ fn lampLight(world: vec3f, n: vec3f) -> vec3f {
   return s.rgb * s.rgb * LAMP_INTENSITY * flicker / mix(1.0, frame.skyZenith.w, 0.6);
 }
 
-const POISSON = array<vec2f, 12>(
+const POISSON = array<vec2f, 8>(
   vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696, 0.457), vec2f(-0.203, 0.621),
-  vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893),
-  vec2f(0.507, 0.064), vec2f(0.896, 0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598));
+  vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893));
 
 /**
  * The wide cascade (layer 1): four taps and a bigger normal bias suit its coarser texels. Shadows
  * fade out at its rim — the cloud-shadow term takes over beyond it.
  */
 fn shadowWide(world: vec3f, n: vec3f) -> f32 {
+  if (frame.qualityParams.y < 0.5) { return 1.0; }
   let p = frame.lightViewProj1 * vec4f(world + n * 0.2, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
@@ -248,6 +251,7 @@ fn shadowWide(world: vec3f, n: vec3f) -> f32 {
 }
 
 fn shadowAt(world: vec3f, n: vec3f) -> f32 {
+  if (frame.qualityParams.x < 0.5) { return shadowFast(world + n * 0.05); }
   let p = frame.lightViewProj * vec4f(world + n * 0.05, 1.0);
   let ndc = p.xyz / p.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
@@ -255,15 +259,15 @@ fn shadowAt(world: vec3f, n: vec3f) -> f32 {
   var s = 1.0;
   if (m < 1.0 && ndc.z < 1.0) {
     let texel = 1.8 / vec2f(textureDimensions(shadowMap).xy);
-    // Rotate the disc per pixel so the 12 taps blur into soft penumbrae instead of banding.
+    // Rotate the disc per pixel so the 8 taps blur into soft penumbrae instead of banding.
     let a = hash21(floor(world.xz * 37.0) + world.y) * 6.2831853;
     let rot = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
     var sum = 0.0;
-    for (var i = 0; i < 12; i++) {
+    for (var i = 0; i < 8; i++) {
       sum += textureSampleCompareLevel(
         shadowMap, shadowSampler, uv + rot * POISSON[i] * texel, 0, ndc.z);
     }
-    s = sum / 12.0;
+    s = sum * 0.125;
   }
   // Blend into the wide cascade over the near box's last tenth: no seam, no pop when orbiting.
   if (m > 0.0) { s = mix(s, shadowWide(world, n), m); }
@@ -288,6 +292,24 @@ fn shadowFast(world: vec3f) -> f32 {
   }
   if (m > 0.0) { s = mix(s, shadowWide(world, vec3f(0.0, 1.0, 0.0)), m); }
   return s;
+}
+
+/** Single hardware-filtered tap for raymarched air/shafts (jittered and upsampled). */
+fn shadowPoint(world: vec3f) -> f32 {
+  let p = frame.lightViewProj * vec4f(world, 1.0);
+  let ndc = p.xyz / p.w;
+  let uv = ndc.xy * vec2f(0.5, -0.5) + 0.5;
+  if (all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && ndc.z < 1.0) {
+    return textureSampleCompareLevel(shadowMap, shadowSampler, uv, 0, ndc.z);
+  }
+  if (frame.qualityParams.y < 0.5) { return 1.0; }
+  let p1 = frame.lightViewProj1 * vec4f(world, 1.0);
+  let ndc1 = p1.xyz / p1.w;
+  let uv1 = ndc1.xy * vec2f(0.5, -0.5) + 0.5;
+  if (all(uv1 > vec2f(0.0)) && all(uv1 < vec2f(1.0)) && ndc1.z < 1.0) {
+    return textureSampleCompareLevel(shadowMap, shadowSampler, uv1, 1, ndc1.z);
+  }
+  return 1.0;
 }
 
 /** Direct key light reaching a point: shadows and clouds. */

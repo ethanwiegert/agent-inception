@@ -46,15 +46,21 @@ fn ign(px: vec2f) -> f32 {
   let size = vec2i(textureDimensions(halfDepthTex));
   let L = textureLoad(halfDepthTex, vec2i(px), 0).r;
   if (L > 3000.0) { return vec4f(1.0); }
-  let p0 = worldFromLinear(px, L);
+  // Near-plane points are affine in pixel coordinates: compute the basis once instead of
+  // multiplying invViewProj inside the march loop.
+  let cam = frame.cameraPos.xyz;
+  let invNear = 1.0 / frame.depthParams.x;
+  let r0 = (worldAt(px * 2.0, 0.0) - cam) * invNear;
+  let drx = (worldAt((px + vec2f(1.0, 0.0)) * 2.0, 0.0) - cam) * invNear - r0;
+  let dry = (worldAt((px + vec2f(0.0, 1.0)) * 2.0, 0.0) - cam) * invNear - r0;
+  let p0 = cam + r0 * L;
   // Surface normal from the two right/down neighbours' reconstructed positions.
   let qx = clamp(vec2i(px) + vec2i(1, 0), vec2i(0), size - 1);
   let qy = clamp(vec2i(px) + vec2i(0, 1), vec2i(0), size - 1);
-  var n = normalize(cross(
-    worldFromLinear(vec2f(qx), textureLoad(halfDepthTex, qx, 0).r) - p0,
-    worldFromLinear(vec2f(qy), textureLoad(halfDepthTex, qy, 0).r) - p0,
-  ));
-  if (dot(n, frame.cameraPos.xyz - p0) < 0.0) { n = -n; }
+  let px1 = cam + (r0 + drx * f32(qx.x - i32(px.x))) * textureLoad(halfDepthTex, qx, 0).r;
+  let py1 = cam + (r0 + dry * f32(qy.y - i32(px.y))) * textureLoad(halfDepthTex, qy, 0).r;
+  var n = normalize(cross(px1 - p0, py1 - p0));
+  if (dot(n, cam - p0) < 0.0) { n = -n; }
 
   // Screen-space march length: RADIUS blocks projected at this depth, spread over STEPS.
   let radiusPx = clamp(RADIUS * f32(size.y) * 0.5 / max(L, 1.0) / ${TAN_HALF_FOV}, 1.5, 18.0);
@@ -66,7 +72,9 @@ fn ign(px: vec2f) -> f32 {
     for (var k = 1; k <= ${steps}; k++) {
       let q = vec2i(px + dir * (f32(k) * radiusPx / ${steps.toFixed(1)}));
       if (any(q < vec2i(0)) || any(q >= size)) { continue; }
-      let v = worldFromLinear(vec2f(q), textureLoad(halfDepthTex, q, 0).r) - p0;
+      let dq = vec2f(q) - px;
+      let qL = textureLoad(halfDepthTex, q, 0).r;
+      let v = cam + (r0 + drx * dq.x + dry * dq.y) * qL - p0;
       let dist = length(v);
       if (dist > RADIUS || dist < 1e-3) { continue; }
       horizon = max(horizon, dot(v, n) / dist);
@@ -98,13 +106,15 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
   let L0 = textureLoad(halfDepthTex, px, 0).r;
   var sum = 0.0;
   var weight = 0.0;
-  for (var k = 0; k < 16; k++) {
-    let q = px + vec2i(k & 3, k >> 2) - 2;
-    if (any(q < vec2i(0)) || any(q >= size)) { continue; }
-    // Depth-aware: taps on the other side of an edge (a silhouette, a step) don't bleed.
-    let w = exp(-abs(textureLoad(halfDepthTex, q, 0).r - L0) * 0.6);
-    sum += textureLoad(src, q, 0).r * w;
-    weight += w;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let q = px + vec2i(dx, dy);
+      if (any(q < vec2i(0)) || any(q >= size)) { continue; }
+      // Depth-aware: taps on the other side of an edge (a silhouette, a step) don't bleed.
+      let w = exp(-abs(textureLoad(halfDepthTex, q, 0).r - L0) * 0.6);
+      sum += textureLoad(src, q, 0).r * w;
+      weight += w;
+    }
   }
   return vec4f(sum / max(weight, 1e-4));
 }

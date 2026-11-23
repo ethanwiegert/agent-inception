@@ -44,10 +44,16 @@ export interface Layouts {
   samples: number;
 }
 
-const SHADOW_SIZE = 2048;
-/** Blocks from the eye past which props draw with their low mesh (a crown is then too small on
- *  screen for its baked grain to show). The shadow map passes 0: every shadow draws low. */
-const LOD_DISTANCE = 110;
+/** Shadow map size on hardware vs software adapters. */
+const SHADOW_SIZE_HW = 2048;
+const SHADOW_SIZE_SW = 1024;
+/** Blocks from the eye past which props draw with their low mesh, per quality tier. */
+const LOD_DISTANCES: Record<Quality, number> = { low: 28, medium: 48, high: 75 };
+
+export interface RendererOptions {
+  /** Software WebGPU adapter: drops MSAA and halves shadow map size to stay usable on CPU. */
+  softwareGpu?: boolean;
+}
 
 /** What's in the world this frame besides terrain. */
 export interface SceneState {
@@ -173,7 +179,11 @@ export class Renderer {
   readonly particles: ParticleRenderer;
   readonly life: LifeRenderer;
 
-  constructor(private device: GPUDevice, private world: World) {
+  private shadowSize: number;
+
+  constructor(private device: GPUDevice, private world: World, options: RendererOptions = {}) {
+    const samples = options.softwareGpu ? 1 : 4;
+    this.shadowSize = options.softwareGpu ? SHADOW_SIZE_SW : SHADOW_SIZE_HW;
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     this.layouts = {
@@ -213,14 +223,14 @@ export class Renderer {
           {
             binding: 2,
             visibility: GPUShaderStage.FRAGMENT,
-            texture: { sampleType: "depth", multisampled: true, viewDimension: "2d" },
+            texture: { sampleType: "depth", multisampled: samples > 1, viewDimension: "2d" },
           },
           { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
         ],
       }),
       colorFormat: "rgba16float",
       depthFormat: "depth24plus",
-      samples: 4,
+      samples,
     };
 
     this.frameBuffer = device.createBuffer({
@@ -229,7 +239,7 @@ export class Renderer {
     });
     this.shadowTexture = device.createTexture({
       // Two layers: 0 the near box around the target, 1 the ±260-block horizon cascade.
-      size: [SHADOW_SIZE, SHADOW_SIZE, 2],
+      size: [this.shadowSize, this.shadowSize, 2],
       format: "depth32float",
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
@@ -394,7 +404,11 @@ export class Renderer {
     this.lightField.update(scene.light);
     fd[F.extra + 3] = scene.light?.lit ? 1 : 0;
     fd[F.weather + 2] = scene.tick - scene.cropsTick;
-    if (this.debug.has("bloom")) fd[F.weather + 3] = 0;
+    const low = this.quality === "low";
+    const skipBloom = low || this.debug.has("bloom");
+    if (skipBloom) fd[F.weather + 3] = 0;
+    fd[F.qualityParams] = low ? 0 : this.quality === "medium" ? 1 : 2;
+    fd[F.qualityParams + 1] = !low && !this.debug.has("shadow") ? 1 : 0;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
     frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
@@ -421,22 +435,25 @@ export class Renderer {
     this.fillPushers(fd, scene, camera.target);
     device.queue.writeBuffer(this.frameBuffer, 0, fd);
     // The far shadow pass reads lightViewProj too: give it a copy carrying the wide matrix.
-    this.farFrameData.set(fd);
-    this.farFrameData.copyWithin(F.lightViewProj, F.lightViewProj1, F.lightViewProj1 + 16);
-    device.queue.writeBuffer(this.farFrameBuffer, 0, this.farFrameData);
+    if (!low) {
+      this.farFrameData.set(fd);
+      this.farFrameData.copyWithin(F.lightViewProj, F.lightViewProj1, F.lightViewProj1 + 16);
+      device.queue.writeBuffer(this.farFrameBuffer, 0, this.farFrameData);
+    }
 
     const encoder = device.createCommandEncoder();
     // The GPU timer's start stamp goes on the frame's first pass, whatever it turns out to be
     // (cull compute today; the cloud slab once it exists); the end stays on the post pass.
     this.stampStarted = false;
+    const lodDist = LOD_DISTANCES[this.quality];
     if (!this.debug.has("props")) {
       const cull = encoder.beginComputePass({
         label: "models-cull",
         timestampWrites: this.firstStamp() as GPUComputePassTimestampWrites | undefined,
       });
-      this.models.cull(cull, this.flora, 0, this.planes, camera.eye, LOD_DISTANCE);
+      this.models.cull(cull, this.flora, 0, this.planes, camera.eye, lodDist);
       this.models.cull(cull, this.flora, 1, this.lightPlanes, camera.eye, 0);
-      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye, LOD_DISTANCE);
+      this.models.cull(cull, this.groundCover, 0, this.planes, camera.eye, lodDist);
       cull.end();
     }
 
@@ -458,50 +475,54 @@ export class Renderer {
     }
     shadowPass.end();
 
-    // Cascade 1 is amortized: it redraws at most every other frame, and only when its snapped
-    // matrix actually moved (the sun turning or the target leaving a texel).
-    const fm = fd.subarray(F.lightViewProj1, F.lightViewProj1 + 16);
-    let moved = false;
-    for (let i = 0; i < 16; i++) {
-      if (Math.abs(fm[i] - this.farDrawn[i]) > 1e-5) moved = true;
-    }
-    this.farFrames++;
-    // Posed captures always get a fresh cascade — the amortized layer could belong to the
-    // previous frame's pose. With ?debug=shadow the pass still runs so the layer is cleared.
-    if (
-      capture || !this.farEverDrawn || moved && this.farFrames % 2 === 0 ||
-      this.debug.has("shadow")
-    ) {
-      this.farDrawn.set(fm);
-      this.farEverDrawn = true;
-      const farPass = encoder.beginRenderPass({
-        colorAttachments: [],
-        depthStencilAttachment: {
-          view: this.shadowFarView,
-          depthClearValue: 1,
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
-        },
-      });
-      farPass.setBindGroup(0, this.farFrameBindGroup);
-      if (!this.debug.has("shadow")) {
-        this.terrain.drawShadow(farPass, this.farLightPlanes);
-        // Flora draws uncullled at its low mesh (view 2 doesn't exist, so drawWith draws all).
-        if (!this.debug.has("props")) this.models.drawShadow(farPass, this.flora, 2);
+    // Cascade 1 is skipped on low quality and amortized on medium/high: it redraws only when
+    // its snapped matrix actually moved (sun turning or target leaving a texel).
+    if (!low) {
+      const fm = fd.subarray(F.lightViewProj1, F.lightViewProj1 + 16);
+      let moved = false;
+      for (let i = 0; i < 16; i++) {
+        if (Math.abs(fm[i] - this.farDrawn[i]) > 1e-5) moved = true;
       }
-      farPass.end();
+      this.farFrames++;
+      const cadence = this.quality === "medium" ? 4 : 2;
+      // Posed captures always get a fresh cascade — the amortized layer could belong to the
+      // previous frame's pose. With ?debug=shadow the pass still runs so the layer is cleared.
+      if (
+        capture || !this.farEverDrawn || moved && this.farFrames % cadence === 0 ||
+        this.debug.has("shadow")
+      ) {
+        this.farDrawn.set(fm);
+        this.farEverDrawn = true;
+        const farPass = encoder.beginRenderPass({
+          colorAttachments: [],
+          depthStencilAttachment: {
+            view: this.shadowFarView,
+            depthClearValue: 1,
+            depthLoadOp: "clear",
+            depthStoreOp: "store",
+          },
+        });
+        farPass.setBindGroup(0, this.farFrameBindGroup);
+        if (!this.debug.has("shadow")) {
+          this.terrain.drawShadow(farPass, this.farLightPlanes);
+          // Flora draws uncullled at its low mesh (view 2 doesn't exist, so drawWith draws all).
+          if (!this.debug.has("props")) this.models.drawShadow(farPass, this.flora, 2);
+        }
+        farPass.end();
+      }
     }
     if (!this.debug.has("grass")) this.grass.cull(encoder, this.frameBindGroup, blades);
 
     const skip = this.debug;
-    if (this.quality === "low") {
+    const msaa = this.layouts.samples > 1;
+    if (low) {
       // Low tier keeps one forward pass: no stored depth, no opaque/trans split.
       const main = encoder.beginRenderPass({
         colorAttachments: [{
           view: targets.colorView,
-          resolveTarget: targets.resolveView,
+          resolveTarget: msaa ? targets.resolveView : undefined,
           loadOp: "clear",
-          storeOp: "discard",
+          storeOp: msaa ? "discard" : "store",
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
         }],
         depthStencilAttachment: {
@@ -531,12 +552,12 @@ export class Renderer {
       if (!skip.has("life")) this.life.draw(main);
       main.end();
     } else {
-      // Opaque stores its MSAA color and depth and resolves to `opaque`: the scene transparent
+      // Opaque stores its color and depth and exposes `opaque`: the scene transparent
       // passes then read (refraction, soft shorelines, AO, shafts).
       const opaque = encoder.beginRenderPass({
         colorAttachments: [{
           view: targets.colorView,
-          resolveTarget: targets.opaqueView!,
+          resolveTarget: msaa ? targets.opaqueView! : undefined,
           loadOp: "clear",
           storeOp: "store",
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
@@ -562,6 +583,13 @@ export class Renderer {
       if (!skip.has("grass")) this.grass.draw(opaque);
       if (!skip.has("sky")) this.sky.draw(opaque, this.plainFrameBindGroup);
       opaque.end();
+      if (!msaa) {
+        encoder.copyTextureToTexture(
+          { texture: targets.resolve },
+          { texture: targets.opaque! },
+          [targets.width, targets.height],
+        );
+      }
 
       if (!skip.has("depthdown")) {
         this.depthDown.draw(
@@ -600,13 +628,13 @@ export class Renderer {
         );
       }
 
-      // Transparent: loads the MSAA color, reads depth without writing, resolves to `resolve`.
+      // Transparent: loads the scene color, reads depth without writing, resolves to `resolve`.
       const trans = encoder.beginRenderPass({
         colorAttachments: [{
           view: targets.colorView,
-          resolveTarget: targets.resolveView,
+          resolveTarget: msaa ? targets.resolveView : undefined,
           loadOp: "load",
-          storeOp: "discard",
+          storeOp: msaa ? "discard" : "store",
         }],
         depthStencilAttachment: {
           view: targets.depthView,
@@ -631,7 +659,7 @@ export class Renderer {
         );
       }
     }
-    if (!skip.has("bloom")) this.post.drawBloom(encoder, this.plainFrameBindGroup, targets.bloom);
+    if (!skipBloom) this.post.drawBloom(encoder, this.plainFrameBindGroup, targets.bloom);
 
     const post = encoder.beginRenderPass({
       colorAttachments: [{
@@ -739,7 +767,7 @@ export class Renderer {
     ortho(this.lightProj, half, half, 1, 260);
     const m = fd.subarray(F.lightViewProj, F.lightViewProj + 16);
     multiply(m, this.lightProj, this.lightView);
-    const texels = SHADOW_SIZE / 2;
+    const texels = this.shadowSize / 2;
     const ox = m[12] * texels, oy = m[13] * texels;
     m[12] += (Math.round(ox) - ox) / texels;
     m[13] += (Math.round(oy) - oy) / texels;
@@ -756,9 +784,10 @@ export class Renderer {
     ortho(this.lightProj, farHalf, farHalf, 1, 1100);
     const fm = fd.subarray(F.lightViewProj1, F.lightViewProj1 + 16);
     multiply(fm, this.lightProj, this.lightView);
-    const fx = fm[12] * texels, fy = fm[13] * texels;
-    fm[12] += (Math.round(fx) - fx) / texels;
-    fm[13] += (Math.round(fy) - fy) / texels;
+    const farTexels = this.quality === "medium" ? texels / 2 : texels;
+    const fx = fm[12] * farTexels, fy = fm[13] * farTexels;
+    fm[12] += (Math.round(fx) - fx) / farTexels;
+    fm[13] += (Math.round(fy) - fy) / farTexels;
     frustumPlanes(this.farLightPlanes, fm);
   }
 
@@ -842,7 +871,7 @@ class SceneTargets {
   /** Half-res linear view depth from `DepthDown`; medium and up. */
   readonly halfDepth: GPUTexture | null;
   readonly halfView: GPUTextureView | null;
-  /** Opaque color + MSAA depth + half depth, bound to transparent passes; medium and up. */
+  /** Opaque color + scene depth + half depth, bound to transparent passes; medium and up. */
   readonly scene: GPUBindGroup | null;
   /** GTAO surfaces from the half-res depth; medium and up. */
   readonly ao: AoTargets | null;
@@ -860,21 +889,25 @@ class SceneTargets {
     readonly quality: Quality,
   ) {
     const { samples, colorFormat, depthFormat } = layouts;
+    const msaa = samples > 1;
     const make = (format: GPUTextureFormat, sampleCount: number, usage: number) =>
       device.createTexture({ size: [width, height], format, sampleCount, usage });
-    this.color = make(colorFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT);
     this.resolve = make(
       colorFormat,
       1,
-      GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
+        (msaa ? 0 : GPUTextureUsage.COPY_SRC),
     );
+    this.color = msaa
+      ? make(colorFormat, samples, GPUTextureUsage.RENDER_ATTACHMENT)
+      : this.resolve;
     this.depth = make(
       depthFormat,
       samples,
       GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     );
-    this.colorView = this.color.createView();
     this.resolveView = this.resolve.createView();
+    this.colorView = msaa ? this.color.createView() : this.resolveView;
     this.depthView = this.depth.createView();
     this.bloom = post.bloomFor(this.resolveView, width, height);
     if (quality === "low") {
@@ -891,7 +924,8 @@ class SceneTargets {
       this.opaque = make(
         colorFormat,
         1,
-        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
+          (msaa ? 0 : GPUTextureUsage.COPY_DST),
       );
       this.opaqueView = this.opaque.createView();
       const half = [Math.max(1, Math.ceil(width / 2)), Math.max(1, Math.ceil(height / 2))];
@@ -920,7 +954,7 @@ class SceneTargets {
   }
 
   destroy() {
-    this.color.destroy();
+    if (this.color !== this.resolve) this.color.destroy();
     this.resolve.destroy();
     this.depth.destroy();
     this.opaque?.destroy();

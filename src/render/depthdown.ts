@@ -1,9 +1,12 @@
 import { commonWgsl, frameWgsl } from "./frame.ts";
 import type { Layouts } from "./renderer.ts";
 
-/** MSAA scene depth → half-res linear view depth (r16float), for AO and shafts. */
-const shader = frameWgsl + commonWgsl + /* wgsl */ `
-@group(1) @binding(0) var sceneDepth: texture_depth_multisampled_2d;
+/** Scene depth (1x or MSAA) → half-res linear view depth (r16float), for AO and shafts. */
+const shader = (msaa: boolean) =>
+  frameWgsl + commonWgsl + /* wgsl */ `
+@group(1) @binding(0) var sceneDepth: ${
+    msaa ? "texture_depth_multisampled_2d" : "texture_depth_2d"
+  };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   let x = f32((vi << 1u) & 2u);
@@ -30,14 +33,15 @@ export class DepthDown {
   private bound = new WeakMap<GPUTextureView, GPUBindGroup>();
 
   constructor(private device: GPUDevice, layouts: Layouts) {
+    const msaa = layouts.samples > 1;
     this.layout = device.createBindGroupLayout({
       entries: [{
         binding: 0,
         visibility: GPUShaderStage.FRAGMENT,
-        texture: { sampleType: "depth", multisampled: true, viewDimension: "2d" },
+        texture: { sampleType: "depth", multisampled: msaa, viewDimension: "2d" },
       }],
     });
-    const module = device.createShaderModule({ code: shader, label: "depthdown" });
+    const module = device.createShaderModule({ code: shader(msaa), label: "depthdown" });
     this.pipeline = device.createRenderPipeline({
       label: "depthdown",
       layout: device.createPipelineLayout({

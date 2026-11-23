@@ -13,15 +13,17 @@ import type { SurfaceTexture } from "./surface.ts";
  */
 /** Bound when the frame stores its opaque pass (medium and high): resolved opaque color, the
  * MSAA scene depth, and the half-res linear depth, for refraction and soft shorelines. */
-const sceneWgsl = /* wgsl */ `
+const sceneWgsl = (msaa: boolean) => /* wgsl */ `
 @group(2) @binding(0) var sceneColor: texture_2d<f32>;
 @group(2) @binding(1) var sceneSampler: sampler;
-@group(2) @binding(2) var sceneDepth: texture_depth_multisampled_2d;
+@group(2) @binding(2) var sceneDepth: ${
+  msaa ? "texture_depth_multisampled_2d" : "texture_depth_2d"
+};
 @group(2) @binding(3) var sceneLinearDepth: texture_2d<f32>;
 `;
 
-const shader = (sceneInputs: boolean, ssr: boolean) =>
-  frameWgsl + lightingWgsl + (sceneInputs ? sceneWgsl : "") + /* wgsl */ `
+const shader = (sceneInputs: boolean, ssr: boolean, msaa: boolean) =>
+  frameWgsl + lightingWgsl + (sceneInputs ? sceneWgsl(msaa) : "") + /* wgsl */ `
 @group(1) @binding(0) var surface: texture_2d<u32>;
 @group(1) @binding(1) var<storage, read> wet: array<u32>;
 
@@ -95,19 +97,21 @@ fn waveSlope(xz: vec2f, t: f32, reach: f32, fetch: f32) -> vec2f {
   let amps = array<f32, 6>(
     0.05 * mix(0.3, 1.0, fetch), 0.04 * mix(0.3, 1.0, fetch), 0.03, 0.016, 0.008, 0.005);
   for (var i = 0; i < 6; i++) {
+    let w = 1.0 - smoothstep(0.5, 1.6, freqs[i] * reach);
+    if (w <= 0.0) { break; }
     let phase = dot(dirs[i], xz) * freqs[i] + t * (1.2 + f32(i) * 0.4);
-    // freqs[i] * reach: the radians this wave turns from one pixel to the next, at most.
-    g += dirs[i] * cos(phase) * amps[i] * freqs[i] * (1.0 - smoothstep(0.5, 1.6, freqs[i] * reach));
+    g += dirs[i] * cos(phase) * amps[i] * freqs[i] * w;
   }
-  // Fine noise ripples break up the regular sines.
-  let e = 0.15;
-  let r = xz * 2.3 + vec2f(t * 0.6, -t * 0.45);
-  g += vec2f(valueNoise(r + vec2f(e, 0.0)) - valueNoise(r - vec2f(e, 0.0)),
-             valueNoise(r + vec2f(0.0, e)) - valueNoise(r - vec2f(0.0, e))) * 0.12 *
-    (1.0 - smoothstep(0.25, 0.8, 2.3 * reach));
-  // Cat's paws: gust streaks advected downwind across open water.
-  let paw = valueNoise(vec2f(dot(xz, wdir) * 0.08 - t * 0.9, dot(xz, vec2f(-wdir.y, wdir.x)) * 0.3));
-  g += wdir * smoothstep(0.6, 0.9, paw) * fetch * 0.06 * (1.0 - smoothstep(0.2, 0.7, 2.3 * reach));
+  // Fine noise ripples and cat's paws fade out on the far sea; skip their noise when faded.
+  let fineW = 1.0 - smoothstep(0.25, 0.8, 2.3 * reach);
+  if (fineW > 0.0) {
+    let e = 0.15;
+    let r = xz * 2.3 + vec2f(t * 0.6, -t * 0.45);
+    g += vec2f(valueNoise(r + vec2f(e, 0.0)) - valueNoise(r - vec2f(e, 0.0)),
+               valueNoise(r + vec2f(0.0, e)) - valueNoise(r - vec2f(0.0, e))) * 0.12 * fineW;
+    let paw = valueNoise(vec2f(dot(xz, wdir) * 0.08 - t * 0.9, dot(xz, vec2f(-wdir.y, wdir.x)) * 0.3));
+    g += wdir * smoothstep(0.6, 0.9, paw) * fetch * 0.06 * (1.0 - smoothstep(0.2, 0.7, 2.3 * reach));
+  }
   return g;
 }
 
@@ -116,7 +120,7 @@ fn rippleSlope(xz: vec2f, t: f32) -> vec2f {
   var g = vec2f(0.0);
   for (var i = 0; i < 16; i++) {
     let p = frame.pushers[i];
-    if (p.w <= 0.0) { continue; }
+    if (p.w <= 0.0) { break; }
     let d = xz - p.xz;
     let dist = length(d);
     if (dist > p.w * 3.0 + 3.0) { continue; }
@@ -167,6 +171,7 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
 
   var alpha: f32;
   var base = body;
+  var foamDepth = depth;
   ${
     sceneInputs
       ? /* wgsl */ `
@@ -174,11 +179,14 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
     // surface (a hull, a rock) would be pulled under the water. The floor's view depth comes
     // from the half-res linear depth, scaled by the ray's slant to match the eye distance.
     let ndcUv = pos.xy * frame.depthParams.zw;
+    let centerRay = rayScaleAt(ndcUv);
+    let centerBackL = textureSampleLevel(sceneLinearDepth, sceneSampler, ndcUv, 0.0).r * centerRay;
+    foamDepth = min(depth, max(centerBackL - dist, 0.0) * 1.4);
     var uv = ndcUv + n.xz * (min(depth, 2.5) * 0.035) / max(dist * 0.002, 1.0);
-    var backL = textureSampleLevel(sceneLinearDepth, sceneSampler, uv, 0.0).r * rayScaleAt(uv);
+    var backL = textureSampleLevel(sceneLinearDepth, sceneSampler, uv, 0.0).r * centerRay;
     if (backL < dist - 0.05) {
       uv = ndcUv;
-      backL = textureSampleLevel(sceneLinearDepth, sceneSampler, uv, 0.0).r * rayScaleAt(uv);
+      backL = centerBackL;
     }
     let path = max(backL - dist, 0.0);
     var refracted = textureSampleLevel(sceneColor, sceneSampler, uv, 0.0).rgb;
@@ -191,7 +199,7 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
         ssr
           ? /* wgsl */ `
     // Screen-space reflections (high): march the reflected ray against the half-res linear
-    // depth and fetch the opaque color; fall back to the sky mirror off-screen and at edges.
+    // depth (clip.w is linear view depth) and fetch opaque color; fall back to sky mirror at edges.
     if (n.y > 0.6 && dist < 220.0) {
       let rr = reflect(-view, n);
       var hit = false;
@@ -203,9 +211,8 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
         if (clip.w <= 0.0) { continue; }
         let sp = clip.xy / clip.w * vec2f(0.5, -0.5) + 0.5;
         if (sp.x < 0.0 || sp.x > 1.0 || sp.y < 0.0 || sp.y > 1.0) { break; }
-        let sl = textureSampleLevel(sceneLinearDepth, sceneSampler, sp, 0.0).r * rayScaleAt(sp);
-        let wl = length(wp - frame.cameraPos.xyz);
-        if (sl < 3000.0 && wl > sl && wl - sl < 1.5) { hit = true; hp = sp; break; }
+        let sl = textureSampleLevel(sceneLinearDepth, sceneSampler, sp, 0.0).r;
+        if (sl < 3000.0 && clip.w > sl && clip.w - sl < 1.5) { hit = true; hp = sp; break; }
       }
       if (hit) {
         let edge = smoothstep(0.0, 0.06, hp.x) * smoothstep(1.0, 0.94, hp.x) *
@@ -239,15 +246,6 @@ fn shadeWater(world: vec3f, pos: vec4f) -> vec4f {
 
   // Foam where the water thins out against the shore. In the scene variant the soft intersection
   // also softens where anything opaque meets the surface.
-  var foamDepth = depth;
-  ${
-    sceneInputs
-      ? /* wgsl */ `
-  let bl = textureSampleLevel(sceneLinearDepth, sceneSampler, ndcUv, 0.0).r * rayScaleAt(ndcUv);
-  foamDepth = min(depth, max(bl - dist, 0.0) * 1.4);
-  `
-      : ""
-  }
   let foamNoise = valueNoise(world.xz * 3.0 + vec2f(t * 0.3, t * 0.2)) * valueNoise(world.xz * 7.0 - t * 0.25);
   // A slow swash wets and dries the sand band; lapping lines ride in on it.
   let swash = depth - sin(t * 0.5 + valueNoise(world.xz * 0.25) * 8.0) * 0.22;
@@ -313,7 +311,7 @@ export class WaterRenderer {
       [true, true, "water-ssr"],
     ];
     const modules = variants.map(([scene, ssr, label]) =>
-      device.createShaderModule({ code: shader(scene, ssr), label })
+      device.createShaderModule({ code: shader(scene, ssr, layouts.samples > 1), label })
     );
     const pipeline = (module: GPUShaderModule, scene: boolean, vs: string, fs: string) =>
       device.createRenderPipeline({

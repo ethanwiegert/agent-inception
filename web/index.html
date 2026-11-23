@@ -124,6 +124,19 @@
       background: #3a1f1a;
       color: #f2d0c8;
     }
+    #fatal-retry {
+      margin: 0 0 14px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(159, 211, 107, 0.55);
+      background: #243620;
+      color: #e9f5dc;
+      font: 600 14px/1.2 system-ui, sans-serif;
+      cursor: pointer;
+    }
+    #fatal-retry:hover {
+      background: #2f4929;
+    }
     #about a {
       color: #9fd36b;
     }
@@ -144,6 +157,7 @@
         <h1>agent-inception</h1>
         <p class="lead">A sandbox you can watch your agent live in.</p>
         <p id="fatal" role="alert"></p>
+        <button id="fatal-retry" type="button" hidden>Retry</button>
         <noscript><p>The island runs in this page, so it needs JavaScript and WebGPU.</p></noscript>
         <p>
           A chill 3D block island with farming, building, animals, physics and fire, played entirely

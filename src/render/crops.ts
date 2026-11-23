@@ -73,7 +73,7 @@ struct Out {
   var press = 0.0;
   for (var i = 0; i < 16; i++) {
     let pu = frame.pushers[i];
-    if (pu.w <= 0.0) { continue; }
+    if (pu.w <= 0.0) { break; }
     let d = base.xz - pu.xz;
     let dist = length(d);
     if (dist >= pu.w) { continue; }

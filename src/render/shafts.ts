@@ -87,7 +87,7 @@ fn phase(cos: f32, g: f32) -> f32 {
     let wp = eye + dir * t;
     let d = ${HAZE.toFixed(4)} + mist * exp(-max(wp.y - sea, 0.0) * ${MIST_FALL.toFixed(2)});
     var light = (frame.sunColor.rgb * sunPhase + vec3f(0.55, 0.65, 1.0) * moonPhase) *
-      shadowFast(wp) * cloudLight(wp);
+      shadowPoint(wp) * cloudLight(wp);
     light += lampAt(wp);
     sum += trans * light * d * dt;
     trans *= exp(-d * dt);
