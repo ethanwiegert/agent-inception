@@ -4,6 +4,7 @@ import { Camera } from "./camera.ts";
 import { attachReverseCaptcha } from "./captcha.ts";
 import { createConnectCard } from "./connect.ts";
 import { createDevPanel } from "./devpanel.ts";
+import { acquireGpu } from "./gpu.ts";
 import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { pref, setPref } from "./prefs.ts";
@@ -16,55 +17,96 @@ import { SimClient } from "./simclient.ts";
 import { createSupportLinks } from "./support.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
-// The GitHub and Support links go up first, so even a browser without WebGPU gets them.
-if (!new URLSearchParams(location.search).has("headless")) createSupportLinks();
-
-/** Say why the game can't run, over the page's own "what this is" (index.html's `#about`). */
-function fatal(message: string): never {
-  document.getElementById("fatal")!.textContent = message;
-  document.getElementById("about")!.hidden = false;
-  throw new Error(message);
-}
-
-if (!navigator.gpu) fatal("agent-inception needs WebGPU. Try a recent Chrome or Edge.");
-const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-if (!adapter) {
-  fatal(
-    "No WebGPU adapter available. Without a GPU, keep the world running headless with " +
-      "`deno task host`, or start Chromium with --enable-unsafe-webgpu --enable-unsafe-swiftshader.",
-  );
-}
-// Timestamps for the GPU timer; indirect draws from an instance offset for GPU culling.
-const features = (["timestamp-query", "indirect-first-instance"] as GPUFeatureName[])
-  .filter((f) => adapter.features.has(f));
-/**
- * A software adapter (SwiftShader, llvmpipe, WARP) means no GPU: the CPU draws every pixel, so the
- * page draws less (thinner grass, a smaller render scale) to stay usable on a CPU-only machine.
- */
-const info = adapter.info;
-const softwareGpu =
-  !!(info as GPUAdapterInfo & { isFallbackAdapter?: boolean }).isFallbackAdapter ||
-  /swiftshader|llvmpipe|lavapipe|softpipe|warp|basic render/i.test(
-    `${info.vendor} ${info.architecture} ${info.device} ${info.description}`,
-  );
-/** Grass density on a software adapter: grass is ~70% of a SwiftShader frame; this halves it. */
-const SOFTWARE_GRASS = 0.3;
-const device = await adapter.requestDevice({ requiredFeatures: features });
-device.lost.then((info) => fatal(`GPU device lost: ${info.message}`));
-const gpuErrors: string[] = [];
-device.addEventListener("uncapturederror", (e) => {
-  const message = (e as GPUUncapturedErrorEvent).error.message;
-  gpuErrors.push(message);
-  console.error(message);
-});
-
 const params = new URLSearchParams(location.search);
+/** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
+const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 // Headless harnesses (software WebGPU without a swapchain) never touch the canvas: frames render
 // offscreen, and `__game.capture()` reads them back.
 const headless = params.has("headless");
-const context = headless ? null : canvas.getContext("webgpu") as GPUCanvasContext;
+// The GitHub and Support links go up first, so even a browser without WebGPU gets them.
+if (!headless) createSupportLinks();
+
+/** Say why the game can't run, over the page's own "what this is" (index.html's `#about`). */
+function showFatal(message: string) {
+  const el = document.getElementById("fatal")!;
+  el.textContent = message;
+  const retry = document.getElementById("fatal-retry") as HTMLButtonElement | null;
+  if (retry) {
+    retry.hidden = false;
+    retry.onclick = () => location.reload();
+  }
+  document.getElementById("about")!.hidden = false;
+}
+
+function fatal(message: string): never {
+  showFatal(message);
+  throw new Error(message);
+}
+
+const initialGpu = await acquireGpu({ devHost });
+if (!initialGpu.ok) fatal(initialGpu.message);
+let device = initialGpu.device;
+let softwareGpu = initialGpu.softwareGpu;
+const gpuErrors: string[] = [];
+const context = headless ? null : canvas.getContext("webgpu") as GPUCanvasContext | null;
+if (!headless && !context) {
+  fatal("Could not initialize a WebGPU canvas context in this browser.");
+}
 const format = navigator.gpu.getPreferredCanvasFormat();
-context?.configure({ device, format, alphaMode: "opaque" });
+let gpuRecovering = false;
+let gpuRecoveries = 0;
+
+function configureCanvas() {
+  if (!context) return;
+  try {
+    context.configure({ device, format, alphaMode: "opaque" });
+  } catch (e) {
+    fatal(`Could not configure WebGPU canvas: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+function watchDevice(dev: GPUDevice) {
+  dev.addEventListener("uncapturederror", (e) => {
+    const message = (e as GPUUncapturedErrorEvent).error.message;
+    gpuErrors.push(message);
+    console.error(message);
+  });
+  dev.lost.then((info) => {
+    if (dev !== device || info.reason === "destroyed") return;
+    void recoverDevice(info.message);
+  });
+}
+
+async function recoverDevice(reason: string) {
+  if (gpuRecovering) return;
+  gpuRecovering = true;
+  gpuRecoveries++;
+  renderer?.destroy();
+  renderer = null;
+  if (gpuRecoveries > 2) {
+    showFatal(`GPU device lost: ${reason || "graphics device reset repeatedly."}`);
+    return;
+  }
+  // Step down load so a GPU timeout / TDR does not immediately trigger again.
+  if (!qualityFixed) quality = "low";
+  if (fixedScale === null) renderScale = Math.min(renderScale, 0.7);
+  resize();
+  const next = await acquireGpu({ devHost, preferFallback: gpuRecoveries > 1 });
+  if (!next.ok) {
+    showFatal(`GPU device lost (${reason || "reset"}), and recovery failed: ${next.message}`);
+    return;
+  }
+  device = next.device;
+  softwareGpu = next.softwareGpu;
+  watchDevice(device);
+  configureCanvas();
+  if (client.world) renderer = createRenderer(client.world);
+  overlay.log("world", "graphics device reset — recovered");
+  gpuRecovering = false;
+}
+
+watchDevice(device);
+configureCanvas();
 
 const LOOK = LOOKS.miniature;
 let linkState: LinkState = "connecting";
@@ -101,6 +143,22 @@ attachReverseCaptcha(canvas);
 let renderer: Renderer | null = null;
 let camera: Camera | null = null;
 
+const fixedGrass = params.has("grass") ? Number(params.get("grass")) || 1 : null;
+/** Grass density per quality tier (or software adapter floor) unless `?grass=` overrides it. */
+function grassFor(q: Quality): number {
+  if (fixedGrass !== null) return fixedGrass;
+  if (softwareGpu) return q === "low" ? 0.25 : 0.3;
+  return q === "low" ? 0.4 : q === "medium" ? 0.65 : 1;
+}
+
+function createRenderer(world: NonNullable<SimClient["world"]>): Renderer {
+  const r = new Renderer(device, world, { softwareGpu });
+  r.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
+  r.quality = quality;
+  r.grassDensity = grassFor(quality);
+  return r;
+}
+
 /** Milliseconds from navigation until the world was ready to draw (the first-frame budget). */
 let readyMs = 0;
 client.onReady = (world, caughtUp, notice) => {
@@ -120,15 +178,8 @@ client.onReady = (world, caughtUp, notice) => {
   if (!link) void startLink();
   // A new world replaces the renderer; free the old one's GPU resources.
   renderer?.destroy();
-  renderer = new Renderer(device, world);
+  renderer = createRenderer(world);
   readyMs ||= performance.now();
-  renderer.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
-  renderer.quality = quality;
-  renderer.grassDensity = params.has("grass")
-    ? Number(params.get("grass")) || 1
-    : softwareGpu
-    ? SOFTWARE_GRASS
-    : 1;
   if (!camera) {
     camera = new Camera([world.sizeX, world.sizeZ], (x, z) => client.world!.heightAt(x, z));
     camera.attach(canvas);
@@ -345,8 +396,6 @@ async function encodeShot(
 
 // ---------------------------------------------------------------- the link to agents
 
-/** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
-const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 /**
  * `?bridge=` points the tab at another socket, which then drives this world: honoured only on the
  * dev server, so a crafted link to a hosted site can't hand someone's world to a stranger.
@@ -521,50 +570,72 @@ let quality: Quality = fixedQuality === "low" || fixedQuality === "medium" ||
 /** Locked out of the governor: a `?quality=` URL tier, or a tier picked in the panel. */
 let qualityFixed = fixedQuality === "low" || fixedQuality === "medium" ||
   fixedQuality === "high";
-const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, WINDOW_MS = 2000;
-/** A software adapter starts at the floor; there's no GPU headroom to earn pixels back from. */
-let renderScale = fixedScale ?? (softwareGpu ? SCALE_MIN : 1);
-let windowStart = 0, windowFrames = 0, windowSlow = 0, slowWindows = 0, fastWindows = 0;
+const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, SEVERE_MS = 45, WINDOW_MS = 2000;
+/**
+ * Initial render scale: software adapters start at the floor; very high-DPI screens (4K/Retina)
+ * start capped near ~1440p and earn back full native resolution if the GPU has headroom.
+ */
+function initialScale(): number {
+  if (fixedScale !== null) return fixedScale;
+  if (softwareGpu) return SCALE_MIN;
+  const maxDpr = Math.min(devicePixelRatio || 1, 2);
+  const pixels = Math.max(1, canvas.clientWidth * maxDpr) *
+    Math.max(1, canvas.clientHeight * maxDpr);
+  const target = 2_600_000;
+  if (pixels <= target) return 1;
+  return Math.max(SCALE_MIN, Math.round(Math.sqrt(target / pixels) * 10) / 10);
+}
+let renderScale = initialScale();
+let windowStart = 0, windowFrames = 0, windowSlow = 0, windowMs = 0;
+let slowWindows = 0, fastWindows = 0;
 
 /** Change the feature tier, on the URL value, the panel, or the adaptive governor. */
 function setQuality(q: Quality) {
   if (q === quality || !QUALITIES.includes(q)) return;
   quality = q;
-  if (renderer) renderer.quality = q;
+  if (renderer) {
+    renderer.quality = q;
+    renderer.grassDensity = grassFor(q);
+  }
 }
 
 /** Count this frame; every two seconds, step the quality tier or render scale if the frame rate
  * asks for it: a slow GPU sheds features (high → medium → low) before it gives up resolution,
  * and earns the features back only once it's back at full resolution. */
 function adaptScale(now: number, interval: number) {
-  if (!context) return;
-  // A hidden tab or a stall (a big world load) isn't the GPU being slow.
-  if (document.hidden || interval > 250) {
-    windowStart = now, windowFrames = windowSlow = 0;
+  if (!context || !renderer || gpuRecovering) return;
+  // Ignore hidden tabs or multi-second pauses (tab switch, debugger, initial world load),
+  // but DO count genuinely slow frames (20-2000 ms) so a <4 fps GPU still downgrades.
+  if (document.hidden || interval <= 0 || interval > 2000) {
+    windowStart = now, windowFrames = windowSlow = windowMs = 0;
     return;
   }
+  if (!windowStart) windowStart = now;
   windowFrames++;
+  windowMs += interval;
   if (interval > SLOW_MS) windowSlow++;
   if (now - windowStart < WINDOW_MS) return;
-  const slow = windowSlow > windowFrames / 2;
-  const gpu = renderer?.stats.gpuMs ?? 0;
+  const meanMs = windowMs / Math.max(1, windowFrames);
+  const slow = windowSlow > windowFrames / 2 || meanMs > SLOW_MS;
+  const severe = meanMs > SEVERE_MS;
+  const gpu = renderer.stats.gpuMs ?? 0;
   // Room to spare: frames on time and, where the GPU timer works, under half a frame of GPU work.
-  const roomy = windowSlow < windowFrames / 20 && gpu > 0 && gpu < 7;
-  slowWindows = slow ? slowWindows + 1 : 0;
+  const roomy = !softwareGpu && windowSlow < windowFrames / 20 && gpu > 0 && gpu < 7;
+  slowWindows = slow ? slowWindows + (severe ? 2 : 1) : 0;
   fastWindows = roomy ? fastWindows + 1 : 0;
-  windowStart = now, windowFrames = windowSlow = 0;
+  windowStart = now, windowFrames = windowSlow = windowMs = 0;
   const was = renderScale;
   if (slowWindows >= 2) {
     const tier = QUALITIES.indexOf(quality);
     if (!qualityFixed && tier > 0) {
       setQuality(QUALITIES[tier - 1]);
     } else if (fixedScale === null && renderScale > SCALE_MIN) {
-      renderScale = Math.max(SCALE_MIN, renderScale - SCALE_STEP);
+      renderScale = Math.max(SCALE_MIN, Math.round((renderScale - SCALE_STEP) * 10) / 10);
     }
     slowWindows = 0;
   } else if (fastWindows >= 3) {
     if (fixedScale === null && renderScale < 1) {
-      renderScale = Math.min(1, renderScale + SCALE_STEP);
+      renderScale = Math.min(1, Math.round((renderScale + SCALE_STEP) * 10) / 10);
     } else if (!qualityFixed && quality !== "high") {
       setQuality(QUALITIES[QUALITIES.indexOf(quality) + 1]);
     }
@@ -574,7 +645,8 @@ function adaptScale(now: number, interval: number) {
 }
 
 function resize() {
-  const dpr = Math.min(devicePixelRatio, 2) * renderScale;
+  const maxDpr = softwareGpu ? 1 : 2;
+  const dpr = Math.min(devicePixelRatio || 1, maxDpr) * renderScale;
   canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
   canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
 }
@@ -584,7 +656,14 @@ resize();
 const stats = createFrameStats();
 Object.assign(globalThis, {
   __perf: {
-    summary: () => ({ ...stats.summary(), ...renderer?.stats, readyMs, renderScale, quality }),
+    summary: () => ({
+      ...stats.summary(),
+      ...renderer?.stats,
+      readyMs,
+      renderScale,
+      quality,
+      softwareGpu,
+    }),
     gpuErrors,
   },
   // Lets tests and the harness drive agents without the bridge.
@@ -610,12 +689,19 @@ Object.assign(globalThis, {
   },
 });
 
-const frameTarget = (): RenderTarget => ({
-  view: context!.getCurrentTexture().createView(),
-  width: canvas.width,
-  height: canvas.height,
-  format,
-});
+const frameTarget = (): RenderTarget | null => {
+  if (!context || gpuRecovering) return null;
+  try {
+    return {
+      view: context.getCurrentTexture().createView(),
+      width: canvas.width,
+      height: canvas.height,
+      format,
+    };
+  } catch {
+    return null;
+  }
+};
 
 let lastPanel = 0;
 let lastFrame = 0;
@@ -626,8 +712,12 @@ function frame(now: number) {
   lastFrame = now;
   // Headless pages (software WebGPU, seconds per frame) draw only when a capture asks, but their
   // panel still follows the world.
-  if (renderer && camera && context) draw(now, frameTarget());
-  else if (renderer && camera) updatePanel(now, client.agents(now));
+  if (renderer && camera && context && !gpuRecovering) {
+    const target = frameTarget();
+    if (target) draw(now, target);
+  } else if (renderer && camera) {
+    updatePanel(now, client.agents(now));
+  }
 }
 requestAnimationFrame(frame);
 

@@ -100,24 +100,40 @@ fn place(v: VIn, ii: u32) -> vec3f {
   // Triplanar in the undeformed mesh so paint follows rig motion and wind. World-scale
   // templates share the same brush size regardless of their primitive tessellation.
   let p = in.local * 0.92;
-  let sides = pow(abs(in.localNormal), vec3f(4.0));
-  let weights = sides / max(dot(sides, vec3f(1.0)), 1e-5);
-  let grain = dot(weights, vec3f(
-    textureSample(grainTiles, grainSampler, p.zy, in.pattern).r,
-    textureSample(grainTiles, grainSampler, p.xz, in.pattern).r,
-    textureSample(grainTiles, grainSampler, p.xy, in.pattern).r));
+  var grain: f32;
+  var n = normalize(in.normal);
+  if (frame.qualityParams.x < 0.5) {
+    grain = textureSample(grainTiles, grainSampler, p.xz + vec2f(p.y, -p.y), in.pattern).r;
+  } else {
+    let sides = pow(abs(in.localNormal), vec3f(4.0));
+    let weights = sides / max(dot(sides, vec3f(1.0)), 1e-5);
+    grain = dot(weights, vec3f(
+      textureSample(grainTiles, grainSampler, p.zy, in.pattern).r,
+      textureSample(grainTiles, grainSampler, p.xz, in.pattern).r,
+      textureSample(grainTiles, grainSampler, p.xy, in.pattern).r));
+    n = reliefNormal(n, in.world, grain * 0.018);
+  }
   let albedo = in.color * (1.0 + (grain - 0.5) * vec3f(0.98, 0.82, 0.7));
-  let n = reliefNormal(normalize(in.normal), in.world, grain * 0.018);
   let view = normalize(frame.cameraPos.xyz - in.world);
-  var c = shade(albedo, n, in.world, 1.0, 0.25) + selfLit(albedo * in.glow * EMISSIVE);
+  let gloss = (1.0 - in.rough) * (1.0 - in.leaf);
+  let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;
+  let needSun = frame.sunDir.w > 0.001 && (dot(n, frame.sunDir.xyz) > -0.25 || gloss > 0.02);
+  var cl = 1.0;
+  var light = 0.0;
+  if (needSun || back > 0.004) {
+    cl = cloudLight(in.world);
+    if (needSun) { light = shadowAt(in.world, n) * cl; }
+  }
+  var c = shadeWith(albedo, n, light, 1.0, 0.25) +
+    albedo * (lampLight(in.world, n) + groundBounce(n)) +
+    selfLit(albedo * in.glow * EMISSIVE);
   // Plants sit in the meadow's pooled shade like the grass does; bodies and props keep theirs.
   if (in.leaf > 0.3) { c *= mix(1.0, fieldAt(in.world.xz).x, 0.5); }
   // The same specular term the terrain's pattern surfaces get: smooth Materials catch the sun,
   // wood and cloth stay matte. Off for leaves, whose sheen is the translucency below.
-  let gloss = (1.0 - in.rough) * (1.0 - in.leaf);
   if (gloss > 0.02) {
     let hdir = normalize(view + frame.sunDir.xyz);
-    c += frame.sunColor.rgb * frame.sunDir.w * keyLight(in.world, n) *
+    c += frame.sunColor.rgb * frame.sunDir.w * light *
       pow(max(dot(n, hdir), 0.0), mix(12.0, 180.0, gloss * gloss)) * gloss * gloss * 0.6;
     c += skyColor(reflect(-view, n)) * pow(1.0 - max(dot(n, view), 0.0), 5.0) * gloss * 0.5;
   }
@@ -133,9 +149,8 @@ fn place(v: VIn, ii: u32) -> vec3f {
     c += albedo * mix(vec3f(1.0, 0.94, 0.82), vec3f(0.72, 0.78, 1.0), frame.extra.x) * upLift;
   }
   // Crowns between the eye and the sun glow: light comes through the leaves.
-  let back = pow(max(dot(-view, frame.sunDir.xyz), 0.0), 3.0) * in.leaf;
   if (back > 0.004) {
-    c += albedo * frame.sunColor.rgb * frame.sunDir.w * back * 0.45 * cloudLight(in.world);
+    c += albedo * frame.sunColor.rgb * frame.sunDir.w * back * 0.45 * cl;
   }
   return vec4f(fog(c, in.world), 1.0);
 }
