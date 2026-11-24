@@ -44,15 +44,19 @@ export interface Layouts {
   samples: number;
 }
 
-/** Shadow map size on hardware vs software adapters. */
-const SHADOW_SIZE_HW = 2048;
-const SHADOW_SIZE_SW = 1024;
+const SHADOW_SIZE = 2048;
 /** Blocks from the eye past which props draw with their low mesh, per quality tier. */
 const LOD_DISTANCES: Record<Quality, number> = { low: 28, medium: 48, high: 75 };
 
 export interface RendererOptions {
-  /** Software WebGPU adapter: drops MSAA and halves shadow map size to stay usable on CPU. */
-  softwareGpu?: boolean;
+  /** Use single-sample targets and smaller shadow maps on mobile and software adapters. */
+  lightweight?: boolean;
+}
+
+interface DepthEffects {
+  depthDown: DepthDown;
+  ao: AmbientOcclusion;
+  shafts: LightShafts;
 }
 
 /** What's in the world this frame besides terrain. */
@@ -168,9 +172,7 @@ export class Renderer {
   private viewTargets: SceneTargets | null = null;
   private shotTargets: SceneTargets | null = null;
   private shot: { texture: GPUTexture; buffer: GPUBuffer; bytesPerRow: number } | null = null;
-  private depthDown: DepthDown;
-  private ao: AmbientOcclusion;
-  private shafts: LightShafts;
+  private depthEffects: DepthEffects | null = null;
   private timer: GpuTimer | null;
   private lightView = mat4();
   private lightProj = mat4();
@@ -182,8 +184,8 @@ export class Renderer {
   private shadowSize: number;
 
   constructor(private device: GPUDevice, private world: World, options: RendererOptions = {}) {
-    const samples = options.softwareGpu ? 1 : 4;
-    this.shadowSize = options.softwareGpu ? SHADOW_SIZE_SW : SHADOW_SIZE_HW;
+    const samples = options.lightweight ? 1 : 4;
+    this.shadowSize = options.lightweight ? SHADOW_SIZE / 2 : SHADOW_SIZE;
     // Grass culls in a compute pass and samples shadows there, so the frame group is visible everywhere.
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     this.layouts = {
@@ -302,9 +304,6 @@ export class Renderer {
     this.terrain = new TerrainRenderer(device, world, this.surface, this.layouts);
     this.grass = new GrassRenderer(device, this.surface, this.layouts);
     this.water = new WaterRenderer(device, this.surface, this.layouts, world.sizeY);
-    this.depthDown = new DepthDown(device, this.layouts);
-    this.ao = new AmbientOcclusion(device, this.layouts);
-    this.shafts = new LightShafts(device, this.layouts);
     this.sky = new SkyRenderer(device, this.layouts);
     this.post = new PostRenderer(device, this.layouts);
     this.bodyModels = new BodyModels(this.library);
@@ -356,9 +355,15 @@ export class Renderer {
     capture = false,
   ) {
     const { device } = this;
+    const low = this.quality === "low";
+    const depthEffects = low ? null : (this.depthEffects ??= {
+      depthDown: new DepthDown(device, this.layouts),
+      ao: new AmbientOcclusion(device, this.layouts),
+      shafts: new LightShafts(device, this.layouts),
+    });
     const targets = capture
-      ? (this.shotTargets = this.sceneTargets(this.shotTargets, out.width, out.height))
-      : (this.viewTargets = this.sceneTargets(this.viewTargets, out.width, out.height));
+      ? (this.shotTargets = this.sceneTargets(this.shotTargets, out, depthEffects))
+      : (this.viewTargets = this.sceneTargets(this.viewTargets, out, depthEffects));
 
     this.terrain.setBlocks(scene.blocks);
     this.stats.chunksRebuilt = this.terrain.update();
@@ -404,7 +409,6 @@ export class Renderer {
     this.lightField.update(scene.light);
     fd[F.extra + 3] = scene.light?.lit ? 1 : 0;
     fd[F.weather + 2] = scene.tick - scene.cropsTick;
-    const low = this.quality === "low";
     const skipBloom = low || this.debug.has("bloom");
     if (skipBloom) fd[F.weather + 3] = 0;
     fd[F.qualityParams] = low ? 0 : this.quality === "medium" ? 1 : 2;
@@ -515,7 +519,7 @@ export class Renderer {
 
     const skip = this.debug;
     const msaa = this.layouts.samples > 1;
-    if (low) {
+    if (!depthEffects) {
       // Low tier keeps one forward pass: no stored depth, no opaque/trans split.
       const main = encoder.beginRenderPass({
         colorAttachments: [{
@@ -592,7 +596,7 @@ export class Renderer {
       }
 
       if (!skip.has("depthdown")) {
-        this.depthDown.draw(
+        depthEffects.depthDown.draw(
           encoder,
           targets.halfView!,
           targets.depthView,
@@ -600,7 +604,7 @@ export class Renderer {
         );
       }
       if (!skip.has("ao") && targets.ao) {
-        this.ao.draw(
+        depthEffects.ao.draw(
           encoder,
           targets.ao,
           this.plainFrameBindGroup,
@@ -619,7 +623,7 @@ export class Renderer {
         clear.end();
       }
       if (!skip.has("shafts") && targets.shafts) {
-        this.shafts.draw(
+        depthEffects.shafts.draw(
           encoder,
           targets.shafts,
           targets.halfView!,
@@ -650,7 +654,7 @@ export class Renderer {
       trans.end();
       // In-scattered light lands on the resolve ahead of bloom, so strong shafts glow.
       if (!skip.has("shafts") && targets.shafts) {
-        this.shafts.composite(
+        depthEffects.shafts.composite(
           encoder,
           targets.resolveView,
           targets.shafts,
@@ -791,7 +795,11 @@ export class Renderer {
     frustumPlanes(this.farLightPlanes, fm);
   }
 
-  private sceneTargets(have: SceneTargets | null, width: number, height: number): SceneTargets {
+  private sceneTargets(
+    have: SceneTargets | null,
+    { width, height }: RenderTarget,
+    depthEffects: DepthEffects | null,
+  ): SceneTargets {
     if (
       have && have.width === width && have.height === height && have.quality === this.quality
     ) return have;
@@ -800,8 +808,7 @@ export class Renderer {
       this.device,
       this.layouts,
       this.post,
-      this.ao,
-      this.shafts,
+      depthEffects,
       width,
       height,
       this.quality,
@@ -882,8 +889,7 @@ class SceneTargets {
     device: GPUDevice,
     layouts: Layouts,
     post: PostRenderer,
-    ao: AmbientOcclusion,
-    shafts: LightShafts,
+    depthEffects: DepthEffects | null,
     readonly width: number,
     readonly height: number,
     readonly quality: Quality,
@@ -910,7 +916,7 @@ class SceneTargets {
     this.colorView = msaa ? this.color.createView() : this.resolveView;
     this.depthView = this.depth.createView();
     this.bloom = post.bloomFor(this.resolveView, width, height);
-    if (quality === "low") {
+    if (!depthEffects) {
       this.opaque =
         this.opaqueView =
         this.halfDepth =
@@ -947,8 +953,8 @@ class SceneTargets {
           { binding: 3, resource: this.halfView },
         ],
       });
-      this.ao = ao.allocate(this.halfView, width, height);
-      this.shafts = shafts.allocate(width, height);
+      this.ao = depthEffects.ao.allocate(this.halfView, width, height);
+      this.shafts = depthEffects.shafts.allocate(width, height);
       this.post = post.bindInput(this.resolveView, this.bloom, this.ao.out);
     }
   }

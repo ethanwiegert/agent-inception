@@ -38,6 +38,11 @@ const css = `
 .ai-feed i{color:#a89f94;font-style:normal}
 /* Fingers: name tags big enough to tap. */
 @media (pointer:coarse){.ai-name{font-size:12px;padding:7px 11px}}
+/* Avoid re-blurring the changing canvas behind each label and feed entry on touch devices. */
+@media (pointer:coarse) and (hover:none){
+  .ai-name:not(.followed),.ai-feed div{background:rgba(24,22,30,.84)}
+  .ai-name,.ai-feed div{backdrop-filter:none;-webkit-backdrop-filter:none}
+}
 /* Narrow screens: the feed sits above the camera buttons, shorter, in smaller type. */
 @media (max-width:640px){.ai-feed{bottom:calc(66px + env(safe-area-inset-bottom));
   max-height:24vh;font-size:11px}.ai-bubble{font-size:12px}}
@@ -70,6 +75,7 @@ export function project(
 /** DOM layer over the canvas: name tags, speech bubbles and an activity feed for spectators. */
 export class Overlay {
   private tags = new Map<number, Tag>();
+  private seen = new Set<number>();
   private feed: HTMLDivElement;
 
   /** `onSelect` fires when a spectator clicks an agent's name tag. */
@@ -121,13 +127,14 @@ export class Overlay {
     now: number,
     followed: number | null,
   ) {
-    const seen = new Set<number>();
+    const seen = this.seen;
+    seen.clear();
     for (const a of agents) {
       seen.add(a.id);
       let tag = this.tags.get(a.id);
       if (!tag) tag = this.createTag(a);
       tag.swatch.style.background = a.floatsee.colors.primary;
-      tag.label.textContent = a.name;
+      if (tag.label.textContent !== a.name) tag.label.textContent = a.name;
       tag.name.classList.toggle("followed", a.id === followed);
       if (!project(viewProj, a.x, a.y + TAG_HEIGHT, a.z, width, height, at)) {
         tag.root.style.display = "none";

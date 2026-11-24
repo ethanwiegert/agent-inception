@@ -18,6 +18,8 @@ import { createSupportLinks } from "./support.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
 const params = new URLSearchParams(location.search);
+// Use the primary input so touchscreen laptops keep the desktop defaults.
+const mobile = matchMedia("(pointer: coarse) and (hover: none)").matches;
 /** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
 const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 // Headless harnesses (software WebGPU without a swapchain) never touch the canvas: frames render
@@ -98,6 +100,9 @@ async function recoverDevice(reason: string) {
   }
   device = next.device;
   softwareGpu = next.softwareGpu;
+  framesInFlight = 0;
+  resetFrameTiming();
+  resize();
   watchDevice(device);
   configureCanvas();
   if (client.world) renderer = createRenderer(client.world);
@@ -152,7 +157,7 @@ function grassFor(q: Quality): number {
 }
 
 function createRenderer(world: NonNullable<SimClient["world"]>): Renderer {
-  const r = new Renderer(device, world, { softwareGpu });
+  const r = new Renderer(device, world, { lightweight: mobile || softwareGpu });
   r.debug = new Set((params.get("debug") ?? "").split(",").filter(Boolean));
   r.quality = quality;
   r.grassDensity = grassFor(quality);
@@ -550,9 +555,8 @@ const panel = createDevPanel({
 });
 
 /**
- * Render resolution as a share of the screen's (up to 2 device pixels per CSS pixel). `?scale=`
- * fixes it; otherwise it adapts: a GPU that can't hold ~50 fps renders fewer pixels (down to half),
- * and earns them back when it has room. Integrated GPUs on high-DPI laptops need this to hold 60.
+ * Render resolution as a share of the viewport's pixel budget. `?scale=` fixes it; otherwise
+ * a device that can't hold ~50 fps renders fewer pixels and earns them back when it has room.
  */
 const fixedScale = params.has("scale")
   ? Math.min(1, Math.max(0.25, Number(params.get("scale")) || 1))
@@ -560,11 +564,11 @@ const fixedScale = params.has("scale")
 /** Feature tier from `?quality=` (`low|medium|high`), or null when the governor may move it. */
 const fixedQuality = params.get("quality");
 const QUALITIES: Quality[] = ["low", "medium", "high"];
-/** A software adapter starts at low: it can't afford the scene-depth passes at all. */
+/** Phones and software adapters start with the cheaper forward rendering path. */
 let quality: Quality = fixedQuality === "low" || fixedQuality === "medium" ||
     fixedQuality === "high"
   ? fixedQuality
-  : softwareGpu
+  : softwareGpu || mobile
   ? "low"
   : "high";
 /** Locked out of the governor: a `?quality=` URL tier, or a tier picked in the panel. */
@@ -578,6 +582,7 @@ const SCALE_MIN = 0.5, SCALE_STEP = 0.1, SLOW_MS = 20, SEVERE_MS = 45, WINDOW_MS
 function initialScale(): number {
   if (fixedScale !== null) return fixedScale;
   if (softwareGpu) return SCALE_MIN;
+  if (mobile) return 0.7;
   const maxDpr = Math.min(devicePixelRatio || 1, 2);
   const pixels = Math.max(1, canvas.clientWidth * maxDpr) *
     Math.max(1, canvas.clientHeight * maxDpr);
@@ -588,6 +593,11 @@ function initialScale(): number {
 let renderScale = initialScale();
 let windowStart = 0, windowFrames = 0, windowSlow = 0, windowMs = 0;
 let slowWindows = 0, fastWindows = 0;
+
+function resetAdaptiveWindow(now: number) {
+  windowStart = now;
+  windowFrames = windowSlow = windowMs = 0;
+}
 
 /** Change the feature tier, on the URL value, the panel, or the adaptive governor. */
 function setQuality(q: Quality) {
@@ -603,11 +613,10 @@ function setQuality(q: Quality) {
  * asks for it: a slow GPU sheds features (high → medium → low) before it gives up resolution,
  * and earns the features back only once it's back at full resolution. */
 function adaptScale(now: number, interval: number) {
-  if (!context || !renderer || gpuRecovering) return;
-  // Ignore hidden tabs or multi-second pauses (tab switch, debugger, initial world load),
-  // but DO count genuinely slow frames (20-2000 ms) so a <4 fps GPU still downgrades.
-  if (document.hidden || interval <= 0 || interval > 2000) {
-    windowStart = now, windowFrames = windowSlow = windowMs = 0;
+  if (!renderer) return;
+  // Mobile intervals include time spent waiting for the GPU queue to make room.
+  if (interval <= 0 || (!mobile && interval > 2000)) {
+    resetAdaptiveWindow(now);
     return;
   }
   if (!windowStart) windowStart = now;
@@ -619,11 +628,12 @@ function adaptScale(now: number, interval: number) {
   const slow = windowSlow > windowFrames / 2 || meanMs > SLOW_MS;
   const severe = meanMs > SEVERE_MS;
   const gpu = renderer.stats.gpuMs ?? 0;
-  // Room to spare: frames on time and, where the GPU timer works, under half a frame of GPU work.
-  const roomy = !softwareGpu && windowSlow < windowFrames / 20 && gpu > 0 && gpu < 7;
+  // Some mobile browsers lack timestamp queries. Require a longer run of smooth delivery there.
+  const roomy = !softwareGpu && windowSlow < windowFrames / 20 &&
+    (gpu > 0 ? gpu < 7 : mobile && meanMs < 18);
   slowWindows = slow ? slowWindows + (severe ? 2 : 1) : 0;
   fastWindows = roomy ? fastWindows + 1 : 0;
-  windowStart = now, windowFrames = windowSlow = windowMs = 0;
+  resetAdaptiveWindow(now);
   const was = renderScale;
   if (slowWindows >= 2) {
     const tier = QUALITIES.indexOf(quality);
@@ -633,7 +643,7 @@ function adaptScale(now: number, interval: number) {
       renderScale = Math.max(SCALE_MIN, Math.round((renderScale - SCALE_STEP) * 10) / 10);
     }
     slowWindows = 0;
-  } else if (fastWindows >= 3) {
+  } else if (fastWindows >= (gpu > 0 ? 3 : 6)) {
     if (fixedScale === null && renderScale < 1) {
       renderScale = Math.min(1, Math.round((renderScale + SCALE_STEP) * 10) / 10);
     } else if (!qualityFixed && quality !== "high") {
@@ -644,11 +654,21 @@ function adaptScale(now: number, interval: number) {
   if (renderScale !== was) resize();
 }
 
+let cssWidth = 0, cssHeight = 0;
 function resize() {
-  const maxDpr = softwareGpu ? 1 : 2;
-  const dpr = Math.min(devicePixelRatio || 1, maxDpr) * renderScale;
-  canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-  canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  cssWidth = canvas.clientWidth;
+  cssHeight = canvas.clientHeight;
+  const maxDpr = softwareGpu ? 1 : mobile ? 1.5 : 2;
+  let dpr = Math.min(devicePixelRatio || 1, maxDpr);
+  // Keep the automatic pixel budget bounded even on large tablets. Explicit scales still apply
+  // to the usual DPR cap, just as they do on desktop.
+  if (mobile && fixedScale === null) {
+    dpr = Math.min(dpr, Math.sqrt(900_000 / Math.max(1, cssWidth * cssHeight)));
+  }
+  const width = Math.max(1, Math.floor(cssWidth * dpr * renderScale));
+  const height = Math.max(1, Math.floor(cssHeight * dpr * renderScale));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
 }
 new ResizeObserver(resize).observe(canvas);
 resize();
@@ -663,6 +683,7 @@ Object.assign(globalThis, {
       renderScale,
       quality,
       softwareGpu,
+      mobile,
     }),
     gpuErrors,
   },
@@ -705,18 +726,39 @@ const frameTarget = (): RenderTarget | null => {
 
 let lastPanel = 0;
 let lastFrame = 0;
+let framesInFlight = 0;
+const MOBILE_FRAMES_IN_FLIGHT = 2;
+
+function resetFrameTiming() {
+  resetAdaptiveWindow(0);
+  lastFrame = slowWindows = fastWindows = 0;
+  stats.pause();
+}
+document.addEventListener("visibilitychange", resetFrameTiming);
+
 function frame(now: number) {
   requestAnimationFrame(frame);
-  stats.tick(now);
+  if (document.hidden || !renderer || !camera) return;
+  // Skip stale mobile camera poses before building the scene. Headless pages only draw on
+  // capture requests. In both cases the spectator panel still follows the world.
+  if (!context || gpuRecovering || (mobile && framesInFlight >= MOBILE_FRAMES_IN_FLIGHT)) {
+    if (headless) stats.tick(now);
+    if (now - lastPanel > 250) updatePanel(now, client.agents(now));
+    return;
+  }
   adaptScale(now, lastFrame ? now - lastFrame : 0);
+  const target = frameTarget();
+  if (!target) return;
   lastFrame = now;
-  // Headless pages (software WebGPU, seconds per frame) draw only when a capture asks, but their
-  // panel still follows the world.
-  if (renderer && camera && context && !gpuRecovering) {
-    const target = frameTarget();
-    if (target) draw(now, target);
-  } else if (renderer && camera) {
-    updatePanel(now, client.agents(now));
+  stats.tick(now);
+  draw(now, target);
+  if (mobile) {
+    const frameDevice = device;
+    framesInFlight++;
+    const finished = () => {
+      if (device === frameDevice) framesInFlight--;
+    };
+    void frameDevice.queue.onSubmittedWorkDone().then(finished, finished);
   }
 }
 requestAnimationFrame(frame);
@@ -771,8 +813,8 @@ function draw(now: number, out: RenderTarget, capture = false) {
   overlay.update(
     agents,
     camera.viewProj,
-    canvas.clientWidth,
-    canvas.clientHeight,
+    cssWidth,
+    cssHeight,
     now,
     camera.follow,
   );
