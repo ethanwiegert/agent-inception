@@ -9,6 +9,9 @@ export function createFrameStats(capacity = 600) {
       if (last >= 0) intervals[count++ % capacity] = now - last;
       last = now;
     },
+    pause() {
+      last = -1;
+    },
     summary() {
       const n = Math.min(count, capacity);
       const sorted = intervals.slice(0, n).sort();

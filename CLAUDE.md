@@ -54,12 +54,12 @@ all three full it says so and opens the current one), `slot` (1-3: open that wor
 on localhost: pair through `/mcp/<code>` like the hosted site instead of the bridge's `/mcp`),
 `share` (an https origin, localhost only: pair, and show agents `<share>/mcp/<code>`; set by
 `deno task share`), `scale` (fixed render scale 0.25-1; otherwise it adapts to hold the frame rate,
-from 0.5 on a software adapter), `grass` (grass density 0.05-1; 0.3 by default on a software
-adapter), `sandbox` (1 switches the world to Sandbox, 0 back to Village Life; saved with the world),
-`time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default, `crisp`, `lush`,
-`storybook`), `quality` (fixed feature tier `low|medium|high`; otherwise the frame-rate governor
-moves it — the spectator panel's quality buttons do the same), `bridge` (WebSocket URL override, dev
-server only), `debug` (comma list of passes to skip for profiling:
+from 0.7 on mobile hardware and 0.5 on a software adapter), `grass` (grass density 0.05-1; 0.3 by
+default on a software adapter), `sandbox` (1 switches the world to Sandbox, 0 back to Village Life;
+saved with the world), `time` (0-1, 0.5 = noon), `speed` (0, 1, 10, 60), `look` (`natural` default,
+`crisp`, `lush`, `storybook`), `quality` (fixed feature tier `low|medium|high`; otherwise the
+frame-rate governor moves it — the spectator panel's quality buttons do the same), `bridge`
+(WebSocket URL override, dev server only), `debug` (comma list of passes to skip for profiling:
 `shadow,terrain,grass,water,sky,bodies,props,fire,bloom,depthdown,ao,shafts,life`), `headless`
 (never touch the canvas; frames render only when `__game.capture()` asks; for software WebGPU, which
 can't back a canvas).
