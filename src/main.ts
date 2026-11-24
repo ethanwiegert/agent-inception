@@ -100,7 +100,7 @@ async function recoverDevice(reason: string) {
   }
   device = next.device;
   softwareGpu = next.softwareGpu;
-  framesInFlight = 0;
+  liveFrames = mobile ? createFrameQueue(device.queue) : null;
   resetFrameTiming();
   resize();
   watchDevice(device);
@@ -593,6 +593,7 @@ function initialScale(): number {
 let renderScale = initialScale();
 let windowStart = 0, windowFrames = 0, windowSlow = 0, windowMs = 0;
 let slowWindows = 0, fastWindows = 0;
+let untimedUpgradeWindows = 6;
 
 function resetAdaptiveWindow(now: number) {
   windowStart = now;
@@ -636,14 +637,20 @@ function adaptScale(now: number, interval: number) {
   resetAdaptiveWindow(now);
   const was = renderScale;
   if (slowWindows >= 2) {
+    const previousQuality = quality;
     const tier = QUALITIES.indexOf(quality);
     if (!qualityFixed && tier > 0) {
       setQuality(QUALITIES[tier - 1]);
     } else if (fixedScale === null && renderScale > SCALE_MIN) {
       renderScale = Math.max(SCALE_MIN, Math.round((renderScale - SCALE_STEP) * 10) / 10);
     }
+    // Frame cadence alone can't distinguish spare GPU time from a GPU just keeping up.
+    // Back off if a higher load proved too slow, so untimed devices don't keep oscillating.
+    if (mobile && gpu === 0 && (quality !== previousQuality || renderScale !== was)) {
+      untimedUpgradeWindows = Math.min(60, untimedUpgradeWindows * 2);
+    }
     slowWindows = 0;
-  } else if (fastWindows >= (gpu > 0 ? 3 : 6)) {
+  } else if (fastWindows >= (gpu > 0 ? 3 : untimedUpgradeWindows)) {
     if (fixedScale === null && renderScale < 1) {
       renderScale = Math.min(1, Math.round((renderScale + SCALE_STEP) * 10) / 10);
     } else if (!qualityFixed && quality !== "high") {
@@ -726,8 +733,22 @@ const frameTarget = (): RenderTarget | null => {
 
 let lastPanel = 0;
 let lastFrame = 0;
-let framesInFlight = 0;
-const MOBILE_FRAMES_IN_FLIGHT = 2;
+let liveFrames = mobile ? createFrameQueue(device.queue) : null;
+
+/** Track this device's submissions independently of any device it replaces. */
+function createFrameQueue(queue: GPUQueue) {
+  let pending = 0;
+  const finished = () => pending--;
+  return {
+    get full() {
+      return pending >= 2;
+    },
+    track() {
+      pending++;
+      void queue.onSubmittedWorkDone().then(finished, finished);
+    },
+  };
+}
 
 function resetFrameTiming() {
   resetAdaptiveWindow(0);
@@ -741,7 +762,7 @@ function frame(now: number) {
   if (document.hidden || !renderer || !camera) return;
   // Skip stale mobile camera poses before building the scene. Headless pages only draw on
   // capture requests. In both cases the spectator panel still follows the world.
-  if (!context || gpuRecovering || (mobile && framesInFlight >= MOBILE_FRAMES_IN_FLIGHT)) {
+  if (!context || gpuRecovering || liveFrames?.full) {
     if (headless) stats.tick(now);
     if (now - lastPanel > 250) updatePanel(now, client.agents(now));
     return;
@@ -752,14 +773,7 @@ function frame(now: number) {
   lastFrame = now;
   stats.tick(now);
   draw(now, target);
-  if (mobile) {
-    const frameDevice = device;
-    framesInFlight++;
-    const finished = () => {
-      if (device === frameDevice) framesInFlight--;
-    };
-    void frameDevice.queue.onSubmittedWorkDone().then(finished, finished);
-  }
+  liveFrames?.track();
 }
 requestAnimationFrame(frame);
 
