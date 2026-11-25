@@ -29,7 +29,7 @@ export const F = {
   lightViewProj1: 180,
   /** Per-look post options: split-tone strength (0 keeps colors true). */
   lookParams: 196,
-  /** x quality tier (0 low, 1 medium, 2 high), y wide shadow on, z/w view forward xz. */
+  /** x quality tier (0 low, 1 medium, 2 high), y wide shadow on, z/w unused. */
   qualityParams: 200,
   size: 116 + 16 * 4 + 16 + 8,
 } as const;

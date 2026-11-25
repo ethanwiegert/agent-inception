@@ -2,19 +2,20 @@ import { frameWgsl, lightingWgsl } from "./frame.ts";
 import type { SurfaceTexture } from "./surface.ts";
 import type { Layouts, Quality } from "./renderer.ts";
 
-/** Particles of ambient life drawn in one instanced call. */
-const COUNT = 320;
-/** Low tier keeps the same mix with fewer instances: ambience stays, vertex work drops 70%. */
-const COUNT_LOW = 96;
+/** Particles of ambient life drawn in one instanced call on medium/high. */
+const COUNT = 160;
+/** Low tier keeps only a sparse sample: half the previous low count, 15% of the original pass. */
+const COUNT_LOW = 48;
 /** Everything fades out by this distance from the camera, in blocks. */
 const REACH = 60;
 
 /**
  * Ambient life: pollen, butterflies, gulls, falling leaves, fireflies and moths, generated
  * entirely in the vertex shader from a hash of the instance index and the frame's time. There
- * is no CPU particle state and nothing the sim or agents can interact with; each particle loops
- * its own small trajectory in a ring around the camera. All of them fade out by ~60 blocks.
- * `?debug=life` skips the draw.
+ * is no CPU particle state and nothing the sim or agents can interact with. Insects and leaves
+ * keep fixed territories in the world, while birds follow fixed flight lines across the island;
+ * nothing recentres on the spectator. All of them fade out by ~60 blocks. `?debug=life` skips
+ * the draw.
  */
 const shader = frameWgsl + lightingWgsl + /* wgsl */ `
 @group(1) @binding(0) var surface: texture_2d<u32>;
@@ -52,10 +53,10 @@ struct Out {
   let k = f32(s) / 4294967296.0;
   // kind: 0 dust mote, 1 butterfly, 2 gull, 3 falling leaf, 4 firefly, 5 moth
   var kind = 0u;
-  if (k > 0.40) { kind = 1u; }
-  if (k > 0.55) { kind = 2u; }
-  if (k > 0.65) { kind = 3u; }
-  if (k > 0.80) { kind = 4u; }
+  if (k > 0.34) { kind = 1u; }
+  if (k > 0.48) { kind = 2u; }
+  if (k > 0.64) { kind = 3u; }
+  if (k > 0.78) { kind = 4u; }
   if (k > 0.95) { kind = 5u; }
 
   s = pcg(s); let h1 = f32(s) / 4294967296.0;
@@ -78,22 +79,22 @@ struct Out {
   if (baseKind == 2u && h6 < darkness * 0.8) { kind = 4u; }
   if (baseKind == 3u && h6 < darkness * 0.5) { kind = 4u; }
 
-  // A wandering anchor in a ring around the camera; winged things stay near their anchor.
-  let ang = h1 * 6.2831853;
-  let rad = 8.0 + h2 * 44.0;
-  var anchorXZ = frame.cameraPos.xz + vec2f(cos(ang) * rad + (h3 - 0.5) * 8.0,
-    sin(ang) * rad + (h4 - 0.5) * 8.0);
-  // Put a share of the small daytime/nighttime insects in the spectator's forward band, so the
-  // meadow always has a few visible travelers instead of hiding them all behind the camera.
-  if ((kind == 0u || kind == 1u || kind == 4u) && h8 < 0.45) {
-    let forward = frame.qualityParams.zw;
-    let side = vec2f(-forward.y, forward.x);
-    let ahead = 6.0 + h1 * 24.0;
-    let lateral = (h2 - 0.5) * 24.0;
-    anchorXZ = frame.cameraPos.xz + forward * ahead + side * lateral;
+  // A fixed territory inland from the island edge. These anchors never depend on the camera:
+  // the spectator discovers ambient life by moving through the world instead of carrying it along.
+  let dims = vec2f(textureDimensions(surface));
+  let center = dims * 0.5;
+  var anchorXZ = center + (vec2f(h1, h2) - 0.5) * dims * 0.76 + (vec2f(h3, h4) - 0.5) * 8.0;
+  // A minority of the small species live in the central meadow. That is a fixed place in the
+  // world, not a camera-following band, so they stay behind when the spectator walks away.
+  if ((kind == 0u || kind == 1u || kind == 4u) && h8 < 0.35) {
+    let meadowAngle = h3 * 6.2831853;
+    let meadowRadius = 7.0 + h4 * 24.0;
+    anchorXZ = center + vec2f(cos(meadowAngle), sin(meadowAngle)) * meadowRadius +
+      (vec2f(h1, h2) - 0.5) * 4.0;
   }
   let anchor = vec3f(anchorXZ.x, 0.0, anchorXZ.y);
-  let cell = textureLoad(surface, vec2i(floor(anchor.xz)), 0);
+  let anchorI = vec2i(clamp(floor(anchor.xz), vec2f(0.0), dims - vec2f(1.0)));
+  let cell = textureLoad(surface, anchorI, 0);
   let ground = f32(cell.r) + 1.0;
   let water = cell.a > 0u && f32(cell.a - 1u) > f32(cell.r);
 
@@ -150,31 +151,36 @@ struct Out {
         let ri = u32(h4 * 6.0);
         let rank = f32(ri);
         let sideSign = select(-1.0, 1.0, (ri & 1u) == 0u);
-        let along = (travel - 0.5) * 150.0 - rank * 2.1 + (h7 - 0.5) * 1.2;
+        let along = (travel - 0.5) * max(dims.x, dims.y) * 1.1 - rank * 2.1 + (h7 - 0.5) * 1.2;
         let lane = (flock - 1.0) * 18.0 + sideSign * rank * 1.45 + (h8 - 0.5) * 1.1;
-        let across = frame.cameraPos.xz + dir * along + side * lane;
+        let across = center + dir * along + side * lane;
         world = vec3f(
           across.x,
-          frame.extra.z + 12.0 + h3 * 7.0 + sin(t * 0.55 + h6 * 9.0) * 0.8,
+          frame.extra.z + 15.0 + h3 * 7.0 + sin(t * 0.55 + h6 * 9.0) * 0.8,
           across.y);
         let edge = smoothstep(0.02, 0.12, travel) * (1.0 - smoothstep(0.88, 0.98, travel));
         alpha = 0.9 * dayness * edge;
-      } else if (h6 < 0.68) {
-        let forward = frame.qualityParams.zw;
-        let side = vec2f(-forward.y, forward.x);
-        let travel = fract(t * (0.045 + h7 * 0.018) + h1);
-        let sweepSign = select(-1.0, 1.0, h8 < 0.5);
-        let sweep = (travel - 0.5) * 34.0 * sweepSign;
-        let ahead = 12.0 + h2 * 14.0 + sin(t * 0.31 + h3 * 6.0) * 1.5;
-        let across = frame.cameraPos.xz + forward * ahead + side * sweep;
-        let below = textureLoad(surface, vec2i(floor(across)), 0);
+      } else if (h6 < 0.76) {
+        // Low birds patrol fixed meadow circuits. Their loops are continuous rather than
+        // spectator-relative, so they only appear when the spectator is actually nearby.
+        let base = center + (vec2f(h1, h2) - 0.5) * dims * 0.34;
+        let w = t * (0.24 + h7 * 0.1) + h6 * 6.2831853;
+        let rx = 9.0 + h2 * 8.0;
+        let rz = 5.0 + h8 * 5.0;
+        let turn = h5 * 6.2831853;
+        let ct = cos(turn);
+        let st = sin(turn);
+        let ox = cos(w) * rx;
+        let oz = sin(w) * rz;
+        let across = base + vec2f(ox * ct - oz * st, ox * st + oz * ct);
+        let belowI = vec2i(clamp(floor(across), vec2f(0.0), dims - vec2f(1.0)));
+        let below = textureLoad(surface, belowI, 0);
         let surfaceY = max(f32(below.r) + 1.0, f32(below.a));
         world = vec3f(
           across.x,
-          surfaceY + 4.0 + h3 * 4.0 + sin(t * 0.8 + h4 * 9.0) * 0.7,
+          surfaceY + 6.0 + h3 * 4.0 + sin(t * 0.8 + h4 * 9.0) * 0.7,
           across.y);
-        let edge = smoothstep(0.03, 0.16, travel) * (1.0 - smoothstep(0.84, 0.97, travel));
-        alpha = dayness * edge;
+        alpha = 0.9 * dayness;
       } else {
         let w2 = t * (0.14 + h7 * 0.08) + h1 * 6.2831853;
         let radius = 10.0 + h5 * 8.0;
@@ -187,8 +193,8 @@ struct Out {
         alpha = 0.78 * dayness * coast;
       }
       color = vec3f(0.58, 0.64, 0.73) * (0.85 + h5 * 0.3) * (0.5 + dayness * 0.6);
-      size = 0.78 + h8 * 0.16;
-      if (h6 >= 0.52 && h6 < 0.68) { size *= 0.75; }
+      size = 0.95 + h8 * 0.18;
+      if (h6 >= 0.52 && h6 < 0.76) { size *= 0.85; }
       // Wing beats come in bursts; between them the bird glides with wings nearly level.
       let glide = smoothstep(0.1, 0.75, sin(t * (0.21 + h7 * 0.1) + h6 * 6.2831853));
       flap = sin(t * (2.8 + h7 * 1.5) + h4 * 9.0) * (1.0 - glide * 0.75);
