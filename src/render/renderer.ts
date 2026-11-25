@@ -413,6 +413,11 @@ export class Renderer {
     if (skipBloom) fd[F.weather + 3] = 0;
     fd[F.qualityParams] = low ? 0 : this.quality === "medium" ? 1 : 2;
     fd[F.qualityParams + 1] = !low && !this.debug.has("shadow") ? 1 : 0;
+    const forwardX = camera.target[0] - camera.eye[0];
+    const forwardZ = camera.target[2] - camera.eye[2];
+    const forwardLen = Math.hypot(forwardX, forwardZ) || 1;
+    fd[F.qualityParams + 2] = forwardX / forwardLen;
+    fd[F.qualityParams + 3] = forwardZ / forwardLen;
     frustumPlanes(this.planes, camera.viewProj);
     this.updateLight(camera.target, camera.distance);
     frustumPlanes(this.lightPlanes, fd.subarray(F.lightViewProj, F.lightViewProj + 16));
@@ -553,7 +558,7 @@ export class Renderer {
       main.setBindGroup(0, this.frameBindGroup);
       if (!skip.has("water")) this.water.draw(main, this.planes, null);
       if (!skip.has("fire")) this.particles.draw(main);
-      if (!skip.has("life")) this.life.draw(main);
+      if (!skip.has("life")) this.life.draw(main, this.quality);
       main.end();
     } else {
       // Opaque stores its color and depth and exposes `opaque`: the scene transparent
@@ -650,7 +655,7 @@ export class Renderer {
         this.water.draw(trans, this.planes, targets.scene, this.quality === "high");
       }
       if (!skip.has("fire")) this.particles.draw(trans);
-      if (!skip.has("life")) this.life.draw(trans);
+      if (!skip.has("life")) this.life.draw(trans, this.quality);
       trans.end();
       // In-scattered light lands on the resolve ahead of bloom, so strong shafts glow.
       if (!skip.has("shafts") && targets.shafts) {
