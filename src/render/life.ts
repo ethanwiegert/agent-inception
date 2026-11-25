@@ -168,9 +168,10 @@ struct Out {
         let ahead = 12.0 + h2 * 14.0 + sin(t * 0.31 + h3 * 6.0) * 1.5;
         let across = frame.cameraPos.xz + forward * ahead + side * sweep;
         let below = textureLoad(surface, vec2i(floor(across)), 0);
+        let surfaceY = max(f32(below.r) + 1.0, f32(below.a));
         world = vec3f(
           across.x,
-          f32(below.r) + 5.0 + h3 * 4.0 + sin(t * 0.8 + h4 * 9.0) * 0.7,
+          surfaceY + 4.0 + h3 * 4.0 + sin(t * 0.8 + h4 * 9.0) * 0.7,
           across.y);
         let edge = smoothstep(0.03, 0.16, travel) * (1.0 - smoothstep(0.84, 0.97, travel));
         alpha = dayness * edge;
