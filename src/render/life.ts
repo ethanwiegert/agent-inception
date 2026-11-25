@@ -4,8 +4,8 @@ import type { Layouts, Quality } from "./renderer.ts";
 
 /** Particles of ambient life drawn in one instanced call. */
 const COUNT = 320;
-/** Low tier keeps the same mix with fewer instances: ambience stays, vertex work drops 60%. */
-const COUNT_LOW = 128;
+/** Low tier keeps the same mix with fewer instances: ambience stays, vertex work drops 70%. */
+const COUNT_LOW = 96;
 /** Everything fades out by this distance from the camera, in blocks. */
 const REACH = 60;
 
@@ -85,11 +85,11 @@ struct Out {
     sin(ang) * rad + (h4 - 0.5) * 8.0);
   // Put a share of the small daytime/nighttime insects in the spectator's forward band, so the
   // meadow always has a few visible travelers instead of hiding them all behind the camera.
-  if ((kind == 0u || kind == 1u || kind == 4u) && h8 < 0.38) {
+  if ((kind == 0u || kind == 1u || kind == 4u) && h8 < 0.45) {
     let forward = frame.qualityParams.zw;
     let side = vec2f(-forward.y, forward.x);
-    let ahead = 8.0 + h1 * 30.0;
-    let lateral = (h2 - 0.5) * 34.0;
+    let ahead = 6.0 + h1 * 24.0;
+    let lateral = (h2 - 0.5) * 24.0;
     anchorXZ = frame.cameraPos.xz + forward * ahead + side * lateral;
   }
   let anchor = vec3f(anchorXZ.x, 0.0, anchorXZ.y);
@@ -119,8 +119,8 @@ struct Out {
       if (frame.qualityParams.x >= 0.5) { lit = keyLightFast(world); }
       color = mix(vec3f(1.0, 0.95, 0.8), vec3f(1.0, 0.86, 0.45), painterly * 0.7) *
         (0.25 + lit * (1.4 + 1.2 * painterly));
-      alpha = (0.08 + lit * (0.55 + 0.35 * painterly)) * max(dayness, twilight * 0.9);
-      size = (0.05 + h5 * 0.04) * (1.0 + 0.55 * painterly);
+      alpha = (0.1 + lit * (0.6 + 0.35 * painterly)) * max(dayness, twilight * 0.9);
+      size = (0.06 + h5 * 0.05) * (1.0 + 0.55 * painterly);
     }
     case 1u: {
       // Butterflies weave over the meadow in daylight, drifting sideways between flowers.
@@ -132,13 +132,14 @@ struct Out {
         sin(w1 * 1.3) * 1.6 + sin(cruise) * 1.1);
       let petals = array<vec3f, 3>(vec3f(1.0, 0.46, 0.08), vec3f(0.95, 0.72, 0.12), vec3f(0.55, 0.34, 0.85));
       color = petals[min(u32(h5 * 3.0), 2u)] * 0.95;
-      alpha = select(0.0, 0.9, cell.g == 1u || cell.g == 2u) * dayness;
-      size = 0.19 + h8 * 0.04;
+      alpha = select(0.0, 0.95, cell.g == 1u || cell.g == 2u) * dayness;
+      size = 0.24 + h8 * 0.06;
       flap = sin(t * (10.0 + h5 * 6.0) + h1 * 9.0);
     }
     case 2u: {
-      // Most gulls travel in loose little flocks across the sky; the rest circle thermals.
-      if (h6 < 0.68) {
+      // Most gulls travel in loose little flocks across the sky; a few sweep through the
+      // foreground so their wingbeats read clearly, and the rest circle thermals.
+      if (h6 < 0.52) {
         let fi = u32(h2 * 3.0);
         let flock = f32(fi);
         let flockAngle = flock * 2.0943951 + 0.45;
@@ -158,6 +159,21 @@ struct Out {
           across.y);
         let edge = smoothstep(0.02, 0.12, travel) * (1.0 - smoothstep(0.88, 0.98, travel));
         alpha = 0.9 * dayness * edge;
+      } else if (h6 < 0.68) {
+        let forward = frame.qualityParams.zw;
+        let side = vec2f(-forward.y, forward.x);
+        let travel = fract(t * (0.045 + h7 * 0.018) + h1);
+        let sweepSign = select(-1.0, 1.0, h8 < 0.5);
+        let sweep = (travel - 0.5) * 34.0 * sweepSign;
+        let ahead = 12.0 + h2 * 14.0 + sin(t * 0.31 + h3 * 6.0) * 1.5;
+        let across = frame.cameraPos.xz + forward * ahead + side * sweep;
+        let below = textureLoad(surface, vec2i(floor(across)), 0);
+        world = vec3f(
+          across.x,
+          f32(below.r) + 5.0 + h3 * 4.0 + sin(t * 0.8 + h4 * 9.0) * 0.7,
+          across.y);
+        let edge = smoothstep(0.03, 0.16, travel) * (1.0 - smoothstep(0.84, 0.97, travel));
+        alpha = dayness * edge;
       } else {
         let w2 = t * (0.14 + h7 * 0.08) + h1 * 6.2831853;
         let radius = 10.0 + h5 * 8.0;
@@ -169,8 +185,9 @@ struct Out {
         let coast = mix(0.45, 1.0, select(0.0, 1.0, water));
         alpha = 0.78 * dayness * coast;
       }
-      color = vec3f(0.48, 0.55, 0.66) * (0.85 + h5 * 0.3) * (0.5 + dayness * 0.6);
+      color = vec3f(0.58, 0.64, 0.73) * (0.85 + h5 * 0.3) * (0.5 + dayness * 0.6);
       size = 0.78 + h8 * 0.16;
+      if (h6 >= 0.52 && h6 < 0.68) { size *= 0.75; }
       // Wing beats come in bursts; between them the bird glides with wings nearly level.
       let glide = smoothstep(0.1, 0.75, sin(t * (0.21 + h7 * 0.1) + h6 * 6.2831853));
       flap = sin(t * (2.8 + h7 * 1.5) + h4 * 9.0) * (1.0 - glide * 0.75);
@@ -191,7 +208,7 @@ struct Out {
       flap = sin(t * 5.0 + h5 * 9.0) * 0.7;
     }
     case 4u: {
-      // Fireflies & terrarium spores: warm amber and bioluminescent cyan-mint at dusk & night!
+      // Fireflies and terrarium spores: warm amber and bioluminescent cyan-mint at dusk and night.
       world += vec3f(
         sin(t * 0.4 + h1 * 9.0) * 2.7,
         0.5 + h3 * 1.8 + sin(t * 0.9 + h4 * 9.0) * 0.4,
@@ -237,14 +254,16 @@ struct Out {
   var ysize = size;
   if (kind == 2u) {
     xsize = size * 1.8;
-    ysize = size * 0.8;
+    ysize = size;
   }
   if (kind == 1u || kind == 5u) {
     xsize = size * 1.15;
     ysize = size * 1.05;
   }
-  let c = (array<vec2f, 6>(vec2f(-0.5), vec2f(0.5), vec2f(0.5, 0.5),
-    vec2f(-0.5), vec2f(0.5, 0.5), vec2f(-0.5, 0.5)))[vi];
+  let c = (array<vec2f, 6>(
+    vec2f(-0.5, -0.5), vec2f(0.5, -0.5), vec2f(0.5, 0.5),
+    vec2f(-0.5, -0.5), vec2f(0.5, 0.5), vec2f(-0.5, 0.5),
+  ))[vi];
   let f = normalize(frame.cameraPos.xyz - world);
   let right = normalize(cross(vec3f(0.0, 1.0, 0.0), f) + vec3f(1e-5, 0.0, 0.0));
   let up = cross(f, right);
@@ -280,16 +299,16 @@ fn ellipse(p: vec2f, c: vec2f, r: vec2f, feather: f32) -> f32 {
     let halo = exp(-r * r * 5.0) * (1.0 - smoothstep(0.8, 1.0, r));
     shape = max(core, halo * 0.7);
   } else if (in.kind == 2u) {
-    // Gull silhouette: a shallow chevron with a small body and darkening wingtips. The wing line
-    // hinges up and down with the signed flap value, then relaxes into a glide.
+    // Gull silhouette: two tapered wings around a small body, with darkening wingtips. The
+    // wing line hinges up and down with the signed flap value, then relaxes into a glide.
     let ax = abs(uv.x);
-    let center = 0.08 - ax * 0.22 + in.flap * ax * 0.34;
-    let thick = mix(0.27, 0.075, ax);
-    let wingBand = 1.0 - smoothstep(thick, thick + 0.07, abs(uv.y - center));
+    let center = -0.02 + ax * 0.12 + in.flap * ax * 0.5;
+    let thick = 0.018 + 0.075 * sin(3.14159265 * ax);
+    let wingBand = 1.0 - smoothstep(thick, thick + 0.025, abs(uv.y - center));
     let span = 1.0 - smoothstep(0.88, 1.0, ax);
-    let awayFromBody = smoothstep(0.06, 0.2, ax);
+    let awayFromBody = smoothstep(0.1, 0.24, ax);
     let wing = wingBand * span * awayFromBody;
-    let body = ellipse(uv, vec2f(0.0, -0.01), vec2f(0.13, 0.22), 0.3);
+    let body = ellipse(uv, vec2f(0.0, -0.01), vec2f(0.07, 0.19), 0.3);
     let tip = smoothstep(0.55, 0.95, ax);
     color = mix(color, color * vec3f(0.42, 0.48, 0.58), tip * 0.65);
     shape = max(wing * 0.95, body);
