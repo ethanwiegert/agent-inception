@@ -86,7 +86,7 @@ struct Out {
   var anchorXZ = center + (vec2f(h1, h2) - 0.5) * dims * 0.76 + (vec2f(h3, h4) - 0.5) * 8.0;
   // A minority of the small species live in the central meadow. That is a fixed place in the
   // world, not a camera-following band, so they stay behind when the spectator walks away.
-  if ((kind == 0u || kind == 1u || kind == 4u) && h8 < 0.35) {
+  if ((kind == 0u || kind == 1u || kind == 4u || kind == 5u) && h8 < 0.35) {
     let meadowAngle = h3 * 6.2831853;
     let meadowRadius = 7.0 + h4 * 24.0;
     anchorXZ = center + vec2f(cos(meadowAngle), sin(meadowAngle)) * meadowRadius +
