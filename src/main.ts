@@ -5,6 +5,19 @@ import { attachReverseCaptcha } from "./captcha.ts";
 import { createConnectCard } from "./connect.ts";
 import { createDevPanel } from "./devpanel.ts";
 import { acquireGpu } from "./gpu.ts";
+import {
+  agentCloudHook,
+  agentPrompt,
+  applyDocumentLocale,
+  availableLocales,
+  initLocale,
+  localeState,
+  localizeWorkerMessage,
+  onLocaleChange,
+  registerLocale,
+  setLocale,
+  t,
+} from "./i18n.ts";
 import { Overlay, project, TAG_HEIGHT } from "./overlay.ts";
 import { createFrameStats } from "./perf.ts";
 import { pref, setPref } from "./prefs.ts";
@@ -18,6 +31,11 @@ import { createSupportLinks } from "./support.ts";
 
 const canvas = document.getElementById("view") as HTMLCanvasElement;
 const params = new URLSearchParams(location.search);
+// Initialize localization first so `#about`, fatal WebGPU errors and corner links match the user's
+// browser language (or `?lang=` / saved preference) from the very first paint.
+initLocale({ search: location.search, saved: pref("lang") });
+applyDocumentLocale();
+onLocaleChange(applyDocumentLocale);
 // Use the primary input so touchscreen laptops keep the desktop defaults.
 const mobile = matchMedia("(pointer: coarse) and (hover: none)").matches;
 /** On the dev server the page uses the bridge's local room unless `?relay=1` asks for a paired one. */
@@ -52,7 +70,7 @@ let softwareGpu = initialGpu.softwareGpu;
 const gpuErrors: string[] = [];
 const context = headless ? null : canvas.getContext("webgpu") as GPUCanvasContext | null;
 if (!headless && !context) {
-  fatal("Could not initialize a WebGPU canvas context in this browser.");
+  fatal(t("gpu.noCanvasContext"));
 }
 const format = navigator.gpu.getPreferredCanvasFormat();
 let gpuRecovering = false;
@@ -63,7 +81,7 @@ function configureCanvas() {
   try {
     context.configure({ device, format, alphaMode: "opaque" });
   } catch (e) {
-    fatal(`Could not configure WebGPU canvas: ${e instanceof Error ? e.message : String(e)}`);
+    fatal(t("gpu.configureFailed", { error: e instanceof Error ? e.message : String(e) }));
   }
 }
 
@@ -86,7 +104,7 @@ async function recoverDevice(reason: string) {
   renderer?.destroy();
   renderer = null;
   if (gpuRecoveries > 2) {
-    showFatal(`GPU device lost: ${reason || "graphics device reset repeatedly."}`);
+    showFatal(t("gpu.deviceLost", { reason: reason || t("gpu.deviceLostDefault") }));
     return;
   }
   // Step down load so a GPU timeout / TDR does not immediately trigger again.
@@ -95,7 +113,12 @@ async function recoverDevice(reason: string) {
   resize();
   const next = await acquireGpu({ devHost, preferFallback: gpuRecoveries > 1 });
   if (!next.ok) {
-    showFatal(`GPU device lost (${reason || "reset"}), and recovery failed: ${next.message}`);
+    showFatal(
+      t("gpu.deviceLostRecoveryFailed", {
+        reason: reason || t("gpu.deviceLostReset"),
+        message: next.message,
+      }),
+    );
     return;
   }
   device = next.device;
@@ -106,7 +129,7 @@ async function recoverDevice(reason: string) {
   watchDevice(device);
   configureCanvas();
   if (client.world) renderer = createRenderer(client.world);
-  overlay.log("world", "graphics device reset — recovered");
+  overlay.log(t("feed.world"), t("gpu.recovered"));
   gpuRecovering = false;
 }
 
@@ -176,8 +199,9 @@ client.onReady = (world, caughtUp, notice) => {
     history.replaceState(null, "", url);
   }
   if (notice) {
-    overlay.log("world", notice, true);
-    panel.notice(notice);
+    const text = localizeWorkerMessage(notice);
+    overlay.log(t("feed.world"), text, true);
+    panel.notice(text);
   }
   void refreshWorlds();
   if (!link) void startLink();
@@ -190,7 +214,7 @@ client.onReady = (world, caughtUp, notice) => {
     camera.attach(canvas);
   }
   if (caughtUp > 20 * 60) {
-    overlay.log("world", `caught up ${Math.round(caughtUp / 20 / 60)} min while you were away`);
+    overlay.log(t("feed.world"), t("feed.caughtUp", { minutes: Math.round(caughtUp / 20 / 60) }));
   }
 };
 
@@ -198,22 +222,22 @@ client.onEvent = (event) => {
   sound.event(event, agentAt);
   if (event.type === "say") {
     overlay.say(event.agent, event.text, performance.now());
-    overlay.log(agentName(event.agent), `says “${event.text}”`);
+    overlay.log(agentName(event.agent), t("feed.says", { text: event.text }));
   } else if (event.type === "catch") {
-    overlay.say(event.agent, `Caught a ${event.fish}!`, performance.now());
+    overlay.say(event.agent, t("feed.caughtFish", { fish: event.fish }), performance.now());
   } else if (event.type === "joined") {
-    overlay.log(agentName(event.agent), "arrived in the meadow");
+    overlay.log(agentName(event.agent), t("feed.joined"));
   } else if (event.type === "rule") {
     if (event.agent) overlay.say(event.agent, event.text, performance.now());
     overlay.log(`✦ ${event.rule}`, event.text);
   } else if (event.type === "catalog") {
-    overlay.log(event.agent ? agentName(event.agent) : "catalog", event.text);
+    overlay.log(event.agent ? agentName(event.agent) : t("feed.catalog"), event.text);
   } else if (event.type === "physics") {
     overlay.log(agentName(event.agent), event.text);
   } else if (event.type === "village") {
-    overlay.log(event.agent ? agentName(event.agent) : "village", event.text);
+    overlay.log(event.agent ? agentName(event.agent) : t("feed.village"), event.text);
   } else if (event.type === "board") {
-    overlay.log(event.agent ? agentName(event.agent) : "✎ notice board", event.text);
+    overlay.log(event.agent ? agentName(event.agent) : t("feed.board"), event.text);
     // A reply is said aloud too, so spectators see it over the villager's head.
     if (event.agent && event.text.startsWith("replied")) {
       overlay.say(event.agent, event.text.replace(/^replied to #\d+: /, ""), performance.now());
@@ -257,7 +281,7 @@ async function handleTool(
   }
   if (name === "screenshot") return await screenshot(session);
   const id = name === "join" ? null : await whoIs(session);
-  const label = id === null ? String(args.name ?? "someone") : agentName(id);
+  const label = id === null ? String(args.name ?? t("feed.someone")) : agentName(id);
   if (!QUIET_TOOLS.has(name) && !ANNOUNCED_TOOLS.has(name)) {
     overlay.log(label, `${name} ${clip(JSON.stringify(args), 120)}`);
   }
@@ -480,7 +504,7 @@ const connectCard = createConnectCard(
 async function refreshWorlds(reply?: SlotsReply) {
   const r = reply ?? await client.slots({ op: "list" });
   panel.worlds(r.slots, client.slot);
-  if (r.error) panel.notice(r.error);
+  if (r.error) panel.notice(localizeWorkerMessage(r.error));
   return r;
 }
 
@@ -500,14 +524,14 @@ const worldHandlers = {
   async create() {
     const { slots } = await client.slots({ op: "list" });
     const free = slots.find((s) => s.empty);
-    if (!free) return panel.notice(`All ${SLOTS} world slots are full. Delete one first.`);
+    if (!free) return panel.notice(t("panel.allSlotsFull", { slots: SLOTS }));
     await openWorld(free.slot, (Math.random() * 1e6) | 0);
   },
   async remove(slot: number) {
     const r = await client.slots({ op: "list" });
     const s = r.slots[slot];
     if (!s || s.empty) return;
-    if (!confirm(`Delete “${s.name}” (seed ${s.seed}, day ${s.day})? This can't be undone.`)) {
+    if (!confirm(t("panel.deleteConfirm", { name: s.name, seed: s.seed, day: s.day }))) {
       return;
     }
     setPref(`link.${slot}`, null);
@@ -544,7 +568,7 @@ const panel = createDevPanel({
   freeVillagers: () => {
     client.send({ type: "forgetSessions" });
     sessionAgents.clear();
-    overlay.log("world", "the spectator freed every villager: agents join again by name");
+    overlay.log(t("feed.world"), t("feed.freedVillagers"));
   },
   follow: toggleFollow,
   villageLife: (on) => client.send({ type: "villageLife", on }),
@@ -707,6 +731,16 @@ Object.assign(globalThis, {
     setLook: (_id: string) => {},
     /** Switch the feature tier (`low|medium|high`), as the spectator panel does. */
     setQuality: (id: string) => setQuality(id as Quality),
+    /** Client localization API (inspect/switch language, register custom locales, agent prompts). */
+    i18n: {
+      state: localeState,
+      setLocale,
+      registerLocale,
+      availableLocales,
+      t,
+      agentPrompt,
+      agentCloudHook,
+    },
     /** A PNG data URL of the current view (or `pose`, at render time `at`), rendered offscreen. */
     capture: async (
       width = canvas.width,
@@ -732,6 +766,9 @@ const frameTarget = (): RenderTarget | null => {
 };
 
 let lastPanel = 0;
+onLocaleChange(() => {
+  lastPanel = 0;
+});
 let lastFrame = 0;
 let liveFrames = mobile ? createFrameQueue(device.queue) : null;
 
@@ -844,6 +881,7 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
     lastPanel = now;
     const s = stats.summary();
     const r = renderer.stats;
+    const qLabel = quality === "low" ? t("panel.qualityLow") : t("panel.qualityMedium");
     panel.update({
       timeOfDay: client.timeOfDay,
       day: client.day,
@@ -862,11 +900,11 @@ function updatePanel(now: number, agents: { id: number; name: string }[]) {
       quality,
       qualityAuto: !qualityFixed,
       stats: [
-        `${(1000 / s.meanMs).toFixed(0)} fps`,
-        `gpu ${r.gpuMs ? r.gpuMs.toFixed(2) + " ms" : "n/a"}`,
-        `${(r.grassBlades / 1000).toFixed(0)}k blades`,
-        ...(renderScale < 1 ? [`${Math.round(renderScale * 100)}% res`] : []),
-        ...(quality !== "high" ? [quality] : []),
+        t("panel.statFps", { fps: (1000 / s.meanMs).toFixed(0) }),
+        t("panel.statGpu", { ms: r.gpuMs ? `${r.gpuMs.toFixed(2)} ms` : t("panel.statNa") }),
+        t("panel.statBlades", { k: (r.grassBlades / 1000).toFixed(0) }),
+        ...(renderScale < 1 ? [t("panel.statRes", { pct: Math.round(renderScale * 100) })] : []),
+        ...(quality !== "high" ? [qLabel] : []),
       ],
     });
   }

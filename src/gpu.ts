@@ -7,6 +7,8 @@
  * (which WebGPU never returns unless `forceFallbackAdapter: true` is requested).
  */
 
+import { t } from "./i18n.ts";
+
 export const OPTIONAL_FEATURES: readonly GPUFeatureName[] = [
   "timestamp-query",
   "indirect-first-instance",
@@ -81,18 +83,9 @@ const FALLBACK_ONLY_CANDIDATES: readonly Candidate[] = [
 
 /** User-facing failure copy: practical advice for live-site visitors, plus CLI hints in dev. */
 export function failureMessage(reason: GpuFailure["reason"], devHost: boolean): string {
-  if (reason === "unsupported") {
-    return "agent-inception needs WebGPU. Try a recent Chrome, Edge, Brave, Safari, or Firefox.";
-  }
-  const base = reason === "no-device"
-    ? "WebGPU found a graphics adapter, but could not start a GPU device. Try reloading, " +
-      "restarting your browser, or updating your graphics driver."
-    : "No WebGPU graphics adapter is available in this browser. Make sure Graphics / Hardware " +
-      "Acceleration is turned on in your browser settings, try restarting your browser, or " +
-      "open this page in a recent Chrome or Edge.";
-  if (!devHost) return base;
-  return `${base} (On a GPU-less dev machine, keep the world running headless with ` +
-    "`deno task host`, or start Chromium with --enable-unsafe-webgpu --enable-unsafe-swiftshader.)";
+  if (reason === "unsupported") return t("gpu.unsupported");
+  const base = reason === "no-device" ? t("gpu.noDevice") : t("gpu.noAdapter");
+  return devHost ? base + t("gpu.devHint") : base;
 }
 
 async function openDevice(adapter: GPUAdapter): Promise<GPUDevice | null> {

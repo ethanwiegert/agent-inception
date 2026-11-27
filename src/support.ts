@@ -5,6 +5,8 @@
  * phone, and under the connect card and the CAPTCHA gag, so those stay modal.
  */
 
+import { onLocaleChange, t } from "./i18n.ts";
+
 export const GITHUB_URL = "https://github.com/ethanwiegert/agent-inception";
 export const KOFI_URL = "https://ko-fi.com/ethanwiegert";
 
@@ -16,9 +18,6 @@ const GITHUB_MARK = "M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.
   "-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34" +
   ".19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 " +
   "0 8c0-4.42 3.58-8 8-8Z";
-
-const NOTE = "Tips go straight to me, Ethan, the solo dev behind this island. No catch: it's a " +
-  "thank-you, and I'll use it as I see fit.";
 
 const css = `
 .ai-support{position:fixed;left:calc(12px + env(safe-area-inset-left));
@@ -67,8 +66,6 @@ export function createSupportLinks() {
   };
 
   const gh = external(document.createElement("a"), GITHUB_URL);
-  gh.title = "Source on GitHub";
-  gh.setAttribute("aria-label", "agent-inception on GitHub");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("aria-hidden", "true");
@@ -79,7 +76,6 @@ export function createSupportLinks() {
 
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.title = "Support the dev";
   toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", "ai-support-pop");
   const heart = Object.assign(document.createElement("span"), {
@@ -87,26 +83,32 @@ export function createSupportLinks() {
     textContent: "♥",
   });
   heart.setAttribute("aria-hidden", "true");
-  const label = Object.assign(document.createElement("span"), {
-    className: "label",
-    textContent: "Support",
-  });
+  const label = Object.assign(document.createElement("span"), { className: "label" });
   toggle.append(heart, label);
-  toggle.setAttribute("aria-label", "Support");
 
   const pop = document.createElement("div");
   pop.id = "ai-support-pop";
   pop.className = "ai-support-pop";
   pop.setAttribute("role", "dialog");
-  pop.setAttribute("aria-label", "Support the dev");
   pop.hidden = true;
-  const note = Object.assign(document.createElement("p"), { textContent: NOTE });
+  const note = document.createElement("p");
   const kofi = external(document.createElement("a"), KOFI_URL);
-  kofi.textContent = "Click here to support me";
-  const where = Object.assign(document.createElement("small"), {
-    textContent: "on Ko-fi · opens in a new tab",
-  });
+  const where = document.createElement("small");
   pop.append(note, kofi, where);
+
+  const applyLocale = () => {
+    gh.title = t("support.githubTitle");
+    gh.setAttribute("aria-label", t("support.githubAria"));
+    toggle.title = t("support.title");
+    label.textContent = t("support.label");
+    toggle.setAttribute("aria-label", t("support.label"));
+    pop.setAttribute("aria-label", t("support.title"));
+    note.textContent = t("support.note");
+    kofi.textContent = t("support.cta");
+    where.textContent = t("support.where");
+  };
+  applyLocale();
+  onLocaleChange(applyLocale);
 
   let open = false;
   const set = (on: boolean) => {

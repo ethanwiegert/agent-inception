@@ -1,3 +1,4 @@
+import { onLocaleChange, t } from "./i18n.ts";
 import { invert, lookAt, mat4, multiply, perspective, type Vec3 } from "./math.ts";
 
 const MIN_PITCH = 0.12, MAX_PITCH = 1.45;
@@ -188,26 +189,38 @@ export class Camera {
     document.head.append(style);
     const bar = document.createElement("div");
     bar.className = "ai-cam";
-    const button = (label: string, title: string, onclick: () => void) => {
+    const button = (label: string, onclick: () => void) => {
       const b = document.createElement("button");
       b.type = "button";
       b.innerHTML = label;
-      b.title = title;
-      b.setAttribute("aria-label", title);
       b.onclick = onclick;
       bar.append(b);
       return b;
     };
-    button("&#8630;", "Rotate left 45°", () => this.goalYaw += Math.PI / 4);
-    const compass = button('<span class="needle">N</span>', "Face north", () => {
+    const rotLeft = button("&#8630;", () => this.goalYaw += Math.PI / 4);
+    const compass = button('<span class="needle"></span>', () => {
       this.goalYaw = Math.round(this.goalYaw / (Math.PI * 2)) * Math.PI * 2;
     });
     this.needle = compass.firstElementChild as HTMLElement;
-    button("&#8631;", "Rotate right 45°", () => this.goalYaw -= Math.PI / 4);
-    button("&#9974;", "Overview of the whole island", () => this.overview());
-    this.cinematicButton = button("&#9654;", "Cinematic auto-orbit", () => {
+    const rotRight = button("&#8631;", () => this.goalYaw -= Math.PI / 4);
+    const overviewBtn = button("&#9974;", () => this.overview());
+    this.cinematicButton = button("&#9654;", () => {
       this.cinematic = !this.cinematic;
     });
+    const setTip = (b: HTMLElement, text: string) => {
+      b.title = text;
+      b.setAttribute("aria-label", text);
+    };
+    const applyLocale = () => {
+      setTip(rotLeft, t("camera.rotateLeft"));
+      setTip(compass, t("camera.faceNorth"));
+      if (this.needle) this.needle.textContent = t("camera.north");
+      setTip(rotRight, t("camera.rotateRight"));
+      setTip(overviewBtn, t("camera.overview"));
+      if (this.cinematicButton) setTip(this.cinematicButton, t("camera.cinematic"));
+    };
+    applyLocale();
+    onLocaleChange(applyLocale);
     document.body.append(bar);
   }
 

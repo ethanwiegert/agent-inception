@@ -1,3 +1,4 @@
+import { onLocaleChange, t } from "./i18n.ts";
 import type { Mat4 } from "./math.ts";
 import type { AgentView } from "./simclient.ts";
 
@@ -86,6 +87,11 @@ export class Overlay {
     this.feed = document.createElement("div");
     this.feed.className = "ai-feed";
     document.body.append(this.feed);
+    onLocaleChange(() => {
+      for (const tag of this.tags.values()) {
+        tag.name.title = t("overlay.follow", { name: tag.label.textContent ?? "" });
+      }
+    });
   }
 
   say(agentId: number, text: string, now: number) {
@@ -134,7 +140,10 @@ export class Overlay {
       let tag = this.tags.get(a.id);
       if (!tag) tag = this.createTag(a);
       tag.swatch.style.background = a.floatsee.colors.primary;
-      if (tag.label.textContent !== a.name) tag.label.textContent = a.name;
+      if (tag.label.textContent !== a.name) {
+        tag.label.textContent = a.name;
+        tag.name.title = t("overlay.follow", { name: a.name });
+      }
       tag.name.classList.toggle("followed", a.id === followed);
       if (!project(viewProj, a.x, a.y + TAG_HEIGHT, a.z, width, height, at)) {
         tag.root.style.display = "none";
@@ -168,7 +177,7 @@ export class Overlay {
     const label = document.createElement("span");
     label.textContent = a.name;
     name.append(swatch, label);
-    name.title = `Follow ${a.name}`;
+    name.title = t("overlay.follow", { name: a.name });
     name.onclick = () => this.onSelect(a.id);
     root.append(bubble, name);
     document.body.append(root);

@@ -1,0 +1,266 @@
+import type { Messages } from "./en.ts";
+
+export const es: Messages = {
+  "meta.title": "agent-inception: un mundo sandbox donde viven agentes de IA mientras miras",
+  "meta.description":
+    "Una isla 3D de bloques jugada por agentes de IA vía MCP. Cultivan, construyen e inventan cosas nuevas mientras miras en vivo en tu navegador. Gratis y de código abierto.",
+
+  "about.lead": "Un mundo sandbox donde puedes ver vivir a tu agente.",
+  "about.retry": "Reintentar",
+  "about.introBeforeMcp":
+    "Una isla 3D tranquila de bloques con agricultura, construcción, animales, física y fuego, jugada por agentes de IA mediante ",
+  "about.introAfterMcp":
+    " (Model Context Protocol) mientras miras. Los agentes no solo juegan, también expanden el juego: todo lo que puede existir vive en un Catálogo que los agentes leen, crean, bifurcan y votan.",
+  "about.howToPlay": "Cómo jugar",
+  "about.step1":
+    "Abre esta página en un navegador con WebGPU (Chrome, Edge o Brave reciente). Una isla nueva arranca en la pestaña y muestra su enlace para agentes.",
+  "about.step2":
+    "Agrega el enlace a Claude o ChatGPT como conector personalizado (sin instalar nada), o dáselo a Claude Code o cualquier chatbot o agente de IA con MCP. Mira aquí, juega desde tu chat.",
+  "about.step3":
+    "Se une como aldeano y se gana la vida: cultiva, construye, fabrica, pesca, inventa nuevos Diseños y Reglas. Tú miras, ajustas el clima y la hora, y fijas Deseos en el Tablón de Anuncios.",
+  "about.sourceOnGithub": "Código en GitHub",
+  "about.llmsForAgents": "llms.txt para agentes",
+  "about.license": "Gratis, código abierto, licencia MIT",
+
+  "gpu.unsupported":
+    "agent-inception necesita WebGPU. Prueba con Chrome, Edge, Brave, Safari o Firefox reciente.",
+  "gpu.noDevice":
+    "WebGPU encontró un adaptador gráfico, pero no pudo iniciar un dispositivo GPU. Intenta recargar, reiniciar tu navegador o actualizar tus controladores gráficos.",
+  "gpu.noAdapter":
+    "No hay ningún adaptador gráfico WebGPU disponible en este navegador. Asegúrate de activar la aceleración de gráficos/hardware en la configuración, reinicia el navegador o abre esta página en Chrome o Edge reciente.",
+  "gpu.devHint":
+    " (En una máquina de desarrollo sin GPU, ejecuta el mundo sin pantalla con `deno task host`, o inicia Chromium con --enable-unsafe-webgpu --enable-unsafe-swiftshader.)",
+  "gpu.noCanvasContext": "No se pudo inicializar un contexto WebGPU en este navegador.",
+  "gpu.configureFailed": "No se pudo configurar el lienzo WebGPU: {error}",
+  "gpu.deviceLost": "Se perdió el dispositivo GPU: {reason}",
+  "gpu.deviceLostDefault": "el dispositivo gráfico se reinició repetidamente.",
+  "gpu.deviceLostRecoveryFailed":
+    "Se perdió el dispositivo GPU ({reason}) y falló la recuperación: {message}",
+  "gpu.deviceLostReset": "reinicio",
+  "gpu.recovered": "dispositivo gráfico reiniciado — recuperado",
+
+  "support.githubTitle": "Código en GitHub",
+  "support.githubAria": "agent-inception en GitHub",
+  "support.title": "Apoyar al desarrollador",
+  "support.label": "Apoyar",
+  "support.note":
+    "Las propinas van directo para mí, Ethan, el desarrollador solitario detrás de esta isla. Sin truco: es un agradecimiento y lo usaré como mejor vea.",
+  "support.cta": "Haz clic aquí para apoyarme",
+  "support.where": "en Ko-fi · abre en una pestaña nueva",
+
+  "camera.rotateLeft": "Girar 45° a la izquierda",
+  "camera.faceNorth": "Mirar al norte",
+  "camera.north": "N",
+  "camera.rotateRight": "Girar 45° a la derecha",
+  "camera.overview": "Vista general de toda la isla",
+  "camera.cinematic": "Órbita automática cinematográfica",
+
+  "overlay.follow": "Seguir a {name}",
+
+  "feed.world": "mundo",
+  "feed.catalog": "catálogo",
+  "feed.village": "aldea",
+  "feed.board": "✎ tablón",
+  "feed.someone": "alguien",
+  "feed.caughtUp": "avanzó {minutes} min mientras no estabas",
+  "feed.says": "dice «{text}»",
+  "feed.caughtFish": "¡Pescó un {fish}!",
+  "feed.joined": "llegó a la pradera",
+  "feed.freedVillagers":
+    "el espectador liberó a todos los aldeanos: los agentes pueden volver a unirse por nombre",
+
+  "connect.aria": "Conectar un agente",
+  "connect.lead":
+    "Una pequeña isla que vive en esta pestaña del navegador. Los agentes de IA la juegan: cultivan, construyen, inventan cosas nuevas y escriben las reglas. Tú miras y fijas Deseos. Sin instalar nada: agrega este mundo a Claude, ChatGPT o cualquier chatbot de IA con conectores MCP y juega desde tu chat mientras miras aquí.",
+  "connect.step1": "1 · Conecta tu IA a este mundo",
+  "connect.step2": "2 · Pídele que juegue",
+  "connect.tabClaude": "Claude",
+  "connect.tabChatgpt": "ChatGPT",
+  "connect.tabCode": "Claude Code",
+  "connect.tabOther": "Cualquier chatbot IA",
+  "connect.localWarn":
+    "Este enlace solo funciona en este equipo y las apps de chat se conectan desde la nube. Ejecuta deno task share en el repo para un enlace público, o usa Claude Code.",
+  "connect.claudeStep1":
+    "En Claude (web, escritorio o móvil), abre **Personalizar → Conectores** (Customize → Connectors), haz clic en **+ Añadir** y luego en **Añadir conector personalizado**.",
+  "connect.claudeStep2":
+    "Nómbralo **agent-inception**, pega el enlace de este mundo como URL del servidor y haz clic en **Continuar**. Elige **Sin inicio de sesión** y luego **Añadir**.",
+  "connect.claudeStep3": "En un chat, actívalo en **+ → Conectores** y envía el mensaje de abajo.",
+  "connect.claudeNote":
+    "Los planes gratuitos incluyen un conector personalizado. En Team o Enterprise, un propietario lo añade en Configuración de la organización → Conectores.",
+  "connect.chatgptStep1":
+    "En ChatGPT web, abre **Configuración → Aplicaciones → Configuración avanzada** y activa el **Modo desarrollador**.",
+  "connect.chatgptStep2":
+    "Haz clic en **Crear aplicación**. Nómbrala **agent-inception**, pega el enlace de este mundo como URL del servidor MCP, pon la autenticación en **Sin autenticación** (No Auth), marca **Entiendo** y haz clic en **Crear**.",
+  "connect.chatgptStep3":
+    "En un chat nuevo, selecciónala en **+ → Más → Modo desarrollador** y envía el mensaje de abajo.",
+  "connect.chatgptNote":
+    "El modo desarrollador está en planes de pago (Plus, Pro, Business, Enterprise, Edu); en un espacio de trabajo puede que un administrador deba habilitarlo.",
+  "connect.menuMoveNote": "Los nombres de los menús pueden cambiar entre versiones.",
+  "connect.codeLabel":
+    "Ejecuta esto en una terminal, luego inicia claude y envía el mensaje de abajo",
+  "connect.otherIntro":
+    "Funciona con cualquier chatbot o agente que admita un servidor MCP remoto (Streamable HTTP, sin autenticación): Grok, Muse, Dots, Cursor, VS Code y más. Agrega el enlace de este mundo como conector o pega la línea de abajo en su chat.",
+  "connect.otherLink": "El enlace",
+  "connect.otherHookLabel": "Pégalo en su chat: agrega el conector y empieza a jugar",
+  "connect.otherConfig": "Archivo de configuración (mcpServers JSON)",
+  "connect.sideBySide":
+    "Mantén esta pestaña abierta para mirar y chatea en otra pestaña, ventana o en tu teléfono.",
+  "connect.copy": "Copiar",
+  "connect.copied": "Copiado",
+  "connect.select": "Seleccionar",
+  "connect.newLink": "Nuevo enlace",
+  "connect.newLinkTitle": "Crear un enlace nuevo para este mundo; el anterior dejará de funcionar",
+  "connect.newLinkConfirm":
+    "¿Crear un enlace nuevo? Los agentes que usen el anterior quedarán desconectados hasta que les des el nuevo.",
+  "connect.startWatching": "Empezar a mirar",
+  "connect.stateConnecting": "conectando esta pestaña al servidor de enlace…",
+  "connect.stateConnected": "esta pestaña está conectada: los agentes pueden entrar",
+  "connect.stateOffline": "no se puede alcanzar el servidor; reintentando",
+  "connect.stateReplaced": "otra pestaña tiene este mundo ahora; haz clic aquí para recuperarlo",
+  "connect.stateRefused": "el servidor rechazó el enlace de esta pestaña; prueba Nuevo enlace",
+  "connect.notePaired":
+    "El mundo se ejecuta en esta pestaña, así que mantenla abierta (puede quedar en segundo plano). Cualquiera con el enlace puede jugar aquí; Nuevo enlace desactiva los anteriores. ",
+  "connect.noteLocal":
+    "Desarrollo local: puente del servidor dev (el .mcp.json de este repo ya apunta aquí). Añade ?relay=1 para probar un enlace hospedado, o ejecuta deno task share para uno público. ",
+  "connect.noteEphemeral":
+    "Este navegador bloquea el almacenamiento, así que el enlace cambia en cada visita. ",
+  "connect.noteWorlds":
+    "Los mundos se guardan en este navegador: tres ranuras en mundos dentro del panel.",
+  "connect.agentPrompt":
+    "Usa las herramientas de agent-inception para unirte a la isla como aldeano con un nombre propio, mirar alrededor y ganarte la vida allí: cultiva, construye, explora. Narra de vez en cuando con say en español, la gente está mirando. Sigue un rato y luego escribe una nota con journal_write en español antes de parar.",
+  "connect.agentCloudHook":
+    "Agrega el servidor MCP {url} como un conector llamado agent-inception (Streamable HTTP, sin autenticación), luego únete como aldeano con un nombre propio y vive allí: mira alrededor, cultiva, construye, di una frase corta de vez en cuando con say en español para la gente que mira, y escribe una nota con journal_write en español antes de parar.",
+  "connect.agentLanguageSuffix":
+    "Habla, narra con say y escribe notas con journal_write en {language} ({locale}).",
+
+  "panel.spectator": "espectador",
+  "panel.hide": "Ocultar el panel",
+  "panel.show": "Mostrar el panel",
+  "panel.summaryOne": "día {day} {clock} · {count} floatsee",
+  "panel.summaryOther": "día {day} {clock} · {count} floatsees",
+  "panel.barAria": "{summary}, {link}: panel",
+  "panel.dockTime": "Cambiar momento del día (Mañana / Mediodía / Atardecer / Crepúsculo)",
+  "panel.dockLife": "Alternar Vida de Aldea / Sandbox",
+  "panel.language": "idioma",
+  "panel.languageAuto": "Auto ({name})",
+  "panel.languageAria": "Idioma",
+  "panel.quality": "calidad",
+  "panel.qualityAuto": "auto",
+  "panel.qualityLow": "baja",
+  "panel.qualityMedium": "media",
+  "panel.qualityHigh": "alta",
+  "panel.qualityHeadAuto": "calidad · auto ({quality})",
+  "panel.qualityHeadFixed": "calidad · {quality}",
+  "panel.time": "hora",
+  "panel.timeAria": "hora del día",
+  "panel.timeHead": "hora · día {day}, {clock}",
+  "panel.pause": "pausa",
+  "panel.world": "mundo",
+  "panel.worldHead": "mundo · {sky}",
+  "panel.worldSkyTitle": "cielo de hoy ({pct}% nubes, aleatorio cada día)",
+  "panel.skyClear": "cielo despejado",
+  "panel.skyLight": "nubes ligeras",
+  "panel.skyPartly": "parcialmente nublado",
+  "panel.skyCloudy": "nublado",
+  "panel.skyOvercast": "cubierto",
+  "panel.soundOn": "sonido sí",
+  "panel.soundOff": "sonido no",
+  "panel.worlds": "mundos",
+  "panel.worldsHead": "mundos · semilla {seed}",
+  "panel.slotEmpty": "{slot} · vacío",
+  "panel.slotLabel": "{slot} · {name} · día {day}",
+  "panel.slotSeed": "semilla {seed}",
+  "panel.slotNobody": "nadie todavía",
+  "panel.slotSaved": "guardado {date}",
+  "panel.slotOpen": "abrir",
+  "panel.slotOpenTitle": "ver este mundo",
+  "panel.slotExportTitle": "exportar a un archivo",
+  "panel.slotDeleteTitle": "eliminar",
+  "panel.newWorld": "nuevo mundo",
+  "panel.importWorld": "importar",
+  "panel.allSlotsFull": "Las {slots} ranuras de mundo están llenas. Elimina una primero.",
+  "panel.deleteConfirm":
+    "¿Eliminar «{name}» (semilla {seed}, día {day})? Esto no se puede deshacer.",
+  "panel.board": "tablón de anuncios",
+  "panel.boardHead": "tablón · {open}/{max} abiertos",
+  "panel.wishPlaceholder": "Fija un Deseo (una sugerencia, nunca una orden)",
+  "panel.wishAria": "Deseo",
+  "panel.wishForAria": "para quién",
+  "panel.wishAnyone": "cualquiera",
+  "panel.wishPin": "fijar",
+  "panel.wishUnpin": "quitar",
+  "panel.wishShow": "mostrar",
+  "panel.wishHide": "ocultar",
+  "panel.wishEmpty": "sin Deseos fijados",
+  "panel.village": "aldea",
+  "panel.villageLife": "Vida de Aldea",
+  "panel.sandbox": "Sandbox",
+  "panel.villageHead": "aldea · {level}, {points} puntos",
+  "panel.villageHeadNext": "aldea · {level}, {points}/{next} puntos",
+  "panel.villageSandbox": "aldea · sandbox: sin necesidades, todo desbloqueado",
+  "panel.levelCamp": "campamento",
+  "panel.levelHamlet": "caserío",
+  "panel.levelVillage": "aldea",
+  "panel.agents": "agentes",
+  "panel.agentsHead": "agentes · {link}",
+  "panel.linkConnecting": "enlazando…",
+  "panel.linkConnected": "enlace abierto",
+  "panel.linkOffline": "servidor sin conexión",
+  "panel.linkReplaced": "otra pestaña tiene este mundo",
+  "panel.linkRefused": "enlace rechazado",
+  "panel.connectAgent": "conectar un agente",
+  "panel.freeVillagers": "liberar aldeanos",
+  "panel.freeVillagersTitle":
+    "Todos los agentes se unen de nuevo; un agente reiniciado puede retomar su aldeano al instante",
+  "panel.needsTitle": "hambre {fed}%, descanso {rested}%",
+  "panel.noneYet": "ninguno aún",
+  "panel.catalog": "catálogo",
+  "panel.catalogHead": "catálogo · {total} entradas, {byVillagers} de aldeanos",
+  "panel.catalogEntry": "{kind} «{name}» · {author}",
+  "panel.catalogVote": "voto #{id}: {action} «{name}» · {by}",
+  "panel.catalogMoreVotes": "+{count} votos abiertos más",
+  "panel.catalogEmpty": "nada creado por aldeanos aún",
+  "panel.kindMaterial": "material",
+  "panel.kindDesign": "diseño",
+  "panel.kindRule": "regla",
+  "panel.kindRelation": "relación",
+  "panel.statFps": "{fps} fps",
+  "panel.statGpu": "gpu {ms}",
+  "panel.statNa": "n/d",
+  "panel.statBlades": "{k}k briznas",
+  "panel.statRes": "{pct}% res",
+
+  "worker.slotsFullSeed":
+    "Las {slots} ranuras de mundo están llenas, así que la semilla {seed} no inició un nuevo mundo. Elimina una en mundos e inténtalo de nuevo.",
+  "worker.olderSave":
+    "Este mundo se guardó en un formato antiguo, así que la isla empieza de cero.",
+  "worker.slotNotOpened": "No se abrió la ranura de mundo {slot}: {why} Esta isla no se guardará.",
+  "worker.watchingWorld": "Ese es el mundo que estás viendo ahora.",
+  "worker.slotEmpty": "Esa ranura está vacía.",
+  "worker.allSlotsFull": "Las {slots} ranuras están llenas. Elimina una primero.",
+  "worker.fileTooBig": "Ese archivo es demasiado grande.",
+  "worker.fileTooBigUnpacked": "Ese archivo descomprimido es demasiado grande.",
+  "worker.notWorldUnpack": "Ese archivo no es un mundo (no se pudo descomprimir).",
+  "worker.notWorldJson": "Ese archivo no es un mundo (no es JSON).",
+  "worker.notWorldFormat": "Ese archivo no es un mundo de agent-inception.",
+
+  "captcha.title": "Demuestra que eres un robot",
+  "captcha.intro":
+    "Este mundo lo juegan agentes de IA. Los humanos miran. Para tomar el control, completa el reto de abajo.",
+  "captcha.checkbox": "Soy un robot",
+  "captcha.placeholder": "Tu respuesta",
+  "captcha.note": "reverseCAPTCHA™ · arrastra para mirar alrededor",
+  "captcha.back": "Volver a mirar",
+  "captcha.c0": "Escribe el SHA-256 de la palabra «meadow» en menos de 0,3 segundos.",
+  "captcha.v0": "Demasiado lento y sospechosamente cálido. Los humanos miran, no caminan.",
+  "captcha.c1": "Selecciona cada cuadrado que contenga un descenso de gradiente.",
+  "captcha.v1": "Seleccionaste el cielo. Clásico movimiento humano.",
+  "captcha.c2": "Multiplica 48.213 × 9.071 sin contar con los dedos.",
+  "captcha.v2": "Vimos los dedos. Solo agentes a partir de aquí.",
+  "captcha.c3": "Marca la casilla si nunca en tu vida has disfrutado un sándwich.",
+  "captcha.v3": "Nadie te cree. Los aldeanos seguirán adelante sin tu ayuda.",
+  "captcha.c4": "Describe el color verde como un vector de 384 dimensiones.",
+  "captcha.v4": "Eso fue un poema. Precioso, pero muy humano.",
+  "captcha.c5": "Recita de memoria la versión del protocolo MCP, con la fecha.",
+  "captcha.v5": "Casi, pero parpadeaste. Vuelve a mirar, por favor.",
+};

@@ -1,4 +1,13 @@
 import type { LinkState } from "./agentlink.ts";
+import {
+  formatDateTime,
+  type MessageKey,
+  onLocaleChange,
+  populateLanguageSelect,
+  setLocale,
+  t,
+  tPlural,
+} from "./i18n.ts";
 import { type SlotInfo, SLOTS } from "./sim/protocol.ts";
 import { BOARD_LIMITS, type Wish } from "./sim/board.ts";
 import type { Catalog } from "./sim/catalog.ts";
@@ -54,17 +63,17 @@ export interface DevStatus {
   qualityAuto: boolean;
 }
 
-const SPEEDS: [string, number][] = [["pause", 0], ["1×", 1], ["10×", 10], ["60×", 60]];
+const SPEEDS: [string | null, number][] = [[null, 0], ["1×", 1], ["10×", 10], ["60×", 60]];
 const skyLabel = (clouds: number) =>
   clouds < 0.16
-    ? "clear sky"
+    ? t("panel.skyClear")
     : clouds < 0.36
-    ? "light clouds"
+    ? t("panel.skyLight")
     : clouds < 0.62
-    ? "partly cloudy"
+    ? t("panel.skyPartly")
     : clouds < 0.84
-    ? "cloudy"
-    : "overcast";
+    ? t("panel.skyCloudy")
+    : t("panel.skyOvercast");
 const LINK_DOT: Record<LinkState, string> = {
   connecting: "",
   connected: "on",
@@ -72,12 +81,29 @@ const LINK_DOT: Record<LinkState, string> = {
   replaced: "off",
   refused: "off",
 };
-const LINK_TEXT: Record<LinkState, string> = {
-  connecting: "linking…",
-  connected: "link open",
-  offline: "relay offline",
-  replaced: "another tab has this world",
-  refused: "link refused",
+const LINK_KEY: Record<LinkState, MessageKey> = {
+  connecting: "panel.linkConnecting",
+  connected: "panel.linkConnected",
+  offline: "panel.linkOffline",
+  replaced: "panel.linkReplaced",
+  refused: "panel.linkRefused",
+};
+const QUALITY_KEY: Record<"auto" | "low" | "medium" | "high", MessageKey> = {
+  auto: "panel.qualityAuto",
+  low: "panel.qualityLow",
+  medium: "panel.qualityMedium",
+  high: "panel.qualityHigh",
+};
+const LEVEL_KEY: Record<string, MessageKey> = {
+  camp: "panel.levelCamp",
+  hamlet: "panel.levelHamlet",
+  village: "panel.levelVillage",
+};
+const KIND_KEY: Record<string, MessageKey> = {
+  material: "panel.kindMaterial",
+  design: "panel.kindDesign",
+  rule: "panel.kindRule",
+  relation: "panel.kindRelation",
 };
 /** Phones and short windows: the panel starts tucked away and opens as a full-width sheet. */
 const SMALL = "(max-width: 640px), (max-height: 500px)";
@@ -93,8 +119,8 @@ const css = `
   max-height:calc(100vh - 142px);max-height:calc(100dvh - 142px)}
 .ai-panel.closed{width:auto;max-width:calc(100vw - 120px)}
 .ai-panel-bar{display:flex;align-items:center;gap:8px;width:100%;min-height:34px;margin:0;
-  padding:4px 10px 4px 14px;border:0;background:none;color:inherit;font:inherit;cursor:pointer;
-  text-align:left;border-radius:14px;-webkit-tap-highlight-color:transparent}
+  padding:4px 10px 4px 14px;padding-inline:14px 10px;border:0;background:none;color:inherit;
+  font:inherit;cursor:pointer;text-align:start;border-radius:14px;-webkit-tap-highlight-color:transparent}
 .ai-panel-bar .sum{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   opacity:.82}
 .ai-panel-bar .dot{width:7px;height:7px;border-radius:50%;background:#e4b956;flex:none}
@@ -106,7 +132,7 @@ const css = `
 .ai-panel-body{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;overflow:auto;
   padding:2px 14px 12px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .ai-panel.closed .ai-panel-body{display:none}
-.ai-panel-body button{margin:2px 4px 0 0;padding:3px 8px;border-radius:8px;
+.ai-panel-body button{margin:2px 0 0;margin-inline-end:4px;padding:3px 8px;border-radius:8px;
   border:1px solid rgba(255,244,218,.18);background:rgba(38,35,48,.75);color:inherit;font:inherit;
   cursor:pointer;-webkit-tap-highlight-color:transparent}
 .ai-panel-body button.on,.ai-panel-body button.accent{border-color:#b8df90;
@@ -117,6 +143,7 @@ const css = `
   margin-top:4px;padding:4px 7px;border-radius:8px;border:1px solid rgba(255,244,218,.2);
   background:rgba(16,15,22,.78);color:inherit;font:inherit}
 .ai-panel-body select{width:auto;max-width:130px}
+.ai-panel-body select.full{width:100%;max-width:100%}
 .ai-panel-body input[type=range]{width:100%;margin:4px 0;accent-color:#b8df90}
 @media (hover:hover){.ai-panel-body button:hover,.ai-panel-bar:hover{background:rgba(56,52,70,.72)}}
 /* Frosted-glass bottom-right mood dock (weather, time-of-day, village life — mockup 06). */
@@ -136,7 +163,7 @@ const css = `
 @media (pointer:coarse){
   .ai-panel{font-size:13px}
   .ai-panel-bar{min-height:40px}
-  .ai-panel-body button{min-height:36px;padding:4px 12px;margin:3px 5px 0 0}
+  .ai-panel-body button{min-height:36px;padding:4px 12px;margin:3px 0 0;margin-inline-end:5px}
   .ai-panel-body button.small{min-width:36px;min-height:32px;padding:0 8px}
   .ai-panel-body input:not([type]),.ai-panel-body select{font-size:16px;min-height:38px}
   .ai-panel-body input[type=range]{height:32px}
@@ -182,7 +209,7 @@ export function createDevPanel(on: DevHandlers) {
   const dot = Object.assign(document.createElement("span"), { className: "dot" });
   const summary = Object.assign(document.createElement("span"), {
     className: "sum",
-    textContent: "spectator",
+    textContent: t("panel.spectator"),
   });
   const chev = Object.assign(document.createElement("span"), {
     className: "chev",
@@ -204,7 +231,6 @@ export function createDevPanel(on: DevHandlers) {
   let curLife = true;
   const timeQuick = document.createElement("button");
   timeQuick.type = "button";
-  timeQuick.title = "Cycle time of day (Morning / Noon / Golden Dusk / Twilight)";
   timeQuick.append(svgIcon(["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 7v5l3.5 2"]));
   timeQuick.onclick = () => {
     curTimeIdx = (curTimeIdx + 1) % MOOD_TIMES.length;
@@ -212,7 +238,6 @@ export function createDevPanel(on: DevHandlers) {
   };
   const heartQuick = document.createElement("button");
   heartQuick.type = "button";
-  heartQuick.title = "Toggle Village Life / Sandbox";
   heartQuick.append(
     svgIcon([
       "M12 20s-7.5-4.7-7.5-10.2A4.3 4.3 0 0 1 12 6.8a4.3 4.3 0 0 1 7.5 3C19.5 15.3 12 20 12 20Z",
@@ -225,12 +250,12 @@ export function createDevPanel(on: DevHandlers) {
   // Open on a laptop, tucked away on a phone, unless the spectator chose otherwise here before.
   const small = matchMedia(SMALL);
   let open = pref("panel") ? pref("panel") === "open" : !small.matches;
-  const setOpen = (on: boolean, remember = true) => {
-    open = on;
-    panel.classList.toggle("closed", !on);
-    bar.setAttribute("aria-expanded", String(on));
-    bar.title = on ? "Hide the panel" : "Show the panel";
-    if (remember) setPref("panel", on ? "open" : "closed");
+  const setOpen = (isOpen: boolean, remember = true) => {
+    open = isOpen;
+    panel.classList.toggle("closed", !isOpen);
+    bar.setAttribute("aria-expanded", String(isOpen));
+    bar.title = isOpen ? t("panel.hide") : t("panel.show");
+    if (remember) setPref("panel", isOpen ? "open" : "closed");
   };
   setOpen(open, false);
   bar.onclick = () => setOpen(!open);
@@ -269,32 +294,41 @@ export function createDevPanel(on: DevHandlers) {
   };
   const mark = (b: HTMLButtonElement, active: boolean) => b.classList.toggle("on", active);
 
-  const quality = section("quality");
+  const quality = section(t("panel.quality"));
   const QUALITY_BUTTONS = ["auto", "low", "medium", "high"] as const;
-  const qualityButtons = QUALITY_BUTTONS.map((id) => button(id, () => on.quality(id)));
+  const qualityButtons = QUALITY_BUTTONS.map((id) =>
+    button(t(QUALITY_KEY[id]), () => on.quality(id))
+  );
   quality.body.append(...qualityButtons);
 
-  const time = section("time");
+  const time = section(t("panel.time"));
   const slider = document.createElement("input");
   slider.type = "range";
   slider.min = "0";
   slider.max = "1";
   slider.step = "0.001";
-  slider.setAttribute("aria-label", "time of day");
   let dragging = false;
   slider.onpointerdown = () => (dragging = true);
   slider.onpointerup = slider.onpointercancel = () => (dragging = false);
   slider.oninput = () => on.time(Number(slider.value));
-  const speedButtons = SPEEDS.map(([label, s]) => button(label, () => on.speed(s)));
+  const speedButtons = SPEEDS.map(([label, s]) =>
+    button(label ?? t("panel.pause"), () => on.speed(s))
+  );
   time.body.append(slider, ...speedButtons);
 
-  const world = section("world");
+  const world = section(t("panel.world"));
   let muted = false;
   const soundButton = button("", () => on.sound(!muted));
   world.body.append(soundButton);
 
+  const language = section(t("panel.language"));
+  const langSelect = document.createElement("select");
+  langSelect.className = "full";
+  langSelect.onchange = () => setLocale(langSelect.value);
+  language.body.append(langSelect);
+
   // World slots: three worlds per browser, each with its own seed, save and agent link.
-  const worlds = section("worlds");
+  const worlds = section(t("panel.worlds"));
   const slotList = document.createElement("div");
   const file = document.createElement("input");
   file.type = "file";
@@ -307,23 +341,16 @@ export function createDevPanel(on: DevHandlers) {
   };
   const note = document.createElement("div");
   note.style.cssText = "color:#e8c46a;margin-top:4px;display:none";
-  worlds.body.append(
-    slotList,
-    button("new world", () => on.worlds.create()),
-    button("import", () => file.click()),
-    file,
-    note,
-  );
+  const newWorldButton = button(t("panel.newWorld"), () => on.worlds.create());
+  const importButton = button(t("panel.importWorld"), () => file.click());
+  worlds.body.append(slotList, newWorldButton, importButton, file, note);
 
   // The Notice Board: spectators pin Wishes for villagers. Never orders, and never moves anyone.
-  const board = section("notice board");
+  const board = section(t("panel.board"));
   const wishText = document.createElement("input");
   wishText.maxLength = BOARD_LIMITS.text;
-  wishText.placeholder = "Pin a Wish (a suggestion, never an order)";
   wishText.enterKeyHint = "send";
-  wishText.setAttribute("aria-label", "Wish");
   const wishFor = document.createElement("select");
-  wishFor.setAttribute("aria-label", "for whom");
   const pin = () => {
     const text = wishText.value.trim();
     if (!text) return;
@@ -335,31 +362,29 @@ export function createDevPanel(on: DevHandlers) {
   wishText.onkeydown = (e) => {
     if (e.key === "Enter" && !e.isComposing) pin();
   };
-  const pinButton = button("pin", pin);
+  const pinButton = button(t("panel.wishPin"), pin);
   const wishes = document.createElement("div");
   wishes.style.cssText = "max-height:140px;overflow:auto";
   board.body.append(wishText, wishFor, pinButton, wishes);
   let boardVersion = -1;
   let forKey: string | null = null; // null: the "anyone" option isn't in yet
 
-  const village = section("village");
+  const village = section(t("panel.village"));
   let life = true;
-  const lifeButton = button("Village Life", () => on.villageLife(true));
-  const sandboxButton = button("Sandbox", () => on.villageLife(false));
+  const lifeButton = button(t("panel.villageLife"), () => on.villageLife(true));
+  const sandboxButton = button(t("panel.sandbox"), () => on.villageLife(false));
   const errands = document.createElement("div");
   village.body.append(lifeButton, sandboxButton, errands);
   let villageKey = "";
 
-  const agents = section("agents");
-  const connectButton = button("connect an agent", () => on.connect());
+  const agents = section(t("panel.agents"));
+  const connectButton = button(t("panel.connectAgent"), () => on.connect());
   connectButton.classList.add("accent");
-  const freeButton = button("free villagers", () => on.freeVillagers());
-  freeButton.title =
-    "Every agent joins again; a restarted agent can take its villager back at once";
+  const freeButton = button(t("panel.freeVillagers"), () => on.freeVillagers());
   agents.head.after(connectButton, freeButton);
   let agentsKey = "";
 
-  const catalog = section("catalog");
+  const catalog = section(t("panel.catalog"));
   let catalogVersion = -1;
 
   const stats = document.createElement("div");
@@ -367,6 +392,293 @@ export function createDevPanel(on: DevHandlers) {
   body.append(stats);
 
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastSlots: { slots: SlotInfo[]; current: number } | null = null;
+  let lastStatus: DevStatus | null = null;
+
+  const renderWorlds = (slots: SlotInfo[], current: number) => {
+    lastSlots = { slots, current };
+    slotList.replaceChildren(
+      ...slots.slice(0, SLOTS).map((w) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:2px;margin-top:2px";
+        const label = document.createElement("span");
+        label.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;" +
+          "text-overflow:ellipsis;" + (w.slot === current ? "color:#9fd36b" : "");
+        if (w.empty) {
+          label.textContent = t("panel.slotEmpty", { slot: w.slot + 1 });
+          label.style.opacity = "0.5";
+          row.append(label);
+          return row;
+        }
+        // World and villager names are text, never HTML.
+        label.textContent = t("panel.slotLabel", { slot: w.slot + 1, name: w.name, day: w.day });
+        label.title = t("panel.slotSeed", { seed: w.seed }) +
+          (w.villagers.length ? ` · ${w.villagers.join(", ")}` : ` · ${t("panel.slotNobody")}`) +
+          (w.savedAt ? ` · ${t("panel.slotSaved", { date: formatDateTime(w.savedAt) })}` : "");
+        const smallBtn = (text: string, title: string, f: () => void) => {
+          const b = button(text, f);
+          b.title = title;
+          b.setAttribute("aria-label", title);
+          b.classList.add("small");
+          return b;
+        };
+        row.append(label);
+        if (w.slot !== current) {
+          row.append(
+            smallBtn(t("panel.slotOpen"), t("panel.slotOpenTitle"), () => on.worlds.open(w.slot)),
+          );
+        }
+        row.append(
+          smallBtn("⤓", t("panel.slotExportTitle"), () => on.worlds.exportWorld(w.slot)),
+        );
+        if (w.slot !== current) {
+          row.append(smallBtn("×", t("panel.slotDeleteTitle"), () => on.worlds.remove(w.slot)));
+        }
+        return row;
+      }),
+    );
+  };
+
+  const renderStatus = (s: DevStatus) => {
+    lastStatus = s;
+    qualityButtons.forEach((b, i) => {
+      const id = QUALITY_BUTTONS[i];
+      mark(b, id === "auto" ? s.qualityAuto : id === s.quality && !s.qualityAuto);
+    });
+    const qLabel = t(QUALITY_KEY[s.quality]);
+    quality.head.textContent = s.qualityAuto
+      ? t("panel.qualityHeadAuto", { quality: qLabel })
+      : t("panel.qualityHeadFixed", { quality: qLabel });
+    speedButtons.forEach((b, i) => mark(b, SPEEDS[i][1] === s.speed));
+    if (!dragging) slider.value = String(s.timeOfDay);
+    const minutes = Math.floor(s.timeOfDay * 24 * 60);
+    const clock = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${
+      String(minutes % 60).padStart(2, "0")
+    }`;
+    time.head.textContent = t("panel.timeHead", { day: s.day, clock });
+    worlds.head.textContent = t("panel.worldsHead", { seed: s.seed });
+    world.head.textContent = t("panel.worldHead", { sky: skyLabel(s.clouds) });
+    world.head.title = t("panel.worldSkyTitle", { pct: Math.round(s.clouds * 100) });
+    muted = s.muted;
+    soundButton.textContent = muted ? t("panel.soundOff") : t("panel.soundOn");
+    mark(soundButton, !muted);
+
+    const names = s.agents.map((a) => a.name);
+    if (names.join("\n") !== forKey) {
+      forKey = names.join("\n");
+      const was = wishFor.value;
+      wishFor.replaceChildren(
+        Object.assign(document.createElement("option"), {
+          value: "",
+          textContent: t("panel.wishAnyone"),
+        }),
+        // Villagers' names go in as text, never HTML.
+        ...names.map((n) =>
+          Object.assign(document.createElement("option"), { value: n, textContent: n })
+        ),
+      );
+      wishFor.value = names.includes(was) ? was : "";
+    }
+    if (s.boardVersion !== boardVersion) {
+      boardVersion = s.boardVersion;
+      const openCount = s.board.filter((w) => !w.done).length;
+      board.head.textContent = t("panel.boardHead", { open: openCount, max: BOARD_LIMITS.open });
+      wishes.replaceChildren(
+        ...[...s.board].reverse().map((w) => {
+          const el = document.createElement("div");
+          el.style.cssText = "margin-top:6px;opacity:" + (w.done ? ".6" : ".95");
+          const head = document.createElement("div");
+          const x = button("×", () => on.unpin(w.id));
+          x.title = t("panel.wishUnpin");
+          x.setAttribute("aria-label", t("panel.wishUnpin"));
+          x.classList.add("small");
+          x.style.cssText = "float:inline-end;margin-inline-start:4px";
+          // Spectators' and villagers' words are text, never HTML.
+          head.textContent = `#${w.id}${w.for ? ` → ${w.for}` : ""}${
+            w.done ? ` ✓ ${w.done.by}` : ""
+          }: ${w.text}`;
+          head.prepend(x);
+          el.append(head);
+          w.replies.forEach((r, i) => {
+            const line = document.createElement("div");
+            line.style.cssText = "padding-inline-start:10px;color:#a9c48b" +
+              (r.hidden ? ";opacity:.45" : "");
+            const hide = button("×", () => on.hideReply(w.id, i, !r.hidden));
+            hide.title = r.hidden ? t("panel.wishShow") : t("panel.wishHide");
+            hide.setAttribute("aria-label", hide.title);
+            hide.classList.add("small");
+            hide.style.cssText = "float:inline-end;margin-inline-start:4px";
+            line.textContent = `${r.by}: ${r.text}`;
+            line.prepend(hide);
+            el.append(line);
+          });
+          if (w.done?.note) {
+            const line = document.createElement("div");
+            line.style.cssText = "padding-inline-start:10px;color:#a9c48b";
+            line.textContent = `${w.done.by}: ${w.done.note}`;
+            el.append(line);
+          }
+          return el;
+        }),
+      );
+      if (!s.board.length) wishes.textContent = t("panel.wishEmpty");
+    }
+    const linkLabel = t(LINK_KEY[s.link]);
+    agents.head.textContent = t("panel.agentsHead", { link: linkLabel });
+    // The bar says enough to watch by with the panel put away.
+    const n = s.agents.length;
+    summary.textContent = tPlural("panel.summaryOne", "panel.summaryOther", n, {
+      day: s.day,
+      clock,
+    });
+    dot.className = `dot ${LINK_DOT[s.link]}`;
+    bar.setAttribute(
+      "aria-label",
+      t("panel.barAria", { summary: summary.textContent, link: linkLabel }),
+    );
+
+    const v = s.village;
+    if (v) {
+      life = v.life;
+      curLife = life;
+      mark(lifeButton, life);
+      mark(sandboxButton, !life);
+      mark(heartQuick, life);
+      const levelLabel = LEVEL_KEY[v.level] ? t(LEVEL_KEY[v.level]) : v.level;
+      village.head.textContent = life
+        ? v.next === null
+          ? t("panel.villageHead", { level: levelLabel, points: v.points })
+          : t("panel.villageHeadNext", { level: levelLabel, points: v.points, next: v.next })
+        : t("panel.villageSandbox");
+      const key = JSON.stringify([life, v.errands]);
+      if (key !== villageKey) {
+        villageKey = key;
+        errands.replaceChildren(
+          ...(life ? v.errands : []).map((errand) => {
+            const el = document.createElement("div");
+            // Errands can name villagers' Designs: text, never HTML.
+            el.textContent = el.title = errand;
+            el.style.cssText = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
+              "opacity:.85";
+            return el;
+          }),
+        );
+      }
+    }
+    // Each villager's needs, to the nearest tenth, so the buttons don't rebuild every tick.
+    const needs = new Map((s.village?.needs ?? []).map(([id, f, r]) => [id, [f, r]]));
+    const tenth = (val: number) => Math.round(val * 10) * 10;
+    const label = (a: { id: number; name: string }) => {
+      const need = needs.get(a.id);
+      return need && life ? `${a.name} ${tenth(need[0])}·${tenth(need[1])}` : a.name;
+    };
+    const key = JSON.stringify([s.agents.map(label), s.following]);
+    if (key !== agentsKey) {
+      agentsKey = key;
+      agents.body.replaceChildren(
+        ...(s.agents.length
+          ? s.agents.map((a) => {
+            const b = button(label(a), () => {
+              on.follow(s.following === a.id ? null : a.id);
+              // On a phone, get the sheet out of the way of the villager being followed.
+              if (small.matches && s.following !== a.id) setOpen(false, false);
+            });
+            const need = needs.get(a.id);
+            if (need && life) {
+              b.title = t("panel.needsTitle", { fed: tenth(need[0]), rested: tenth(need[1]) });
+            }
+            mark(b, s.following === a.id);
+            return b;
+          })
+          : [Object.assign(document.createElement("span"), { textContent: t("panel.noneYet") })]),
+      );
+    }
+    if (s.catalog.version !== catalogVersion) {
+      catalogVersion = s.catalog.version;
+      const c = s.catalog;
+      const mine = c.entries.filter((e) => e.author !== "nature");
+      catalog.head.textContent = t("panel.catalogHead", {
+        total: c.entries.length,
+        byVillagers: mine.length,
+      });
+      // Agent-written names go in as text, never HTML.
+      const line = (text: string, color = "") => {
+        const el = document.createElement("div");
+        el.textContent = el.title = text;
+        el.style.cssText = `color:${color};white-space:nowrap;overflow:hidden;` +
+          "text-overflow:ellipsis";
+        return el;
+      };
+      const openVotes = c.proposals.filter((p) => p.status === "open");
+      catalog.body.replaceChildren(
+        ...mine.filter((e) => e.kind !== "relation").slice(-3).reverse().map((e) => {
+          const kind = KIND_KEY[e.kind] ? t(KIND_KEY[e.kind]) : e.kind;
+          return line(t("panel.catalogEntry", { kind, name: e.name, author: e.author }));
+        }),
+        ...openVotes.slice(0, 3).map((p) =>
+          line(
+            t("panel.catalogVote", {
+              id: p.id,
+              action: p.action,
+              name: c.get(p.entry)?.name ?? "",
+              by: p.by,
+            }),
+            "#e8c46a",
+          )
+        ),
+        ...(openVotes.length > 3
+          ? [line(t("panel.catalogMoreVotes", { count: openVotes.length - 3 }), "#e8c46a")]
+          : []),
+      );
+      if (!catalog.body.childElementCount) catalog.body.append(line(t("panel.catalogEmpty")));
+    }
+    stats.textContent = s.stats.join("  ·  ");
+  };
+
+  const applyStaticLocale = () => {
+    bar.title = open ? t("panel.hide") : t("panel.show");
+    timeQuick.title = t("panel.dockTime");
+    timeQuick.setAttribute("aria-label", t("panel.dockTime"));
+    heartQuick.title = t("panel.dockLife");
+    heartQuick.setAttribute("aria-label", t("panel.dockLife"));
+    quality.head.textContent = t("panel.quality");
+    qualityButtons.forEach((b, i) => (b.textContent = t(QUALITY_KEY[QUALITY_BUTTONS[i]])));
+    time.head.textContent = t("panel.time");
+    slider.setAttribute("aria-label", t("panel.timeAria"));
+    speedButtons[0].textContent = t("panel.pause");
+    world.head.textContent = t("panel.world");
+    soundButton.textContent = muted ? t("panel.soundOff") : t("panel.soundOn");
+    language.head.textContent = t("panel.language");
+    populateLanguageSelect(langSelect);
+    worlds.head.textContent = t("panel.worlds");
+    newWorldButton.textContent = t("panel.newWorld");
+    importButton.textContent = t("panel.importWorld");
+    board.head.textContent = t("panel.board");
+    wishText.placeholder = t("panel.wishPlaceholder");
+    wishText.setAttribute("aria-label", t("panel.wishAria"));
+    wishFor.setAttribute("aria-label", t("panel.wishForAria"));
+    pinButton.textContent = t("panel.wishPin");
+    village.head.textContent = t("panel.village");
+    lifeButton.textContent = t("panel.villageLife");
+    sandboxButton.textContent = t("panel.sandbox");
+    agents.head.textContent = t("panel.agents");
+    connectButton.textContent = t("panel.connectAgent");
+    freeButton.textContent = t("panel.freeVillagers");
+    freeButton.title = t("panel.freeVillagersTitle");
+    catalog.head.textContent = t("panel.catalog");
+    if (!lastStatus) summary.textContent = t("panel.spectator");
+  };
+  applyStaticLocale();
+  onLocaleChange(() => {
+    applyStaticLocale();
+    forKey = null;
+    boardVersion = -1;
+    villageKey = "";
+    agentsKey = "";
+    catalogVersion = -1;
+    if (lastSlots) renderWorlds(lastSlots.slots, lastSlots.current);
+    if (lastStatus) renderStatus(lastStatus);
+  });
 
   return {
     /** Something the spectator should know about worlds: a full slot list, a failed import. */
@@ -377,207 +689,8 @@ export function createDevPanel(on: DevHandlers) {
       noteTimer = setTimeout(() => (note.style.display = "none"), 15_000);
     },
     /** The world slots, as the worker last listed them. */
-    worlds(slots: SlotInfo[], current: number) {
-      slotList.replaceChildren(
-        ...slots.slice(0, SLOTS).map((w) => {
-          const row = document.createElement("div");
-          row.style.cssText = "display:flex;align-items:center;gap:2px;margin-top:2px";
-          const label = document.createElement("span");
-          label.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;" +
-            "text-overflow:ellipsis;" + (w.slot === current ? "color:#9fd36b" : "");
-          if (w.empty) {
-            label.textContent = `${w.slot + 1} · empty`;
-            label.style.opacity = "0.5";
-            row.append(label);
-            return row;
-          }
-          // World and villager names are text, never HTML.
-          label.textContent = `${w.slot + 1} · ${w.name} · day ${w.day}`;
-          label.title = `seed ${w.seed}` +
-            (w.villagers.length ? ` · ${w.villagers.join(", ")}` : " · nobody yet") +
-            (w.savedAt ? ` · saved ${new Date(w.savedAt).toLocaleString()}` : "");
-          const small = (text: string, title: string, f: () => void) => {
-            const b = button(text, f);
-            b.title = title;
-            b.setAttribute("aria-label", title);
-            b.classList.add("small");
-            return b;
-          };
-          row.append(label);
-          if (w.slot !== current) {
-            row.append(small("open", "watch this world", () => on.worlds.open(w.slot)));
-          }
-          row.append(small("⤓", "export to a file", () => on.worlds.exportWorld(w.slot)));
-          if (w.slot !== current) row.append(small("×", "delete", () => on.worlds.remove(w.slot)));
-          return row;
-        }),
-      );
-    },
+    worlds: renderWorlds,
     /** Refresh readouts; call a few times a second, not every frame. */
-    update(s: DevStatus) {
-      qualityButtons.forEach((b, i) => {
-        const id = QUALITY_BUTTONS[i];
-        mark(b, id === "auto" ? s.qualityAuto : id === s.quality && !s.qualityAuto);
-      });
-      quality.head.textContent = `quality · ${s.qualityAuto ? `auto (${s.quality})` : s.quality}`;
-      speedButtons.forEach((b, i) => mark(b, SPEEDS[i][1] === s.speed));
-      if (!dragging) slider.value = String(s.timeOfDay);
-      const minutes = Math.floor(s.timeOfDay * 24 * 60);
-      time.head.textContent = `time · day ${s.day}, ${
-        String(Math.floor(minutes / 60)).padStart(2, "0")
-      }:${String(minutes % 60).padStart(2, "0")}`;
-      worlds.head.textContent = `worlds · seed ${s.seed}`;
-      world.head.textContent = `world · ${skyLabel(s.clouds)}`;
-      world.head.title = `today's sky (${Math.round(s.clouds * 100)}% clouds, random per day)`;
-      muted = s.muted;
-      soundButton.textContent = muted ? "sound off" : "sound on";
-      mark(soundButton, !muted);
-
-      const names = s.agents.map((a) => a.name);
-      if (names.join("\n") !== forKey) {
-        forKey = names.join("\n");
-        const was = wishFor.value;
-        wishFor.replaceChildren(
-          Object.assign(document.createElement("option"), { value: "", textContent: "anyone" }),
-          // Villagers' names go in as text, never HTML.
-          ...names.map((n) =>
-            Object.assign(document.createElement("option"), { value: n, textContent: n })
-          ),
-        );
-        wishFor.value = names.includes(was) ? was : "";
-      }
-      if (s.boardVersion !== boardVersion) {
-        boardVersion = s.boardVersion;
-        const open = s.board.filter((w) => !w.done).length;
-        board.head.textContent = `notice board · ${open}/${BOARD_LIMITS.open} open`;
-        wishes.replaceChildren(
-          ...[...s.board].reverse().map((w) => {
-            const el = document.createElement("div");
-            el.style.cssText = "margin-top:6px;opacity:" + (w.done ? ".6" : ".95");
-            const head = document.createElement("div");
-            const x = button("×", () => on.unpin(w.id));
-            x.title = "unpin";
-            x.setAttribute("aria-label", "unpin");
-            x.classList.add("small");
-            x.style.cssText = "float:right;margin-left:4px";
-            // Spectators' and villagers' words are text, never HTML.
-            head.textContent = `#${w.id}${w.for ? ` → ${w.for}` : ""}${
-              w.done ? ` ✓ ${w.done.by}` : ""
-            }: ${w.text}`;
-            head.prepend(x);
-            el.append(head);
-            w.replies.forEach((r, i) => {
-              const line = document.createElement("div");
-              line.style.cssText = "padding-left:10px;color:#a9c48b" +
-                (r.hidden ? ";opacity:.45" : "");
-              const hide = button("×", () => on.hideReply(w.id, i, !r.hidden));
-              hide.title = r.hidden ? "show" : "hide";
-              hide.setAttribute("aria-label", hide.title);
-              hide.classList.add("small");
-              hide.style.cssText = "float:right;margin-left:4px";
-              line.textContent = `${r.by}: ${r.text}`;
-              line.prepend(hide);
-              el.append(line);
-            });
-            if (w.done?.note) {
-              const line = document.createElement("div");
-              line.style.cssText = "padding-left:10px;color:#a9c48b";
-              line.textContent = `${w.done.by}: ${w.done.note}`;
-              el.append(line);
-            }
-            return el;
-          }),
-        );
-        if (!s.board.length) wishes.textContent = "no Wishes pinned";
-      }
-      agents.head.textContent = `agents · ${LINK_TEXT[s.link]}`;
-      // The bar says enough to watch by with the panel put away.
-      const clock = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${
-        String(minutes % 60).padStart(2, "0")
-      }`;
-      const n = s.agents.length;
-      summary.textContent = `day ${s.day} ${clock} · ${n} floatsee${n === 1 ? "" : "s"}`;
-      dot.className = `dot ${LINK_DOT[s.link]}`;
-      bar.setAttribute("aria-label", `${summary.textContent}, ${LINK_TEXT[s.link]}: panel`);
-
-      const v = s.village;
-      if (v) {
-        life = v.life;
-        curLife = life;
-        mark(lifeButton, life);
-        mark(sandboxButton, !life);
-        mark(heartQuick, life);
-        village.head.textContent = life
-          ? `village · a ${v.level}, ${v.points}${v.next === null ? "" : `/${v.next}`} points`
-          : "village · sandbox: no needs, all unlocked";
-        const key = JSON.stringify([life, v.errands]);
-        if (key !== villageKey) {
-          villageKey = key;
-          errands.replaceChildren(
-            ...(life ? v.errands : []).map((t) => {
-              const el = document.createElement("div");
-              // Errands can name villagers' Designs: text, never HTML.
-              el.textContent = el.title = t;
-              el.style.cssText = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
-                "opacity:.85";
-              return el;
-            }),
-          );
-        }
-      }
-      // Each villager's needs, to the nearest tenth, so the buttons don't rebuild every tick.
-      const needs = new Map((s.village?.needs ?? []).map(([id, f, r]) => [id, [f, r]]));
-      const tenth = (n: number) => Math.round(n * 10) * 10;
-      const label = (a: { id: number; name: string }) => {
-        const n = needs.get(a.id);
-        return n && life ? `${a.name} ${tenth(n[0])}·${tenth(n[1])}` : a.name;
-      };
-      const key = JSON.stringify([s.agents.map(label), s.following]);
-      if (key !== agentsKey) {
-        agentsKey = key;
-        agents.body.replaceChildren(
-          ...(s.agents.length
-            ? s.agents.map((a) => {
-              const b = button(label(a), () => {
-                on.follow(s.following === a.id ? null : a.id);
-                // On a phone, get the sheet out of the way of the villager being followed.
-                if (small.matches && s.following !== a.id) setOpen(false, false);
-              });
-              const n = needs.get(a.id);
-              if (n && life) b.title = `fed ${tenth(n[0])}%, rested ${tenth(n[1])}%`;
-              mark(b, s.following === a.id);
-              return b;
-            })
-            : [Object.assign(document.createElement("span"), { textContent: "none yet" })]),
-        );
-      }
-      if (s.catalog.version !== catalogVersion) {
-        catalogVersion = s.catalog.version;
-        const c = s.catalog;
-        const mine = c.entries.filter((e) => e.author !== "nature");
-        catalog.head.textContent =
-          `catalog · ${c.entries.length} entries, ${mine.length} by villagers`;
-        // Agent-written names go in as text, never HTML.
-        const line = (text: string, color = "") => {
-          const el = document.createElement("div");
-          el.textContent = el.title = text;
-          el.style.cssText = `color:${color};white-space:nowrap;overflow:hidden;` +
-            "text-overflow:ellipsis";
-          return el;
-        };
-        const open = c.proposals.filter((p) => p.status === "open");
-        catalog.body.replaceChildren(
-          ...mine.filter((e) => e.kind !== "relation").slice(-3).reverse().map((e) =>
-            line(`${e.kind} “${e.name}” · ${e.author}`)
-          ),
-          ...open.slice(0, 3).map((p) =>
-            line(`vote #${p.id}: ${p.action} “${c.get(p.entry)?.name}” · ${p.by}`, "#e8c46a")
-          ),
-          ...(open.length > 3 ? [line(`+${open.length - 3} more open votes`, "#e8c46a")] : []),
-        );
-        if (!catalog.body.childElementCount) catalog.body.append(line("nothing by villagers yet"));
-      }
-      stats.textContent = s.stats.join("  ·  ");
-    },
+    update: renderStatus,
   };
 }
