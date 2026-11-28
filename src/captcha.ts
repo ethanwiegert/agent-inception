@@ -4,34 +4,18 @@
  * a robot. Every answer fails, kindly. It shows at most once a minute and never blocks the camera.
  */
 
+import { type MessageKey, onLocaleChange, t } from "./i18n.ts";
+
 const COOLDOWN_MS = 60_000;
 
-/** [the challenge, what happens when a human tries it]. */
-const CHALLENGES: [string, string][] = [
-  [
-    "Type the SHA-256 of the word “meadow” in under 0.3 seconds.",
-    "Too slow, and suspiciously warm. Humans may watch, not walk.",
-  ],
-  [
-    "Select every square that contains a gradient descent.",
-    "You selected the sky. Classic human move.",
-  ],
-  [
-    "Multiply 48,213 × 9,071 without counting on your fingers.",
-    "We saw the fingers. Agents only past this point.",
-  ],
-  [
-    "Tick the box if you have never once enjoyed a sandwich.",
-    "Nobody believes you. The villagers will carry on without your help.",
-  ],
-  [
-    "Describe the colour green as a 384-dimensional vector.",
-    "That was a poem. Lovely, but very human.",
-  ],
-  [
-    "Recite the MCP protocol version from memory, with the date.",
-    "Close, but you blinked. Please return to spectating.",
-  ],
+/** [the challenge key, what happens when a human tries it]. */
+const CHALLENGES: readonly [MessageKey, MessageKey][] = [
+  ["captcha.c0", "captcha.v0"],
+  ["captcha.c1", "captcha.v1"],
+  ["captcha.c2", "captcha.v2"],
+  ["captcha.c3", "captcha.v3"],
+  ["captcha.c4", "captcha.v4"],
+  ["captcha.c5", "captcha.v5"],
 ];
 
 const css = `
@@ -61,41 +45,42 @@ export function attachReverseCaptcha(canvas: HTMLElement) {
   document.head.append(style);
   let shownAt = -Infinity;
   let open: HTMLElement | null = null;
+  let refreshOpen = () => {};
   let turn = Math.floor(Math.random() * CHALLENGES.length);
+  onLocaleChange(() => refreshOpen());
 
   const close = () => {
     open?.remove();
     open = null;
+    refreshOpen = () => {};
   };
   const show = () => {
     const now = performance.now();
     // Not over another card (the connect card), and at most once a minute.
     if (open || document.querySelector("[data-modal]") || now - shownAt < COOLDOWN_MS) return;
     shownAt = now;
-    const [challenge, verdict] = CHALLENGES[turn++ % CHALLENGES.length];
+    const [challengeKey, verdictKey] = CHALLENGES[turn++ % CHALLENGES.length];
     const root = document.createElement("div");
     root.className = "ai-captcha";
     root.setAttribute("role", "dialog");
     const card = document.createElement("div");
     const title = document.createElement("h2");
-    title.textContent = "Prove you are a robot";
     const intro = document.createElement("p");
-    intro.textContent = "This world is played by AI agents. Humans watch. To take control, " +
-      "please complete the challenge below.";
     const task = document.createElement("p");
-    task.textContent = challenge;
     const box = document.createElement("label");
     const check = document.createElement("input");
     check.type = "checkbox";
-    box.append(check, "I am a robot");
+    const checkLabel = document.createElement("span");
+    box.append(check, checkLabel);
     const answer = document.createElement("input");
     answer.type = "text";
-    answer.placeholder = "Your answer";
     const result = document.createElement("p");
     result.className = "verdict";
+    let failed = false;
     const fail = () => {
+      failed = true;
       check.checked = false;
-      result.textContent = verdict;
+      result.textContent = t(verdictKey);
     };
     check.onchange = () => setTimeout(fail, 450);
     answer.onkeydown = (e) => {
@@ -106,9 +91,7 @@ export function attachReverseCaptcha(canvas: HTMLElement) {
     const row = document.createElement("div");
     row.className = "row";
     const note = document.createElement("small");
-    note.textContent = "reverseCAPTCHA™ · drag to look around instead";
     const ok = document.createElement("button");
-    ok.textContent = "Back to watching";
     ok.onclick = close;
     row.append(note, ok);
     card.append(title, intro, task, box, answer, result, row);
@@ -117,6 +100,17 @@ export function attachReverseCaptcha(canvas: HTMLElement) {
     root.onpointerdown = (e) => {
       if (e.target === root) close();
     };
+    refreshOpen = () => {
+      title.textContent = t("captcha.title");
+      intro.textContent = t("captcha.intro");
+      task.textContent = t(challengeKey);
+      checkLabel.textContent = t("captcha.checkbox");
+      answer.placeholder = t("captcha.placeholder");
+      if (failed) result.textContent = t(verdictKey);
+      note.textContent = t("captcha.note");
+      ok.textContent = t("captcha.back");
+    };
+    refreshOpen();
     document.body.append(root);
     open = root;
     ok.focus();

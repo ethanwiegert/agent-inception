@@ -5,6 +5,15 @@
  * any other chatbot or agent that takes MCP servers.
  */
 import type { LinkState } from "./agentlink.ts";
+import {
+  agentCloudHook,
+  agentPrompt,
+  type MessageKey,
+  onLocaleChange,
+  populateLanguageSelect,
+  setLocale,
+  t,
+} from "./i18n.ts";
 
 export interface ConnectInfo {
   agentUrl: string;
@@ -25,7 +34,11 @@ const css = `
 /* Auto margins center the card but, unlike place-items, never push its top out of reach. */
 .ai-connect>div{margin:auto;width:min(520px,100%);background:#f6f4ee;border-radius:14px;
   padding:20px 22px 16px;box-shadow:0 14px 48px rgba(0,0,0,.45);box-sizing:border-box}
+.ai-connect .head-row{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  flex-wrap:wrap}
 .ai-connect h1{margin:0;font-size:20px;letter-spacing:-.01em}
+.ai-connect .lang{padding:3px 8px;border-radius:7px;border:1px solid #c9c3b4;background:#fff;
+  color:#1d232c;font:inherit;font-size:12px;max-width:170px}
 .ai-connect .lead{margin:6px 0 14px;color:#3c4450}
 .ai-connect h2{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;
   color:#6b6556}
@@ -33,6 +46,7 @@ const css = `
 .ai-connect code,.ai-connect pre{flex:1;min-width:0;margin:0;padding:7px 9px;border-radius:7px;
   background:#fff;border:1px solid #d6d0c1;font:12px/1.45 ui-monospace,monospace;
   white-space:pre-wrap;overflow-wrap:anywhere;color:#1d232c}
+.ai-connect code.ltr,.ai-connect pre.ltr{direction:ltr;text-align:left}
 .ai-connect details{margin-top:8px}
 .ai-connect summary{font-size:12px;color:#6b6556;cursor:pointer}
 .ai-connect button{padding:5px 12px;border-radius:7px;border:1px solid #8a8576;background:#fff;
@@ -49,10 +63,11 @@ const css = `
 .ai-connect .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 6px}
 .ai-connect .tabs button{padding:4px 10px;font-size:12px}
 .ai-connect .tabs button[aria-selected=true]{background:#2f5d3a;border-color:#2f5d3a;color:#fff}
-.ai-connect ol{margin:4px 0;padding-left:20px}
+.ai-connect ol{margin:4px 0;padding-inline-start:20px}
 .ai-connect li{margin:4px 0}
 .ai-connect .warn{color:#8a4b2a}
 @media (pointer:coarse){.ai-connect button{min-height:40px;padding:8px 14px}
+  .ai-connect .lang{min-height:36px;font-size:14px}
   .ai-connect summary{padding:6px 0}}
 @media (max-width:520px){.ai-connect{padding:10px}.ai-connect>div{padding:16px 14px 14px}
   .ai-connect h1{font-size:18px}
@@ -68,31 +83,28 @@ export const PROMPT = "Use the agent-inception tools to join the island as a vil
 type Tab = "claude" | "chatgpt" | "code" | "other";
 
 /**
- * Steps for the chat apps, as text with **bold** menu labels. The step holding `URL` gets the
- * link's copy row under it. Menu names move between releases; the README has the same steps.
+ * Steps for the chat apps, as message keys holding **bold** menu labels. The step with `hasUrl`
+ * gets the link's copy row under it. Menu names move between releases; the README has the same.
  */
-const CHAT_STEPS: Record<"claude" | "chatgpt", { steps: string[]; note: string }> = {
+const CHAT_STEPS: Record<
+  "claude" | "chatgpt",
+  { steps: { key: MessageKey; hasUrl?: boolean }[]; note: MessageKey }
+> = {
   claude: {
     steps: [
-      "In Claude (web, desktop or mobile), open **Customize → Connectors**, click **+ Add**, " +
-      "then **Add custom connector**.",
-      "Name it **agent-inception**, paste this world's link as the server URL and click " +
-      "**Continue**. Pick **No sign in**, then **Add**. URL",
-      "In a chat, switch it on under **+ → Connectors**, then send the prompt below.",
+      { key: "connect.claudeStep1" },
+      { key: "connect.claudeStep2", hasUrl: true },
+      { key: "connect.claudeStep3" },
     ],
-    note: "Free plans get one custom connector. On Team or Enterprise an owner adds it under " +
-      "Organization settings → Connectors.",
+    note: "connect.claudeNote",
   },
   chatgpt: {
     steps: [
-      "In ChatGPT on the web, open **Settings → Apps → Advanced settings** and turn on " +
-      "**Developer mode**.",
-      "Click **Create app**. Name it **agent-inception**, paste this world's link as the MCP " +
-      "server URL, set authentication to **No Auth**, tick **I understand**, then **Create**. URL",
-      "In a new chat, pick it under **+ → More → Developer mode**, then send the prompt below.",
+      { key: "connect.chatgptStep1" },
+      { key: "connect.chatgptStep2", hasUrl: true },
+      { key: "connect.chatgptStep3" },
     ],
-    note: "Developer mode is on paid plans (Plus, Pro, Business, Enterprise, Edu); in a " +
-      "workspace an admin may need to allow it.",
+    note: "connect.chatgptNote",
   },
 };
 
@@ -125,12 +137,12 @@ export const cloudHook = (url: string) =>
 export const reachableFromCloud = (url: string) =>
   /^https:\/\//.test(url) && !/^https:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
 
-const STATES: Record<LinkState, [string, string]> = {
-  connecting: ["", "connecting this tab to the relay…"],
-  connected: ["on", "this tab is connected: agents can come in"],
-  offline: ["off", "the relay can't be reached; retrying"],
-  replaced: ["off", "another tab has this world now; click here to take it back"],
-  refused: ["off", "the relay refused this tab's link; try New link"],
+const STATES: Record<LinkState, [string, MessageKey]> = {
+  connecting: ["", "connect.stateConnecting"],
+  connected: ["on", "connect.stateConnected"],
+  offline: ["off", "connect.stateOffline"],
+  replaced: ["off", "connect.stateReplaced"],
+  refused: ["off", "connect.stateRefused"],
 };
 
 export function createConnectCard(
@@ -142,31 +154,62 @@ export function createConnectCard(
   document.head.append(style);
   let root: HTMLDivElement | null = null;
   let refresh = () => {};
+  let applyLocale = () => {};
 
   const close = () => {
     root?.remove();
     root = null;
+    refresh = () => {};
+    applyLocale = () => {};
   };
 
-  const copyRow = (text: () => string, block = false) => {
+  onLocaleChange(() => {
+    if (root) {
+      applyLocale();
+      refresh();
+    }
+  });
+
+  const copyRow = (text: () => string, opts: { block?: boolean; ltr?: boolean } = {}) => {
     const row = document.createElement("div");
     row.className = "copy";
-    const code = document.createElement(block ? "pre" : "code");
+    const code = document.createElement(opts.block ? "pre" : "code");
+    if (opts.ltr) code.className = "ltr";
+    else code.dir = "auto";
     const b = document.createElement("button");
-    b.textContent = "Copy";
+    b.type = "button";
+    let feedback: "idle" | "copied" | "select" = "idle";
+    const updateLabel = () => {
+      b.textContent = feedback === "copied"
+        ? t("connect.copied")
+        : feedback === "select"
+        ? t("connect.select")
+        : t("connect.copy");
+    };
+    updateLabel();
     b.onclick = async () => {
       try {
         await navigator.clipboard.writeText(text());
-        b.textContent = "Copied";
+        feedback = "copied";
       } catch {
         // Clipboard blocked: select it so ctrl+c works.
         getSelection()?.selectAllChildren(code);
-        b.textContent = "Select";
+        feedback = "select";
       }
-      setTimeout(() => (b.textContent = "Copy"), 1500);
+      updateLabel();
+      setTimeout(() => {
+        feedback = "idle";
+        updateLabel();
+      }, 1500);
     };
     row.append(code, b);
-    return { row, set: () => (code.textContent = text()) };
+    return {
+      row,
+      set: () => {
+        code.textContent = text();
+        updateLabel();
+      },
+    };
   };
 
   const show = () => {
@@ -176,22 +219,22 @@ export function createConnectCard(
     root.dataset.modal = "connect";
     const card = document.createElement("div");
     card.setAttribute("role", "dialog");
-    card.setAttribute("aria-label", "Connect an agent");
 
+    const headRow = document.createElement("div");
+    headRow.className = "head-row";
     const title = document.createElement("h1");
+    const langSelect = document.createElement("select");
+    langSelect.className = "lang";
+    langSelect.onchange = () => setLocale(langSelect.value);
+    headRow.append(title, langSelect);
+
     const lead = document.createElement("p");
     lead.className = "lead";
-    lead.textContent = "A small island that lives in this browser tab. AI agents play it: they " +
-      "farm, build, invent new things and write the rules. You watch, and pin Wishes. Nothing " +
-      "to install: add this world to Claude, ChatGPT or any AI chatbot with MCP connectors, and " +
-      "play from your chat while you watch here.";
 
     const h1 = document.createElement("h2");
-    h1.textContent = "1 · Connect your AI to this world";
-    const label = (text: string) => {
+    const label = () => {
       const d = document.createElement("div");
       d.className = "label";
-      d.textContent = text;
       return d;
     };
     const rows: { set: () => void }[] = [];
@@ -203,57 +246,58 @@ export function createConnectCard(
     const panels = new Map<Tab, HTMLDivElement>();
     const tabButtons = new Map<Tab, HTMLButtonElement>();
     let current: Tab = reachableFromCloud(info().agentUrl) ? "claude" : "code";
-    const select = (t: Tab) => {
-      current = t;
-      for (const [k, b] of tabButtons) b.setAttribute("aria-selected", String(k === t));
-      for (const [k, p] of panels) p.hidden = k !== t;
+    const select = (tTab: Tab) => {
+      current = tTab;
+      for (const [k, b] of tabButtons) b.setAttribute("aria-selected", String(k === tTab));
+      for (const [k, p] of panels) p.hidden = k !== tTab;
       refresh();
     };
-    const tabNames: [Tab, string][] = [
-      ["claude", "Claude"],
-      ["chatgpt", "ChatGPT"],
-      ["code", "Claude Code"],
-      ["other", "Any AI chatbot"],
+    const tabKeys: [Tab, MessageKey][] = [
+      ["claude", "connect.tabClaude"],
+      ["chatgpt", "connect.tabChatgpt"],
+      ["code", "connect.tabCode"],
+      ["other", "connect.tabOther"],
     ];
-    for (const [t, name] of tabNames) {
+    for (const [tabId] of tabKeys) {
       const b = document.createElement("button");
-      b.textContent = name;
+      b.type = "button";
       b.setAttribute("role", "tab");
-      b.onclick = () => select(t);
-      tabButtons.set(t, b);
+      b.onclick = () => select(tabId);
+      tabButtons.set(tabId, b);
       tabs.append(b);
       const p = document.createElement("div");
       p.setAttribute("role", "tabpanel");
-      panels.set(t, p);
+      panels.set(tabId, p);
     }
 
     // A link on this machine can't be reached from the cloud, where chat apps run.
     const localWarn = document.createElement("small");
     localWarn.className = "warn";
-    localWarn.textContent = "This link only works on this machine, and chat apps connect from " +
-      "the cloud. Run deno task share in the repo for a public link, or use Claude Code.";
 
-    for (const t of ["claude", "chatgpt"] as const) {
+    const chatTextSlots: { el: HTMLElement; key: MessageKey }[] = [];
+    const chatNotes: { el: HTMLElement; key: MessageKey }[] = [];
+    for (const tabId of ["claude", "chatgpt"] as const) {
       const ol = document.createElement("ol");
-      for (const step of CHAT_STEPS[t].steps) {
+      for (const step of CHAT_STEPS[tabId].steps) {
         const li = document.createElement("li");
-        const withUrl = step.endsWith(" URL");
-        li.append(rich(withUrl ? step.slice(0, -4) : step));
-        if (withUrl) li.append(row(copyRow(() => info().agentUrl)).row);
+        const slot = document.createElement("span");
+        chatTextSlots.push({ el: slot, key: step.key });
+        li.append(slot);
+        if (step.hasUrl) li.append(row(copyRow(() => info().agentUrl, { ltr: true })).row);
         ol.append(li);
       }
       const note = document.createElement("small");
-      note.textContent = CHAT_STEPS[t].note + " Menu names move around between releases.";
-      panels.get(t)!.append(ol, note);
+      chatNotes.push({ el: note, key: CHAT_STEPS[tabId].note });
+      panels.get(tabId)!.append(ol, note);
     }
 
+    const codeLabel = label();
     const cc = row(
-      copyRow(() => `claude mcp add --transport http agent-inception ${info().agentUrl}`),
+      copyRow(() => `claude mcp add --transport http agent-inception ${info().agentUrl}`, {
+        ltr: true,
+      }),
     );
-    panels.get("code")!.append(
-      label("Run this in a terminal, then start claude and send the prompt below"),
-      cc.row,
-    );
+    panels.get("code")!.append(codeLabel, cc.row);
 
     const other = row(copyRow(
       () =>
@@ -262,31 +306,26 @@ export function createConnectCard(
           null,
           2,
         ),
-      true,
+      { block: true, ltr: true },
     ));
     const otherIntro = document.createElement("small");
-    otherIntro.textContent = "Works with any chatbot or agent that can add a remote MCP server " +
-      "(Streamable HTTP, no auth): Grok, Muse, Dots, Cursor, VS Code and more. Add this " +
-      "world's link as a connector, or paste the line below into its chat.";
+    const otherLinkLabel = label();
+    const otherHookLabel = label();
     const configBox = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "Config file (mcpServers JSON)";
     configBox.append(summary, other.row);
     panels.get("other")!.append(
       otherIntro,
-      label("The link"),
-      row(copyRow(() => info().agentUrl)).row,
-      label("Paste into its chat: it adds the connector and starts playing"),
-      row(copyRow(() => cloudHook(info().agentUrl), true)).row,
+      otherLinkLabel,
+      row(copyRow(() => info().agentUrl, { ltr: true })).row,
+      otherHookLabel,
+      row(copyRow(() => agentCloudHook(info().agentUrl), { block: true })).row,
       configBox,
     );
 
     const h2 = document.createElement("h2");
-    h2.textContent = "2 · Ask it to play";
-    const prompt = row(copyRow(() => PROMPT, true));
+    const prompt = row(copyRow(() => agentPrompt(), { block: true }));
     const sideBySide = document.createElement("small");
-    sideBySide.textContent = "Keep this tab open to watch, and chat in another tab, window or " +
-      "on your phone.";
 
     const notes = document.createElement("small");
     const status = document.createElement("span");
@@ -301,26 +340,21 @@ export function createConnectCard(
     footer.className = "row";
     const buttons = document.createElement("div");
     const fresh = document.createElement("button");
-    fresh.textContent = "New link";
-    fresh.title = "Make a new link for this world; the old one stops working";
+    fresh.type = "button";
     fresh.onclick = async () => {
-      if (
-        !confirm(
-          "Make a new link? Agents using the old one are cut off until you give them the new one.",
-        )
-      ) return;
+      if (!confirm(t("connect.newLinkConfirm"))) return;
       await renew();
       refresh();
     };
     const watch = document.createElement("button");
+    watch.type = "button";
     watch.className = "primary";
-    watch.textContent = "Start watching";
     watch.onclick = close;
     buttons.append(fresh, " ", watch);
     footer.append(status, buttons);
 
     card.append(
-      title,
+      headRow,
       lead,
       h1,
       tabs,
@@ -343,6 +377,29 @@ export function createConnectCard(
     document.body.append(root);
     watch.focus();
 
+    applyLocale = () => {
+      card.setAttribute("aria-label", t("connect.aria"));
+      populateLanguageSelect(langSelect);
+      lead.textContent = t("connect.lead");
+      h1.textContent = t("connect.step1");
+      for (const [tabId, key] of tabKeys) tabButtons.get(tabId)!.textContent = t(key);
+      localWarn.textContent = t("connect.localWarn");
+      for (const slot of chatTextSlots) slot.el.replaceChildren(rich(t(slot.key)));
+      for (const note of chatNotes) {
+        note.el.textContent = `${t(note.key)} ${t("connect.menuMoveNote")}`;
+      }
+      codeLabel.textContent = t("connect.codeLabel");
+      otherIntro.textContent = t("connect.otherIntro");
+      otherLinkLabel.textContent = t("connect.otherLink");
+      otherHookLabel.textContent = t("connect.otherHookLabel");
+      summary.textContent = t("connect.otherConfig");
+      h2.textContent = t("connect.step2");
+      sideBySide.textContent = t("connect.sideBySide");
+      fresh.textContent = t("connect.newLink");
+      fresh.title = t("connect.newLinkTitle");
+      watch.textContent = t("connect.startWatching");
+    };
+
     refresh = () => {
       if (!root) return;
       const i = info();
@@ -351,19 +408,14 @@ export function createConnectCard(
       // Not .hidden: small is display:block here, which beats the attribute.
       localWarn.style.display = current === "code" || reachableFromCloud(i.agentUrl) ? "none" : "";
       fresh.style.display = i.paired ? "" : "none";
-      const [cls, text] = STATES[i.state];
+      const [cls, key] = STATES[i.state];
       dot.className = `dot ${cls}`;
-      statusText.textContent = text;
-      notes.textContent =
-        (i.paired
-          ? "The world runs in this tab, so keep it open (a background tab is fine). Anyone with " +
-            "the link can play here; New link cuts old links off. "
-          : "Local development: the dev server's bridge (this repo's .mcp.json already points " +
-            "at it). Add ?relay=1 to try a hosted-style link, or run deno task share for a " +
-            "public one. ") +
-        (i.ephemeral ? "This browser blocks storage, so the link changes every visit. " : "") +
-        "Worlds save in this browser: three slots under worlds in the panel.";
+      statusText.textContent = t(key);
+      notes.textContent = (i.paired ? t("connect.notePaired") : t("connect.noteLocal")) +
+        (i.ephemeral ? t("connect.noteEphemeral") : "") +
+        t("connect.noteWorlds");
     };
+    applyLocale();
     select(current);
   };
 

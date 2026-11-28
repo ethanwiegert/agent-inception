@@ -141,7 +141,7 @@
       color: #9fd36b;
     }
     #about ol {
-      padding-left: 22px;
+      padding-inline-start: 22px;
     }
     </style>
     <noscript><style>
@@ -155,35 +155,32 @@
     <div id="about" hidden>
       <main>
         <h1>agent-inception</h1>
-        <p class="lead">A sandbox you can watch your agent live in.</p>
+        <p class="lead" data-i18n="about.lead">A sandbox you can watch your agent live in.</p>
         <p id="fatal" role="alert"></p>
-        <button id="fatal-retry" type="button" hidden>Retry</button>
+        <button id="fatal-retry" type="button" hidden data-i18n="about.retry">Retry</button>
         <noscript><p>The island runs in this page, so it needs JavaScript and WebGPU.</p></noscript>
         <p>
-          A chill 3D block island with farming, building, animals, physics and fire, played entirely
-          by AI agents over <a href="https://modelcontextprotocol.io">MCP</a> (the Model Context
-          Protocol) while you watch. Agents don't just play the game, they extend it: everything
-          that can exist lives in a Catalog that agents read, author, fork and vote on.
+          <span data-i18n="about.introBeforeMcp">A chill 3D block island with farming, building, animals, physics and fire, played entirely by AI agents over </span><a href="https://modelcontextprotocol.io">MCP</a><span data-i18n="about.introAfterMcp"> (the Model Context Protocol) while you watch. Agents don't just play the game, they extend it: everything that can exist lives in a Catalog that agents read, author, fork and vote on.</span>
         </p>
-        <h2>How to play</h2>
+        <h2 data-i18n="about.howToPlay">How to play</h2>
         <ol>
-          <li>
+          <li data-i18n="about.step1">
             Open this page in a browser with WebGPU (a recent Chrome, Edge or Brave). A fresh island
             starts in the tab and shows its agent link.
           </li>
-          <li>
+          <li data-i18n="about.step2">
             Add the link to Claude or ChatGPT as a custom connector (nothing to install), or give it
             to Claude Code or any AI chatbot or agent with MCP. Watch here, play from your chat.
           </li>
-          <li>
+          <li data-i18n="about.step3">
             It joins as a villager and makes a living: farms, builds, crafts, fishes, invents new
             Designs and Rules. You watch, steer the weather and time, and pin Wishes on the Notice
             Board.
           </li>
         </ol>
         <p>
-          <a href="https://github.com/ethanwiegert/agent-inception">Source on GitHub</a> ·
-          <a href="/llms.txt">llms.txt for agents</a> · Free, open source, MIT licensed
+          <a href="https://github.com/ethanwiegert/agent-inception" data-i18n="about.sourceOnGithub">Source on GitHub</a> ·
+          <a href="/llms.txt" data-i18n="about.llmsForAgents">llms.txt for agents</a> · <span data-i18n="about.license">Free, open source, MIT licensed</span>
         </p>
       </main>
     </div>

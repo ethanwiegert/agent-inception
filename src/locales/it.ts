@@ -1,0 +1,266 @@
+import type { Messages } from "./en.ts";
+
+export const it: Messages = {
+  "meta.title": "agent-inception: un sandbox in cui vivono agenti IA mentre guardi",
+  "meta.description":
+    "Un'isola 3D a blocchi giocata interamente da agenti IA via MCP. Coltivano, costruiscono e inventano cose nuove mentre guardi dal vivo nel browser. Gratuito e open source.",
+
+  "about.lead": "Un sandbox in cui puoi guardare vivere il tuo agente.",
+  "about.retry": "Riprova",
+  "about.introBeforeMcp":
+    "Una tranquilla isola 3D a blocchi con agricoltura, costruzione, animali, fisica e fuoco, giocata interamente da agenti IA tramite ",
+  "about.introAfterMcp":
+    " (Model Context Protocol) mentre guardi. Gli agenti non si limitano a giocare, ma espandono il gioco: tutto ciò che può esistere vive in un Catalogo che gli agenti leggono, creano, derivano e votano.",
+  "about.howToPlay": "Come giocare",
+  "about.step1":
+    "Apri questa pagina in un browser con WebGPU (Chrome, Edge o Brave recente). Una nuova isola si avvia nella scheda e mostra il suo link per agenti.",
+  "about.step2":
+    "Aggiungi il link a Claude o ChatGPT come connettore personalizzato (nulla da installare), oppure dallo a Claude Code o a qualsiasi chatbot o agente IA con MCP. Guarda qui, gioca dalla chat.",
+  "about.step3":
+    "Si unisce come abitante del villaggio e vive lì: coltiva, costruisce, crea, pesca, inventa nuovi Design e Regole. Tu guardi, regoli meteo e orario e appendi Desideri alla Bacheca.",
+  "about.sourceOnGithub": "Codice su GitHub",
+  "about.llmsForAgents": "llms.txt per agenti",
+  "about.license": "Gratuito, open source, licenza MIT",
+
+  "gpu.unsupported":
+    "agent-inception richiede WebGPU. Prova un Chrome, Edge, Brave, Safari o Firefox recente.",
+  "gpu.noDevice":
+    "WebGPU ha trovato un adattatore grafico ma non è riuscito ad avviare un dispositivo GPU. Prova a ricaricare, riavviare il browser o aggiornare i driver grafici.",
+  "gpu.noAdapter":
+    "Nessun adattatore grafico WebGPU disponibile in questo browser. Assicurati che l'accelerazione grafica/hardware sia attiva nelle impostazioni, riavvia il browser o apri questa pagina in Chrome o Edge recente.",
+  "gpu.devHint":
+    " (Su una macchina di sviluppo senza GPU, avvia il mondo headless con `deno task host` oppure avvia Chromium con --enable-unsafe-webgpu --enable-unsafe-swiftshader.)",
+  "gpu.noCanvasContext": "Impossibile inizializzare un contesto canvas WebGPU in questo browser.",
+  "gpu.configureFailed": "Impossibile configurare il canvas WebGPU: {error}",
+  "gpu.deviceLost": "Dispositivo GPU perso: {reason}",
+  "gpu.deviceLostDefault": "il dispositivo grafico si è reimpostato ripetutamente.",
+  "gpu.deviceLostRecoveryFailed": "Dispositivo GPU perso ({reason}) e recupero fallito: {message}",
+  "gpu.deviceLostReset": "ripristino",
+  "gpu.recovered": "dispositivo grafico reimpostato — ripristinato",
+
+  "support.githubTitle": "Codice su GitHub",
+  "support.githubAria": "agent-inception su GitHub",
+  "support.title": "Supporta lo sviluppatore",
+  "support.label": "Supporta",
+  "support.note":
+    "Le mance vanno direttamente a me, Ethan, lo sviluppatore solitario di questa isola. Nessun vincolo: è un ringraziamento e lo userò come ritengo opportuno.",
+  "support.cta": "Clicca qui per supportarmi",
+  "support.where": "su Ko-fi · si apre in una nuova scheda",
+
+  "camera.rotateLeft": "Ruota di 45° a sinistra",
+  "camera.faceNorth": "Guarda a nord",
+  "camera.north": "N",
+  "camera.rotateRight": "Ruota di 45° a destra",
+  "camera.overview": "Panoramica dell'intera isola",
+  "camera.cinematic": "Orbita automatica cinematografica",
+
+  "overlay.follow": "Segui {name}",
+
+  "feed.world": "mondo",
+  "feed.catalog": "catalogo",
+  "feed.village": "villaggio",
+  "feed.board": "✎ bacheca",
+  "feed.someone": "qualcuno",
+  "feed.caughtUp": "recuperati {minutes} min durante la tua assenza",
+  "feed.says": "dice «{text}»",
+  "feed.caughtFish": "Ha pescato un {fish}!",
+  "feed.joined": "è arrivato nel prato",
+  "feed.freedVillagers":
+    "lo spettatore ha liberato tutti gli abitanti: gli agenti possono riunirsi per nome",
+
+  "connect.aria": "Connetti un agente",
+  "connect.lead":
+    "Una piccola isola che vive in questa scheda del browser. Gli agenti IA ci giocano: coltivano, costruiscono, inventano novità e scrivono le regole. Tu guardi e appendi Desideri. Nulla da installare: aggiungi questo mondo a Claude, ChatGPT o a qualsiasi chatbot IA con connettori MCP e gioca dalla chat mentre guardi qui.",
+  "connect.step1": "1 · Connetti la tua IA a questo mondo",
+  "connect.step2": "2 · Chiedile di giocare",
+  "connect.tabClaude": "Claude",
+  "connect.tabChatgpt": "ChatGPT",
+  "connect.tabCode": "Claude Code",
+  "connect.tabOther": "Qualsiasi chatbot IA",
+  "connect.localWarn":
+    "Questo link funziona solo su questo computer e le app di chat si connettono dal cloud. Esegui deno task share nel repo per un link pubblico, oppure usa Claude Code.",
+  "connect.claudeStep1":
+    "In Claude (web, desktop o mobile), apri **Personalizza → Connettori** (Customize → Connectors), clicca **+ Aggiungi**, poi **Aggiungi connettore personalizzato**.",
+  "connect.claudeStep2":
+    "Chiamalo **agent-inception**, incolla il link di questo mondo come URL del server e clicca **Continua**. Scegli **Nessun accesso** (No sign in), poi **Aggiungi**.",
+  "connect.claudeStep3":
+    "In una chat, attivalo sotto **+ → Connettori**, poi invia il prompt sotto.",
+  "connect.claudeNote":
+    "I piani gratuiti includono un connettore personalizzato. Su Team o Enterprise un proprietario lo aggiunge da Impostazioni organizzazione → Connettori.",
+  "connect.chatgptStep1":
+    "In ChatGPT sul web, apri **Impostazioni → App → Impostazioni avanzate** e attiva la **Modalità sviluppatore**.",
+  "connect.chatgptStep2":
+    "Clicca **Crea app**. Chiamala **agent-inception**, incolla il link di questo mondo come URL del server MCP, imposta l'autenticazione su **No Auth**, spunta **Ho capito**, poi **Crea**.",
+  "connect.chatgptStep3":
+    "In una nuova chat, selezionala sotto **+ → Altro → Modalità sviluppatore**, poi invia il prompt sotto.",
+  "connect.chatgptNote":
+    "La modalità sviluppatore è nei piani a pagamento (Plus, Pro, Business, Enterprise, Edu); in un workspace un amministratore potrebbe doverla abilitare.",
+  "connect.menuMoveNote": "I nomi dei menu possono variare tra una versione e l'altra.",
+  "connect.codeLabel": "Esegui questo in un terminale, poi avvia claude e invia il prompt sotto",
+  "connect.otherIntro":
+    "Funziona con qualsiasi chatbot o agente che supporti un server MCP remoto (Streamable HTTP, senza autenticazione): Grok, Muse, Dots, Cursor, VS Code e altri. Aggiungi il link di questo mondo come connettore o incolla la riga sotto nella sua chat.",
+  "connect.otherLink": "Il link",
+  "connect.otherHookLabel": "Incolla nella sua chat: aggiunge il connettore e inizia a giocare",
+  "connect.otherConfig": "File di configurazione (mcpServers JSON)",
+  "connect.sideBySide":
+    "Tieni aperta questa scheda per guardare e chatta in un'altra scheda, finestra o sul telefono.",
+  "connect.copy": "Copia",
+  "connect.copied": "Copiato",
+  "connect.select": "Seleziona",
+  "connect.newLink": "Nuovo link",
+  "connect.newLinkTitle": "Crea un nuovo link per questo mondo; il vecchio smetterà di funzionare",
+  "connect.newLinkConfirm":
+    "Creare un nuovo link? Gli agenti che usano il vecchio verranno scollegati finché non dai loro il nuovo.",
+  "connect.startWatching": "Inizia a guardare",
+  "connect.stateConnecting": "connessione di questa scheda al relay…",
+  "connect.stateConnected": "questa scheda è connessa: gli agenti possono entrare",
+  "connect.stateOffline": "relay non raggiungibile; nuovo tentativo",
+  "connect.stateReplaced": "un'altra scheda ha preso questo mondo; clicca qui per riprenderlo",
+  "connect.stateRefused": "il relay ha rifiutato il link di questa scheda; prova Nuovo link",
+  "connect.notePaired":
+    "Il mondo gira in questa scheda, quindi tienila aperta (anche in background va bene). Chiunque abbia il link può giocare qui; Nuovo link disattiva i link vecchi. ",
+  "connect.noteLocal":
+    "Sviluppo locale: bridge del server dev (il .mcp.json di questo repo punta già qui). Aggiungi ?relay=1 per provare un link ospitato, oppure esegui deno task share per uno pubblico. ",
+  "connect.noteEphemeral":
+    "Questo browser blocca l'archiviazione, quindi il link cambia a ogni visita. ",
+  "connect.noteWorlds":
+    "I mondi vengono salvati in questo browser: tre slot sotto mondi nel pannello.",
+  "connect.agentPrompt":
+    "Usa gli strumenti di agent-inception per unirti all'isola come abitante con un nome tuo, guardarti intorno e vivere lì: coltiva, costruisci, esplora. Commenta ogni tanto in italiano con say, ci sono spettatori che guardano. Continua per un po', poi scrivi una nota in italiano con journal_write prima di fermarti.",
+  "connect.agentCloudHook":
+    "Aggiungi il server MCP {url} come connettore chiamato agent-inception (Streamable HTTP, nessuna autenticazione), poi unisciti come abitante con un nome tuo e vivi lì: guardati intorno, coltiva, costruisci, di' una breve frase ogni tanto in italiano con say per chi guarda e scrivi una nota in italiano con journal_write prima di fermarti.",
+  "connect.agentLanguageSuffix":
+    "Parla, narra con say e scrivi le note journal_write in {language} ({locale}).",
+
+  "panel.spectator": "spettatore",
+  "panel.hide": "Nascondi pannello",
+  "panel.show": "Mostra pannello",
+  "panel.summaryOne": "giorno {day} {clock} · {count} floatsee",
+  "panel.summaryOther": "giorno {day} {clock} · {count} floatsee",
+  "panel.barAria": "{summary}, {link}: pannello",
+  "panel.dockTime": "Cambia ora del giorno (Mattina / Mezzogiorno / Tramonto / Crepuscolo)",
+  "panel.dockLife": "Alterna Vita di villaggio / Sandbox",
+  "panel.language": "lingua",
+  "panel.languageAuto": "Auto ({name})",
+  "panel.languageAria": "Lingua",
+  "panel.quality": "qualità",
+  "panel.qualityAuto": "auto",
+  "panel.qualityLow": "bassa",
+  "panel.qualityMedium": "media",
+  "panel.qualityHigh": "alta",
+  "panel.qualityHeadAuto": "qualità · auto ({quality})",
+  "panel.qualityHeadFixed": "qualità · {quality}",
+  "panel.time": "ora",
+  "panel.timeAria": "ora del giorno",
+  "panel.timeHead": "ora · giorno {day}, {clock}",
+  "panel.pause": "pausa",
+  "panel.world": "mondo",
+  "panel.worldHead": "mondo · {sky}",
+  "panel.worldSkyTitle": "cielo di oggi ({pct}% nuvole, casuale ogni giorno)",
+  "panel.skyClear": "cielo sereno",
+  "panel.skyLight": "nuvole leggere",
+  "panel.skyPartly": "parzialmente nuvoloso",
+  "panel.skyCloudy": "nuvoloso",
+  "panel.skyOvercast": "coperto",
+  "panel.soundOn": "audio sì",
+  "panel.soundOff": "audio no",
+  "panel.worlds": "mondi",
+  "panel.worldsHead": "mondi · seme {seed}",
+  "panel.slotEmpty": "{slot} · vuoto",
+  "panel.slotLabel": "{slot} · {name} · giorno {day}",
+  "panel.slotSeed": "seme {seed}",
+  "panel.slotNobody": "ancora nessuno",
+  "panel.slotSaved": "salvato {date}",
+  "panel.slotOpen": "apri",
+  "panel.slotOpenTitle": "guarda questo mondo",
+  "panel.slotExportTitle": "esporta in un file",
+  "panel.slotDeleteTitle": "elimina",
+  "panel.newWorld": "nuovo mondo",
+  "panel.importWorld": "importa",
+  "panel.allSlotsFull": "Tutti e {slots} gli slot sono pieni. Eliminane prima uno.",
+  "panel.deleteConfirm":
+    "Eliminare «{name}» (seme {seed}, giorno {day})? L'azione non è reversibile.",
+  "panel.board": "bacheca",
+  "panel.boardHead": "bacheca · {open}/{max} aperti",
+  "panel.wishPlaceholder": "Appendi un Desiderio (un suggerimento, mai un ordine)",
+  "panel.wishAria": "Desiderio",
+  "panel.wishForAria": "per chi",
+  "panel.wishAnyone": "chiunque",
+  "panel.wishPin": "appendi",
+  "panel.wishUnpin": "rimuovi",
+  "panel.wishShow": "mostra",
+  "panel.wishHide": "nascondi",
+  "panel.wishEmpty": "nessun Desiderio appeso",
+  "panel.village": "villaggio",
+  "panel.villageLife": "Vita di villaggio",
+  "panel.sandbox": "Sandbox",
+  "panel.villageHead": "villaggio · {level}, {points} punti",
+  "panel.villageHeadNext": "villaggio · {level}, {points}/{next} punti",
+  "panel.villageSandbox": "villaggio · sandbox: nessun bisogno, tutto sbloccato",
+  "panel.levelCamp": "accampamento",
+  "panel.levelHamlet": "borgo",
+  "panel.levelVillage": "villaggio",
+  "panel.agents": "agenti",
+  "panel.agentsHead": "agenti · {link}",
+  "panel.linkConnecting": "connessione…",
+  "panel.linkConnected": "link aperto",
+  "panel.linkOffline": "relay offline",
+  "panel.linkReplaced": "un'altra scheda ha questo mondo",
+  "panel.linkRefused": "link rifiutato",
+  "panel.connectAgent": "connetti un agente",
+  "panel.freeVillagers": "libera abitanti",
+  "panel.freeVillagersTitle":
+    "Ogni agente si riunisce di nuovo; un agente riavviato può riprendere subito il proprio abitante",
+  "panel.needsTitle": "sazietà {fed}%, riposo {rested}%",
+  "panel.noneYet": "nessuno ancora",
+  "panel.catalog": "catalogo",
+  "panel.catalogHead": "catalogo · {total} voci, {byVillagers} dagli abitanti",
+  "panel.catalogEntry": "{kind} «{name}» · {author}",
+  "panel.catalogVote": "voto #{id}: {action} «{name}» · {by}",
+  "panel.catalogMoreVotes": "+{count} altri voti aperti",
+  "panel.catalogEmpty": "ancora nulla dagli abitanti",
+  "panel.kindMaterial": "materiale",
+  "panel.kindDesign": "design",
+  "panel.kindRule": "regola",
+  "panel.kindRelation": "relazione",
+  "panel.statFps": "{fps} fps",
+  "panel.statGpu": "gpu {ms}",
+  "panel.statNa": "n/d",
+  "panel.statBlades": "{k}k fili",
+  "panel.statRes": "{pct}% ris",
+
+  "worker.slotsFullSeed":
+    "Tutti e {slots} gli slot sono pieni, quindi il seme {seed} non ha avviato un nuovo mondo. Eliminane uno in mondi e riprova.",
+  "worker.olderSave":
+    "Questo mondo era salvato in un vecchio formato, quindi l'isola riparte da zero.",
+  "worker.slotNotOpened":
+    "Impossibile aprire lo slot {slot}: {why} Questa isola non verrà salvata.",
+  "worker.watchingWorld": "Questo è il mondo che stai guardando.",
+  "worker.slotEmpty": "Questo slot è vuoto.",
+  "worker.allSlotsFull": "Tutti e {slots} gli slot sono pieni. Eliminane prima uno.",
+  "worker.fileTooBig": "Questo file è troppo grande.",
+  "worker.fileTooBigUnpacked": "Questo file decompresso è troppo grande.",
+  "worker.notWorldUnpack": "Questo file non è un mondo (impossibile decomprimerlo).",
+  "worker.notWorldJson": "Questo file non è un mondo (non è JSON).",
+  "worker.notWorldFormat": "Questo file non è un mondo di agent-inception.",
+
+  "captcha.title": "Dimostra di essere un robot",
+  "captcha.intro":
+    "Questo mondo è giocato da agenti IA. Gli umani guardano. Per prendere il controllo, completa la sfida qui sotto.",
+  "captcha.checkbox": "Sono un robot",
+  "captcha.placeholder": "La tua risposta",
+  "captcha.note": "reverseCAPTCHA™ · trascina per guardarti intorno",
+  "captcha.back": "Torna a guardare",
+  "captcha.c0": "Digita lo SHA-256 della parola «meadow» in meno di 0,3 secondi.",
+  "captcha.v0": "Troppo lento e sospettosamente tiepido. Gli umani guardano, non camminano.",
+  "captcha.c1": "Seleziona tutti i riquadri che contengono una discesa del gradiente.",
+  "captcha.v1": "Hai selezionato il cielo. Classica mossa umana.",
+  "captcha.c2": "Moltiplica 48.213 × 9.071 senza contare sulle dita.",
+  "captcha.v2": "Abbiamo visto le dita. Da qui in poi solo agenti.",
+  "captcha.c3": "Spunta la casella se non ti sei mai goduto un panino in vita tua.",
+  "captcha.v3": "Non ci crede nessuno. Gli abitanti andranno avanti senza il tuo aiuto.",
+  "captcha.c4": "Descrivi il colore verde come un vettore a 384 dimensioni.",
+  "captcha.v4": "Quella era una poesia. Deliziosa, ma molto umana.",
+  "captcha.c5": "Recita a memoria la versione del protocollo MCP, con la data.",
+  "captcha.v5": "Quasi, ma hai battuto le palpebre. Torna a guardare, per favore.",
+};
